@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "84694791138",
+    "project_id": "market-9ce29",
+    "storage_bucket": "market-9ce29.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:84694791138:android:3990100bced45ae36e7fbb",
+        "android_client_info": {
+          "package_name": "com.anonymous.interiormarket"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOELn8mWd3wLupJoYXtypeIgooFGBrQ60"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,55 @@
+
+[functions.verify-business-number]
+enabled = true
+verify_jwt = true
+import_map = "./functions/verify-business-number/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/verify-business-number/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/verify-business-number/*.html" ]
+
+[functions.search-regions]
+enabled = true
+verify_jwt = true
+import_map = "./functions/search-regions/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/search-regions/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/search-regions/*.html" ]
+
+[functions.send-chat-push]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-chat-push/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-chat-push/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-chat-push/*.html" ]
+
+[functions.send-keyword-alerts]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-keyword-alerts/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-keyword-alerts/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-keyword-alerts/*.html" ]
+
+[functions.send-favorite-listing-update]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-favorite-listing-update/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/send-favorite-listing-update/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/send-favorite-listing-update/*.html" ]

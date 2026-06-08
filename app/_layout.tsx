@@ -1,24 +1,87 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+// iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
+// 알림 테스트를 다시 할 때 true로 바꾸면 됩니다.
+const ENABLE_PUSH_NOTIFICATIONS = false;
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+function PushNotificationRegister() {
+  const { isReady } = useAuth();
 
-export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  useEffect(() => {
+    if (!ENABLE_PUSH_NOTIFICATIONS) return;
+
+    let sub: { remove: () => void } | null = null;
+
+    import('../lib/notifications').then(({ listenNotificationResponse }) => {
+      sub = listenNotificationResponse();
+    });
+
+    return () => {
+      sub?.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isReady && ENABLE_PUSH_NOTIFICATIONS) {
+      import('../lib/notifications').then(({ registerPushToken }) => {
+        registerPushToken();
+      });
+    }
+  }, [isReady]);
+
+  return null;
+}
+
+function RootNavigator() {
+  const { isReady } = useAuth();
+
+  if (!isReady) {
+    return (
+      <SafeAreaView style={{ flex: 1 }}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator size="large" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        <Stack.Screen name="login" options={{ title: '로그인' }} />
+        <Stack.Screen name="profile/edit" options={{ title: '프로필수정' }} />
+        <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
+        <Stack.Screen name="my" options={{ headerShown: false }} />
+        <Stack.Screen name="support" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="trade-map"
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
+       
       </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    </SafeAreaView>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
+
+      <AuthProvider>
+        <PushNotificationRegister />
+        <RootNavigator />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
