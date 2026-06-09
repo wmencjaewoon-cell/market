@@ -28,12 +28,13 @@ export default function HomeStackLayout() {
   }}
 />
 
-<Stack.Screen
-  name="user/[userId]"
-  options={{
-    headerShown: false,
-  }}
-/>
+      <Stack.Screen
+        name="user/[userId]"
+        options={{
+          title: "판매자 정보",
+          headerShown: false,
+        }}
+      />
 
       <Stack.Screen
         name="post/[id]"

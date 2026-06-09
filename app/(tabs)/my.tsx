@@ -141,6 +141,19 @@ export default function MyScreen() {
         <MenuItem title="고객센터" onPress={() => router.push('/support/help' as any)} />
       </Section>
 
+      <Section title="설정">
+        <MenuItem title="개인정보처리방침" onPress={() => router.push('/my/privacy' as any)} />
+        <MenuItem title="이용약관" onPress={() => router.push('/my/terms' as any)} />
+        <MenuItem title="차단한 사용자" onPress={() => router.push('/my/blocked-users' as any)} />
+        <MenuItem title="회원탈퇴" onPress={() => router.push('/my/delete-account' as any)} />
+      </Section>
+
+      {profile?.role === 'admin' ? (
+        <Section title="관리자">
+          <MenuItem title="관리자 화면" onPress={() => router.push('/admin' as any)} />
+        </Section>
+      ) : null}
+
       <TouchableOpacity style={styles.logoutBtn} onPress={signOut}>
         <Text style={styles.logoutText}>로그아웃</Text>
       </TouchableOpacity>

@@ -2,19 +2,51 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
+  Alert,
   Image,
   Linking,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../../../contexts/AuthContext';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
 import { supabase } from '../../../../lib/supabase';
 
+function showProfileAlert(title: string, message = '') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n${message}` : title);
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
+async function confirmBlockUser(name: string) {
+  const message = `${name}님을 차단할까요?\n차단하면 차단한 사용자 목록에서 해제할 수 있습니다.`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('차단하기', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '차단', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 export default function UserProfileScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { user } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [reviewStats, setReviewStats] = useState({
   average: 0,
   count: 0,
@@ -98,6 +130,7 @@ export default function UserProfileScreen() {
     isVerifiedStore &&
     !!profile?.is_phone_public &&
     !!profile?.phone;
+  const isMyProfile = user?.id === userId;
 
   const handleCall = async () => {
   if (!canCallStore) return;
@@ -126,8 +159,51 @@ export default function UserProfileScreen() {
     } as any);
   };
 
+  const handleBlock = async () => {
+    setMenuOpen(false);
+
+    if (!user) {
+      showProfileAlert('차단하기', '로그인이 필요합니다.');
+      router.push('/login' as any);
+      return;
+    }
+
+    if (!userId || isMyProfile) {
+      showProfileAlert('차단하기', '본인은 차단할 수 없습니다.');
+      return;
+    }
+
+    const targetName = profile?.display_name || '사용자';
+    const ok = await confirmBlockUser(targetName);
+    if (!ok) return;
+
+    const { error } = await supabase.from('user_blocks').upsert(
+      {
+        blocker_id: user.id,
+        blocked_id: userId,
+      },
+      {
+        onConflict: 'blocker_id,blocked_id',
+      }
+    );
+
+    if (error) {
+      console.log('판매자 정보 차단 실패:', error);
+      showProfileAlert(
+        '차단 실패',
+        error.message.includes('user_blocks')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '차단하지 못했습니다.'
+      );
+      return;
+    }
+
+    showProfileAlert('차단 완료', `${targetName}님을 차단했습니다.`);
+  };
+
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
+    <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
   <TouchableOpacity onPress={() => router.back()}>
     <Ionicons name="chevron-back" size={24} color="#111827" />
@@ -135,13 +211,21 @@ export default function UserProfileScreen() {
 
   <Text style={styles.headerTitle}>판매자 정보</Text>
 
-  {canCallStore ? (
-    <TouchableOpacity onPress={handleCall}>
-      <Ionicons name="call-outline" size={22} color="#2563eb" />
-    </TouchableOpacity>
-  ) : (
-    <View style={styles.headerSide} />
-  )}
+  <View style={styles.headerActions}>
+    {canCallStore ? (
+      <TouchableOpacity style={styles.headerIconBtn} onPress={handleCall}>
+        <Ionicons name="call-outline" size={22} color="#2563eb" />
+      </TouchableOpacity>
+    ) : null}
+
+    {!isMyProfile ? (
+      <TouchableOpacity style={styles.headerIconBtn} onPress={() => setMenuOpen(true)}>
+        <Ionicons name="ellipsis-vertical" size={22} color="#111827" />
+      </TouchableOpacity>
+    ) : (
+      <View style={styles.headerSide} />
+    )}
+  </View>
 </View>
 
       <View style={styles.profileCard}>
@@ -247,6 +331,25 @@ export default function UserProfileScreen() {
         </View>
       </View>
     </ScrollView>
+
+    <Modal visible={menuOpen} transparent animationType="fade">
+      <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
+        <View style={styles.menuOverlay}>
+          <TouchableWithoutFeedback>
+            <View style={styles.menuBox}>
+              <TouchableOpacity style={styles.menuItem} onPress={handleBlock}>
+                <Text style={styles.blockText}>차단하기</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.menuItem} onPress={() => setMenuOpen(false)}>
+                <Text style={styles.menuText}>취소</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
+        </View>
+      </TouchableWithoutFeedback>
+    </Modal>
+    </SafeAreaView>
   );
 }
 
@@ -266,6 +369,18 @@ const styles = StyleSheet.create({
   headerSide: {
     width: 24,
     height: 24,
+  },
+  headerActions: {
+    minWidth: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+  headerIconBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileCard: {
     alignItems: 'center',
@@ -425,5 +540,37 @@ statText: {
     fontSize: 14,
     fontWeight: '800',
     color: '#111827',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    alignItems: 'flex-end',
+    paddingTop: 62,
+    paddingRight: 14,
+  },
+  menuBox: {
+    width: 180,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  menuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  menuText: {
+    color: '#374151',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  blockText: {
+    color: '#dc2626',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

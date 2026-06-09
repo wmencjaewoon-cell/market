@@ -33,7 +33,7 @@ export default function CreateSellScreen() {
 
   const [title, setTitle] = useState('');
   const [priceText, setPriceText] = useState('');
-  const [quantityText, setQuantityText] = useState('1');
+  const [quantityText, setQuantityText] = useState('');
   const [description, setDescription] = useState('');
   const [detailLocation, setDetailLocation] = useState('');
 

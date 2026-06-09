@@ -30,6 +30,7 @@ export default function CreateShareScreen() {
 }>();
 
   const [title, setTitle] = useState('');
+  const [quantityText, setQuantityText] = useState('');
   const [description, setDescription] = useState('');
   const [detailLocation, setDetailLocation] = useState('');
 
@@ -137,7 +138,7 @@ useEffect(() => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const MAX_DISTANCE_KM = 5;
+const MAX_DISTANCE_KM = 30;
 
 const distanceFromRegion =
   activeRegionLat != null &&
@@ -244,6 +245,13 @@ const isTooFarFromRegion =
         return;
       }
 
+      const quantity = Number(quantityText);
+
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        setErrorMessage('나눔 수량은 1개 이상 입력해 주세요.');
+        return;
+      }
+
       if (latitude == null || longitude == null) {
         setErrorMessage('거래 희망 장소를 선택해 주세요.');
         return;
@@ -279,6 +287,9 @@ const isTooFarFromRegion =
           available_now: availableNow,
           available_today: availableToday,
           status: 'active',
+          quantity_total: quantity,
+          quantity_remaining: quantity,
+          quantity_sold: 0,
         })
         .select()
         .single();
@@ -406,6 +417,19 @@ const isTooFarFromRegion =
 )}
 
       <TextInput style={styles.input} placeholder="제목" value={title} onChangeText={setTitle} />
+
+      <TextInput
+        style={styles.input}
+        placeholder="나눔 수량"
+        placeholderTextColor="#9ca3af"
+        keyboardType="number-pad"
+        value={quantityText}
+        onChangeText={(value) => {
+          const onlyNumber = value.replace(/[^0-9]/g, '');
+          setQuantityText(onlyNumber || '');
+        }}
+      />
+
       <TextInput
         style={[styles.input, styles.textarea]}
         placeholder="설명"

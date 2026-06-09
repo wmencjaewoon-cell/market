@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Modal,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -49,6 +50,7 @@ export default function MapTabScreen() {
   const [selectedGroup, setSelectedGroup] = useState<ListingMapItem[]>([]);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [showHint, setShowHint] = useState(true);
+  const [tracksMarkerViewChanges, setTracksMarkerViewChanges] = useState(true);
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   useEffect(() => {
@@ -165,6 +167,18 @@ export default function MapTabScreen() {
     return () => clearTimeout(timer);
   }, [groupedMarkers]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    setTracksMarkerViewChanges(true);
+
+    const timer = setTimeout(() => {
+      setTracksMarkerViewChanges(false);
+    }, 900);
+
+    return () => clearTimeout(timer);
+  }, [groupedMarkers]);
+
   const initialRegion: Region = {
     latitude: 37.5665,
     longitude: 126.978,
@@ -230,10 +244,11 @@ export default function MapTabScreen() {
                 latitude: group.latitude,
                 longitude: group.longitude,
               }}
-              tracksViewChanges={false}
+              tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
               onPress={() => handleMarkerPress(group)}
             >
               <View
+                collapsable={false}
                 style={[
                   styles.markerWrap,
                   { backgroundColor: single ? color : '#111827' },
@@ -396,7 +411,10 @@ const styles = StyleSheet.create({
   markerText: {
     color: '#fff',
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '800',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 
   bottomHint: {

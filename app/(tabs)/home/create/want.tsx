@@ -117,7 +117,7 @@ setActiveRegionLng(region.longitude);
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const MAX_DISTANCE_KM = 5;
+const MAX_DISTANCE_KM = 30;
 
 const distanceFromRegion =
   activeRegionLat != null &&

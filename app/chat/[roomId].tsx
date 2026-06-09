@@ -8,7 +8,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
-  Animated,
   Dimensions,
   FlatList,
   Image,
@@ -16,7 +15,6 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
-  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -26,6 +24,18 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import Reanimated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
@@ -66,6 +76,7 @@ type RoomInfo = {
   }[];
   listing: {
     id: number;
+    category?: string | null;
     title: string;
     price_text: string | null;
     region: string | null;
@@ -201,6 +212,21 @@ function showChatAlert(title: string, message = '') {
   }
 
   Alert.alert(title, message);
+}
+
+async function confirmBlockChatTarget() {
+  const message = '상대방을 차단할까요?\n차단한 사용자는 내정보에서 해제할 수 있습니다.';
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('차단하기', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '차단', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
 }
 
 function formatTime(dateString?: string) {
@@ -382,6 +408,134 @@ function ChatThumbnailImage({ image }: { image: ChatImageItem }) {
   );
 }
 
+function ZoomableChatImage({
+  uri,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  uri: string;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedX = useSharedValue(0);
+  const savedY = useSharedValue(0);
+  const dismissY = useSharedValue(0);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: dismissY.value },
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.max(1, Math.min(savedScale.value * e.scale, 4));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+
+      if (scale.value <= 1.02) {
+        scale.value = withTiming(1);
+        savedScale.value = 1;
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedX.value = 0;
+        savedY.value = 0;
+      }
+    });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDelay(300)
+    .onEnd(() => {
+      if (scale.value > 1.05) {
+        scale.value = withTiming(1);
+        savedScale.value = 1;
+        translateX.value = withTiming(0);
+        translateY.value = withTiming(0);
+        savedX.value = 0;
+        savedY.value = 0;
+        return;
+      }
+
+      scale.value = withTiming(2.5);
+      savedScale.value = 2.5;
+    });
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      if (scale.value > 1.05) {
+        const maxX = (SCREEN_WIDTH * (scale.value - 1)) / 2;
+        const maxY = (SCREEN_HEIGHT * (scale.value - 1)) / 2;
+
+        translateX.value = Math.max(-maxX, Math.min(maxX, savedX.value + e.translationX));
+        translateY.value = Math.max(-maxY, Math.min(maxY, savedY.value + e.translationY));
+        return;
+      }
+
+      dismissY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      if (scale.value > 1.05) {
+        savedX.value = translateX.value;
+        savedY.value = translateY.value;
+        return;
+      }
+
+      const shouldClose =
+        e.translationY > IMAGE_VIEWER_CLOSE_SWIPE_DISTANCE ||
+        (e.translationY > 40 &&
+          e.velocityY > IMAGE_VIEWER_CLOSE_SWIPE_VELOCITY * 1000);
+
+      if (shouldClose) {
+        dismissY.value = withTiming(SCREEN_HEIGHT, { duration: 140 }, (finished) => {
+          if (finished) {
+            runOnJS(onClose)();
+          }
+        });
+        return;
+      }
+
+      dismissY.value = withSpring(0, {
+        damping: 18,
+        stiffness: 220,
+      });
+
+      if (e.translationX < -70) {
+        runOnJS(onNext)();
+      }
+
+      if (e.translationX > 70) {
+        runOnJS(onPrev)();
+      }
+    });
+
+  const composed = Gesture.Simultaneous(pinch, Gesture.Exclusive(doubleTap, pan));
+
+  return (
+    <GestureDetector gesture={composed}>
+      <Reanimated.View collapsable={false} style={styles.zoomGestureBox}>
+        <Reanimated.Image
+          source={{ uri }}
+          style={[styles.fullImage, animatedStyle]}
+          resizeMode="contain"
+          resizeMethod="resize"
+          onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
+        />
+      </Reanimated.View>
+    </GestureDetector>
+  );
+}
+
 export default function ChatRoomScreen() {
   const { roomId, lat, lng } = useLocalSearchParams<{
     roomId: string;
@@ -392,7 +546,6 @@ export default function ChatRoomScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
-  const imageViewerTranslateY = useRef(new Animated.Value(0)).current;
   const initialReportWarningRunningRef = useRef(false);
   const appointmentCompletionPromptRunningRef = useRef(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -442,6 +595,7 @@ export default function ChatRoomScreen() {
 
   const listing = roomInfo?.listing;
   const listingQuantityInfo = useMemo(() => getListingQuantityInfo(listing), [listing]);
+  const isShareListing = listing?.category === 'share';
   const latestAppointment = useMemo(() => {
     const appointmentMessages = messages
       .map((message) => {
@@ -530,73 +684,18 @@ export default function ChatRoomScreen() {
   );
 
   const closeImageViewer = useCallback(() => {
-    Animated.timing(imageViewerTranslateY, {
-      toValue: SCREEN_HEIGHT,
-      duration: 140,
-      useNativeDriver: true,
-    }).start(() => {
-      imageViewerTranslateY.setValue(0);
-      setImageViewerOpen(false);
-      setSelectedImageUrls([]);
-      setSelectedImageIndex(0);
-    });
-  }, [imageViewerTranslateY]);
+    setImageViewerOpen(false);
+    setSelectedImageUrls([]);
+    setSelectedImageIndex(0);
+  }, []);
 
-  const imageViewerPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          const verticalDistance = Math.abs(gestureState.dy);
-          const horizontalDistance = Math.abs(gestureState.dx);
+  const goPrevImage = useCallback(() => {
+    setSelectedImageIndex((prev) => Math.max(0, prev - 1));
+  }, []);
 
-          return (
-            imageViewerOpen &&
-            verticalDistance > 18 &&
-            verticalDistance > horizontalDistance * 1.2
-          );
-        },
-        onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-          const verticalDistance = Math.abs(gestureState.dy);
-          const horizontalDistance = Math.abs(gestureState.dx);
-
-          return (
-            imageViewerOpen &&
-            gestureState.dy > 18 &&
-            verticalDistance > horizontalDistance * 1.2
-          );
-        },
-        onPanResponderMove: (_, gestureState) => {
-          imageViewerTranslateY.setValue(Math.max(0, gestureState.dy));
-        },
-        onPanResponderRelease: (_, gestureState) => {
-          const shouldClose =
-            gestureState.dy > IMAGE_VIEWER_CLOSE_SWIPE_DISTANCE ||
-            (gestureState.dy > 40 &&
-              gestureState.vy > IMAGE_VIEWER_CLOSE_SWIPE_VELOCITY);
-
-          if (shouldClose) {
-            closeImageViewer();
-            return;
-          }
-
-          Animated.spring(imageViewerTranslateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 18,
-            stiffness: 220,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(imageViewerTranslateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 18,
-            stiffness: 220,
-          }).start();
-        },
-      }),
-    [closeImageViewer, imageViewerOpen, imageViewerTranslateY]
-  );
+  const goNextImage = useCallback(() => {
+    setSelectedImageIndex((prev) => Math.min(selectedImageUrls.length - 1, prev + 1));
+  }, [selectedImageUrls.length]);
 
   const targetUserId =
   roomInfo?.members?.find((m) => m.user_id !== user?.id)?.user_id ||
@@ -885,6 +984,7 @@ export default function ChatRoomScreen() {
     ),
     listings (
           id,
+          category,
           title,
           price_text,
           region,
@@ -1800,7 +1900,10 @@ export default function ChatRoomScreen() {
     }
 
     if (listingQuantityInfo.remaining < 1) {
-      showChatAlert('재고 없음', '남은 수량이 없어 판매 처리할 수 없습니다.');
+      showChatAlert(
+        '남은 수량 없음',
+        `남은 수량이 없어 ${isShareListing ? '나눔완료' : '판매'} 처리할 수 없습니다.`
+      );
       return;
     }
 
@@ -1818,14 +1921,15 @@ export default function ChatRoomScreen() {
     if (!listing || !user || !roomId || !pendingReviewTargetId || saleCompleting) return;
 
     const saleQuantity = Number(saleQuantityText);
+    const quantityLabel = isShareListing ? '나눔 수량' : '판매 수량';
 
     if (!Number.isInteger(saleQuantity) || saleQuantity < 1) {
-      Alert.alert('판매 수량', '판매한 수량을 1개 이상 입력해 주세요.');
+      Alert.alert(quantityLabel, `${isShareListing ? '나눔한' : '판매한'} 수량을 1개 이상 입력해 주세요.`);
       return;
     }
 
     if (saleQuantity > listingQuantityInfo.remaining) {
-      Alert.alert('판매 수량', `남은 수량은 ${listingQuantityInfo.remaining}개입니다.`);
+      Alert.alert(quantityLabel, `남은 수량은 ${listingQuantityInfo.remaining}개입니다.`);
       return;
     }
 
@@ -1840,8 +1944,8 @@ export default function ChatRoomScreen() {
       });
 
       if (error) {
-        console.log('채팅 판매 처리 실패:', error);
-        Alert.alert('오류', '거래완료 처리에 실패했습니다.');
+        console.log(`채팅 ${isShareListing ? '나눔' : '판매'} 처리 실패:`, error);
+        Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
         return;
       }
 
@@ -1878,6 +1982,14 @@ export default function ChatRoomScreen() {
     return;
   }
 
+  if (targetUserId === user.id) {
+    Alert.alert('차단하기', '본인은 차단할 수 없습니다.');
+    return;
+  }
+
+  const ok = await confirmBlockChatTarget();
+  if (!ok) return;
+
   const { error } = await supabase.from('user_blocks').upsert(
     {
       blocker_id: user.id,
@@ -1890,7 +2002,12 @@ export default function ChatRoomScreen() {
 
   if (error) {
     console.log('차단 실패:', error);
-    Alert.alert('오류', '차단하지 못했습니다.');
+    Alert.alert(
+      '오류',
+      error.message.includes('user_blocks')
+        ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+        : '차단하지 못했습니다.'
+    );
     return;
   }
 
@@ -2507,9 +2624,11 @@ const handleExitRoom = () => {
     <View style={styles.centerModalOverlay}>
       <TouchableWithoutFeedback>
         <View style={styles.formModalBox}>
-          <Text style={styles.modalTitle}>판매 수량 선택</Text>
+          <Text style={styles.modalTitle}>
+            {isShareListing ? '나눔 수량 선택' : '판매 수량 선택'}
+          </Text>
           <Text style={styles.modalDesc}>
-            거래한 수량을 입력하면 남은 수량이 차감됩니다.
+            {isShareListing ? '나눔한' : '거래한'} 수량을 입력하면 남은 수량이 차감됩니다.
           </Text>
 
           <Text style={styles.stockSummaryText}>
@@ -2533,7 +2652,9 @@ const handleExitRoom = () => {
             disabled={saleCompleting}
           >
             <Text style={styles.primaryModalBtnText}>
-              {saleCompleting ? '처리 중...' : '거래완료하고 후기 남기기'}
+              {saleCompleting
+                ? '처리 중...'
+                : `${isShareListing ? '나눔완료' : '거래완료'}하고 후기 남기기`}
             </Text>
           </TouchableOpacity>
 
@@ -2574,64 +2695,70 @@ const handleExitRoom = () => {
   animationType="fade"
   onRequestClose={closeImageViewer}
 >
-  <View style={styles.imageViewerOverlay}>
-    <TouchableOpacity
-      style={styles.imageViewerBack}
-      onPress={closeImageViewer}
-    >
-      <Ionicons name="chevron-back" size={32} color="#fff" />
-    </TouchableOpacity>
+  <GestureHandlerRootView style={styles.imageViewerRoot}>
+    <View style={styles.imageViewerOverlay}>
+      <TouchableOpacity
+        style={styles.imageViewerBack}
+        onPress={closeImageViewer}
+      >
+        <Ionicons name="chevron-back" size={32} color="#fff" />
+      </TouchableOpacity>
 
-    <TouchableOpacity
-      style={styles.imageViewerClose}
-      onPress={closeImageViewer}
-    >
-      <Ionicons name="close" size={30} color="#fff" />
-    </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.imageViewerClose}
+        onPress={closeImageViewer}
+      >
+        <Ionicons name="close" size={30} color="#fff" />
+      </TouchableOpacity>
 
-    <FlatList
-      data={selectedImageUrls}
-      horizontal
-      pagingEnabled
-      showsHorizontalScrollIndicator={false}
-      keyExtractor={(item, index) => `${item}-${index}`}
-      getItemLayout={(_, index) => ({
-        length: SCREEN_WIDTH,
-        offset: SCREEN_WIDTH * index,
-        index,
-      })}
-      onMomentumScrollEnd={(e) => {
-        const width = e.nativeEvent.layoutMeasurement.width;
-        const index = Math.round(e.nativeEvent.contentOffset.x / width);
-        setSelectedImageIndex(index);
-      }}
-      renderItem={({ item }) => (
-        <Animated.View
-          style={[
-            styles.fullImagePage,
-            {
-              transform: [{ translateY: imageViewerTranslateY }],
-            },
-          ]}
-          {...imageViewerPanResponder.panHandlers}
-        >
-          <Image
-            source={{ uri: item }}
-            style={styles.fullImage}
-            resizeMode="contain"
-            resizeMethod="resize"
-            onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
+      {Platform.OS === 'web' ? (
+        <FlatList
+          data={selectedImageUrls}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          keyExtractor={(item, index) => `${item}-${index}`}
+          getItemLayout={(_, index) => ({
+            length: SCREEN_WIDTH,
+            offset: SCREEN_WIDTH * index,
+            index,
+          })}
+          onMomentumScrollEnd={(e) => {
+            const width = e.nativeEvent.layoutMeasurement.width;
+            const index = Math.round(e.nativeEvent.contentOffset.x / width);
+            setSelectedImageIndex(index);
+          }}
+          renderItem={({ item }) => (
+            <View style={styles.fullImagePage}>
+              <Image
+                source={{ uri: item }}
+                style={styles.fullImage}
+                resizeMode="contain"
+                resizeMethod="resize"
+                onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
+              />
+            </View>
+          )}
+        />
+      ) : selectedImageUrls[selectedImageIndex] ? (
+        <View style={styles.fullImagePage}>
+          <ZoomableChatImage
+            key={`${selectedImageUrls[selectedImageIndex]}-${selectedImageIndex}`}
+            uri={selectedImageUrls[selectedImageIndex]}
+            onClose={closeImageViewer}
+            onPrev={goPrevImage}
+            onNext={goNextImage}
           />
-        </Animated.View>
-      )}
-    />
+        </View>
+      ) : null}
 
-    {selectedImageUrls.length > 1 ? (
-      <Text style={styles.imageCountText}>
-        {selectedImageIndex + 1} / {selectedImageUrls.length}
-      </Text>
-    ) : null}
-  </View>
+      {selectedImageUrls.length > 1 ? (
+        <Text style={styles.imageCountText}>
+          {selectedImageIndex + 1} / {selectedImageUrls.length}
+        </Text>
+      ) : null}
+    </View>
+  </GestureHandlerRootView>
 </Modal>
       <Modal visible={accountModalOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setAccountModalOpen(false)}>
@@ -2881,6 +3008,10 @@ imageViewerOverlay: {
   backgroundColor: 'rgba(0,0,0,0.95)',
 },
 
+imageViewerRoot: {
+  flex: 1,
+},
+
 imageViewerClose: {
   position: 'absolute',
   top: 50,
@@ -2900,6 +3031,14 @@ fullImagePage: {
   height: SCREEN_HEIGHT,
   alignItems: 'center',
   justifyContent: 'center',
+},
+
+zoomGestureBox: {
+  width: SCREEN_WIDTH,
+  height: SCREEN_HEIGHT,
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'hidden',
 },
 
 reportReasonWrap: {

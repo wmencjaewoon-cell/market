@@ -17,28 +17,61 @@ export default function MyPurchasesScreen() {
   const fetchPurchases = async () => {
     if (!user) return;
 
-    const { data: saleRows, error: saleError } = await supabase
-      .from('listing_sales')
-      .select(`
+    const saleSelectWithQuantity = `
+      id,
+      room_id,
+      quantity,
+      created_at,
+      listings (
         id,
-        room_id,
-        quantity,
-        created_at,
-        listings (
+        title,
+        price_text,
+        region,
+        status,
+        listing_images (
           id,
-          title,
-          price_text,
-          region,
-          status,
-          listing_images (
-            id,
-            image_path,
-            sort_order
-          )
+          image_path,
+          sort_order
         )
-      `)
+      )
+    `;
+    const saleSelectWithoutQuantity = `
+      id,
+      room_id,
+      created_at,
+      listings (
+        id,
+        title,
+        price_text,
+        region,
+        status,
+        listing_images (
+          id,
+          image_path,
+          sort_order
+        )
+      )
+    `;
+
+    const saleResult = await supabase
+      .from('listing_sales')
+      .select(saleSelectWithQuantity)
       .eq('buyer_id', user.id)
       .order('created_at', { ascending: false });
+
+    let saleRows: any[] | null = saleResult.data as any[] | null;
+    let saleError = saleResult.error;
+
+    if (saleError?.code === '42703') {
+      const fallbackResult = await supabase
+        .from('listing_sales')
+        .select(saleSelectWithoutQuantity)
+        .eq('buyer_id', user.id)
+        .order('created_at', { ascending: false });
+
+      saleRows = fallbackResult.data as any[] | null;
+      saleError = fallbackResult.error;
+    }
 
     if (saleError) {
       console.log('구매 판매기록 조회 실패:', saleError);
@@ -121,7 +154,7 @@ export default function MyPurchasesScreen() {
             roomId: row.room_id,
             listing,
             status: 'done',
-            quantity: row.quantity,
+            quantity: row.quantity ?? null,
           });
         })
         .filter(Boolean) || [];

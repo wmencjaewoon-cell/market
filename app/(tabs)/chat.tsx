@@ -6,6 +6,7 @@ import {
   Image,
   Linking,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -73,6 +74,30 @@ function formatTimeAgo(dateString?: string) {
   return `${diffMonth}개월 전`;
 }
 
+function showChatListAlert(title: string, message = '') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n${message}` : title);
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
+async function confirmBlockChatUser() {
+  const message = '상대방을 차단할까요?\n차단한 사용자는 내정보에서 해제할 수 있습니다.';
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('차단하기', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '차단', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 export default function ChatScreen() {
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
@@ -80,6 +105,15 @@ export default function ChatScreen() {
   const [selectedTab, setSelectedTab] = useState<ChatFilterTab>('전체');
   const [rooms, setRooms] = useState<ChatRoomListItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+
+  const getRoomTargetUserId = (room: ChatRoomListItem) => {
+    if (!user) return null;
+
+    return (
+      room.members.find((member) => member.user_id !== user.id)?.user_id ||
+      (room.listing?.author_id !== user.id ? room.listing?.author_id : null)
+    );
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -162,6 +196,17 @@ export default function ChatScreen() {
         (settingRows || []).map((row: any) => [row.room_id, row.muted])
       );
 
+      const { data: blockRows, error: blockError } = await supabase
+        .from('user_blocks')
+        .select('blocked_id')
+        .eq('blocker_id', user.id);
+
+      if (blockError) {
+        console.log('채팅 목록 차단 사용자 조회 실패:', blockError);
+      }
+
+      const blockedIds = new Set((blockRows || []).map((row: any) => row.blocked_id));
+
       const { data: roomRows, error: roomError } = await supabase
         .from('chat_rooms')
         .select(`
@@ -231,8 +276,13 @@ export default function ChatScreen() {
         return new Date(bTime).getTime() - new Date(aTime).getTime();
       });
 
+      const visibleRooms = mapped.filter((room) => {
+        const targetId = getRoomTargetUserId(room);
+        return !targetId || !blockedIds.has(targetId);
+      });
+
       const mappedWithUnread = await Promise.all(
-  mapped.map(async (room) => ({
+  visibleRooms.map(async (room) => ({
     ...room,
     unread_count: await getUnreadCountByRoom(room.id),
   }))
@@ -327,10 +377,7 @@ const openFraudHistory = async () => {
 const reportRoom = (room: ChatRoomListItem) => {
   setMenuRoom(null);
 
-  const targetUserId =
-    room.listing?.author_id === user?.id
-      ? room.members.find((m) => m.user_id !== user?.id)?.user_id
-      : room.listing?.author_id;
+  const targetUserId = getRoomTargetUserId(room);
 
   router.push({
     pathname: '/report/create',
@@ -340,6 +387,51 @@ const reportRoom = (room: ChatRoomListItem) => {
       listingId: room.listing?.id ? String(room.listing.id) : '',
     },
   } as any);
+};
+
+const blockRoomUser = async (room: ChatRoomListItem) => {
+  const targetUserId = getRoomTargetUserId(room);
+
+  if (!user || !targetUserId) {
+    setMenuRoom(null);
+    showChatListAlert('차단하기', '차단할 상대를 찾을 수 없습니다.');
+    return;
+  }
+
+  if (targetUserId === user.id) {
+    setMenuRoom(null);
+    showChatListAlert('차단하기', '본인은 차단할 수 없습니다.');
+    return;
+  }
+
+  const ok = await confirmBlockChatUser();
+  if (!ok) return;
+
+  const { error } = await supabase.from('user_blocks').upsert(
+    {
+      blocker_id: user.id,
+      blocked_id: targetUserId,
+    },
+    {
+      onConflict: 'blocker_id,blocked_id',
+    }
+  );
+
+  setMenuRoom(null);
+
+  if (error) {
+    console.log('채팅 목록 차단 실패:', error);
+    showChatListAlert(
+      '차단 실패',
+      error.message.includes('user_blocks')
+        ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+        : '차단하지 못했습니다.'
+    );
+    return;
+  }
+
+  setRooms((prev) => prev.filter((item) => item.id !== room.id));
+  showChatListAlert('차단 완료', '상대방을 차단했습니다.');
 };
 
 const exitRoom = (room: ChatRoomListItem) => {
@@ -439,6 +531,10 @@ const exitRoom = (room: ChatRoomListItem) => {
 
               <TouchableOpacity style={styles.menuItem} onPress={() => reportRoom(menuRoom)}>
                 <Text style={[styles.menuText, styles.warnText]}>신고하기</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.menuItem} onPress={() => blockRoomUser(menuRoom)}>
+                <Text style={[styles.menuText, styles.warnText]}>차단하기</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuItem} onPress={openFraudHistory}>

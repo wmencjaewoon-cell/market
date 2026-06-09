@@ -72,6 +72,23 @@ const [regionMessage, setRegionMessage] = useState('');
   };
 
   const fetchListings = async () => {
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = authData.user?.id;
+    let blockedIds = new Set<string>();
+
+    if (currentUserId) {
+      const { data: blockRows, error: blockError } = await supabase
+        .from('user_blocks')
+        .select('blocked_id')
+        .eq('blocker_id', currentUserId);
+
+      if (blockError) {
+        console.log('홈 차단 목록 조회 실패:', blockError);
+      } else {
+        blockedIds = new Set((blockRows || []).map((row: any) => row.blocked_id));
+      }
+    }
+
     const { data, error } = await supabase
       .from('listings')
       .select(`
@@ -93,14 +110,16 @@ const [regionMessage, setRegionMessage] = useState('');
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      const mapped = (data as any[]).map((item) => ({
-        ...item,
-        favorites_count: item.favorites_count ?? 0,
-        chats_count: item.chats_count ?? 0,
-        listing_images: [...(item.listing_images || [])].sort(
-          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
-        ),
-      }));
+      const mapped = (data as any[])
+        .filter((item) => !blockedIds.has(item.author_id))
+        .map((item) => ({
+          ...item,
+          favorites_count: item.favorites_count ?? 0,
+          chats_count: item.chats_count ?? 0,
+          listing_images: [...(item.listing_images || [])].sort(
+            (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+          ),
+        }));
       setItems(mapped as Listing[]);
     }
   };

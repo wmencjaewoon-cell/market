@@ -49,3 +49,11 @@ Join our community of developers creating universal apps.
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
 # market
+
+
+
+
+
+26년 6월 9일 ios에서 각 화면별 뒤로가기 버튼 없는 오류 및 상단 safearea 적용 및 채팅방 이미지 확대 및 축소 기능 추가 약속 잡기 알고리즘 수정 추가
+
+26년 6월 10일 ~ 11일 앱스토어, 플레이스토어에 등록을 위해 필요한 기능 추가 (회원 탈퇴, 개인정보처리방침 메뉴, 이용약관 메뉴, 차단한 사용자 목록/해제 기능 추가)

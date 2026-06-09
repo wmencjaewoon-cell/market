@@ -56,6 +56,7 @@ function RootNavigator() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ title: '로그인' }} />
         <Stack.Screen name="profile/edit" options={{ title: '프로필수정' }} />
+        <Stack.Screen name="admin" options={{ title: '관리자' }} />
         <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
         <Stack.Screen name="my" options={{ headerShown: false }} />
         <Stack.Screen name="support" options={{ headerShown: false }} />

@@ -59,6 +59,27 @@ create table if not exists public.listing_sales (
   created_at timestamptz not null default now()
 );
 
+alter table public.listing_sales
+  add column if not exists quantity integer;
+
+update public.listing_sales
+set quantity = 1
+where quantity is null;
+
+alter table public.listing_sales
+  alter column quantity set default 1,
+  alter column quantity set not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'listing_sales_quantity_positive'
+  ) then
+    alter table public.listing_sales
+      add constraint listing_sales_quantity_positive check (quantity > 0);
+  end if;
+end $$;
+
 alter table public.listing_sales enable row level security;
 
 drop policy if exists listing_sales_select_participants on public.listing_sales;

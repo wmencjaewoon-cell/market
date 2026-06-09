@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Image, Modal,
   Platform,
   StyleSheet,
@@ -82,6 +83,30 @@ function getListingQuantityInfo(item: any) {
   };
 }
 
+function showCardAlert(title: string, message = '') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n${message}` : title);
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
+async function confirmBlockSeller(name: string) {
+  const message = `${name}님을 차단할까요?\n차단한 사용자는 내정보에서 해제할 수 있습니다.`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('판매자 차단', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '차단', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 export default function MaterialCard({
   item,
   myLatitude,
@@ -156,6 +181,61 @@ export default function MaterialCard({
 
   const handleReport = async () => {
     setMenuOpen(false);
+  };
+
+  const handleBlockSeller = async () => {
+    const { data } = await supabase.auth.getUser();
+    const currentUserId = data.user?.id;
+    const sellerId = item.author_id || item.profiles?.id;
+
+    if (!currentUserId) {
+      setMenuOpen(false);
+      showCardAlert('판매자 차단', '로그인이 필요합니다.');
+      router.push('/login' as any);
+      return;
+    }
+
+    if (!sellerId) {
+      setMenuOpen(false);
+      showCardAlert('판매자 차단', '차단할 판매자를 찾을 수 없습니다.');
+      return;
+    }
+
+    if (sellerId === currentUserId) {
+      setMenuOpen(false);
+      showCardAlert('판매자 차단', '본인은 차단할 수 없습니다.');
+      return;
+    }
+
+    const sellerName = item.profiles?.display_name || '판매자';
+    const ok = await confirmBlockSeller(sellerName);
+    if (!ok) return;
+
+    const { error } = await supabase.from('user_blocks').upsert(
+      {
+        blocker_id: currentUserId,
+        blocked_id: sellerId,
+      },
+      {
+        onConflict: 'blocker_id,blocked_id',
+      }
+    );
+
+    setMenuOpen(false);
+
+    if (error) {
+      console.log('판매자 차단 실패:', error);
+      showCardAlert(
+        '판매자 차단 실패',
+        error.message.includes('user_blocks')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '차단하지 못했습니다.'
+      );
+      return;
+    }
+
+    showCardAlert('차단 완료', `${sellerName}님을 차단했습니다.`);
+    onRefresh?.();
   };
 
   return (
@@ -303,6 +383,10 @@ export default function MaterialCard({
 
                 <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
                   <Text style={[styles.menuText, styles.reportText]}>신고하기</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuItem} onPress={handleBlockSeller}>
+                  <Text style={[styles.menuText, styles.reportText]}>판매자 차단하기</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.menuItem} onPress={() => setMenuOpen(false)}>

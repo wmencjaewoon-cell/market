@@ -58,10 +58,11 @@ function formatTimeAgo(dateString?: string) {
   const diffDay = Math.floor(diffHour / 24);
   return `${diffDay}일 전`;
 }
-function getTradeStatusLabel(status?: string) {
+function getTradeStatusLabel(status?: string, category?: string) {
+  const isShare = category === 'share';
   if (status === 'reserved') return '예약중';
-  if (status === 'done') return '거래완료';
-  return '거래중';
+  if (status === 'done') return isShare ? '나눔완료' : '거래완료';
+  return isShare ? '나눔중' : '거래중';
 }
 
 function getTradeStatusStyle(status?: string) {
@@ -425,6 +426,7 @@ export default function PostDetailScreen() {
     sellerType === 'store' && item?.profiles?.is_phone_public ? item?.profiles?.phone : null;
   const appChatDeepLink = item ? `interiormarket://open-chat/${item.id}` : '';
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
+  const isShareListing = item?.category === 'share';
 
 //   const viewerImages = useMemo(() => {
 //   return imageUrls.map((url: any) => ({
@@ -697,14 +699,15 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
 
   const saleQuantity = Number(saleQuantityText);
   const { remaining } = getListingQuantityInfo(item);
+  const quantityLabel = isShareListing ? '나눔 수량' : '판매 수량';
 
   if (!Number.isInteger(saleQuantity) || saleQuantity < 1) {
-    Alert.alert('판매 수량', '판매한 수량을 1개 이상 입력해 주세요.');
+    Alert.alert(quantityLabel, `${isShareListing ? '나눔한' : '판매한'} 수량을 1개 이상 입력해 주세요.`);
     return;
   }
 
   if (saleQuantity > remaining) {
-    Alert.alert('판매 수량', `남은 수량은 ${remaining}개입니다.`);
+    Alert.alert(quantityLabel, `남은 수량은 ${remaining}개입니다.`);
     return;
   }
 
@@ -716,8 +719,8 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   });
 
   if (error) {
-    console.log('거래완료 실패:', error);
-    Alert.alert('오류', '거래완료 처리에 실패했습니다.');
+    console.log(`${isShareListing ? '나눔완료' : '거래완료'} 실패:`, error);
+    Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
     return;
   }
 
@@ -930,7 +933,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
 
         <View style={styles.statusRow}>
   <Text style={[styles.tradeStatusBadge, getTradeStatusStyle(item.status)]}>
-    {getTradeStatusLabel(item.status)}
+    {getTradeStatusLabel(item.status, item.category)}
   </Text>
 </View>
 {isOwner ? (
@@ -951,7 +954,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
               남은 {quantityInfo.remaining}개 / 전체 {quantityInfo.total}개
             </Text>
             {quantityInfo.sold > 0 ? (
-              <Text style={styles.quantitySubText}>판매 {quantityInfo.sold}개</Text>
+              <Text style={styles.quantitySubText}>
+                {isShareListing ? '나눔' : '판매'} {quantityInfo.sold}개
+              </Text>
             ) : null}
           </View>
         ) : null}
@@ -1120,7 +1125,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             style={styles.menuItem}
             onPress={() => updateListingStatus('done')}
           >
-            <Text style={styles.menuText}>판매 처리하기</Text>
+            <Text style={styles.menuText}>
+              {isShareListing ? '나눔 완료 처리하기' : '판매 처리하기'}
+            </Text>
           </TouchableOpacity>
         </View>
       </TouchableWithoutFeedback>
@@ -1133,10 +1140,14 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     <View style={styles.modalOverlay}>
       <TouchableWithoutFeedback>
         <View style={styles.menuBox}>
-          <Text style={styles.modalTitle}>거래한 상대와 수량을 선택하세요</Text>
+          <Text style={styles.modalTitle}>
+            {isShareListing ? '나눔한 상대와 수량을 선택하세요' : '거래한 상대와 수량을 선택하세요'}
+          </Text>
 
           <View style={styles.saleQuantityBox}>
-            <Text style={styles.saleQuantityLabel}>판매 수량</Text>
+            <Text style={styles.saleQuantityLabel}>
+              {isShareListing ? '나눔 수량' : '판매 수량'}
+            </Text>
             <TextInput
               style={styles.saleQuantityInput}
               keyboardType="number-pad"
