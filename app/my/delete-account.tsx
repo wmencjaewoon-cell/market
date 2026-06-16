@@ -23,7 +23,7 @@ function showAlert(title: string, message = '') {
 
 async function confirmDeleteAccount() {
   const message =
-    '회원탈퇴를 하면 계정에 다시 로그인할 수 없습니다. 진행할까요?';
+    '회원탈퇴를 신청하면 3일 동안 복구할 수 있고, 그동안 같은 이메일이나 카카오 계정으로 새로 가입할 수 없습니다. 진행할까요?';
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return window.confirm(`회원탈퇴\n${message}`);
@@ -50,7 +50,7 @@ export default function DeleteAccountScreen() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.rpc('delete_current_user');
+      const { error } = await supabase.rpc('request_current_user_deletion');
 
       if (error) {
         console.log('회원탈퇴 실패:', error);
@@ -63,6 +63,10 @@ export default function DeleteAccountScreen() {
         return;
       }
 
+      showAlert(
+        '회원탈퇴 신청 완료',
+        '3일 동안 로그인 후 탈퇴를 취소할 수 있습니다. 같은 이메일이나 카카오 계정으로는 바로 새로 가입할 수 없습니다.'
+      );
       await supabase.auth.signOut();
       router.replace('/login' as any);
     } catch (error: any) {
@@ -79,16 +83,17 @@ export default function DeleteAccountScreen() {
         <Text style={styles.title}>회원탈퇴 전 확인해 주세요</Text>
 
         <Text style={styles.desc}>
-          탈퇴 후에는 현재 계정으로 다시 로그인할 수 없습니다. 작성한 게시글, 채팅,
-          거래 기록, 신고 처리 기록은 서비스 운영과 분쟁 대응을 위해 일부 보관될 수
-          있습니다.
+          탈퇴 신청 후 3일 동안은 같은 계정으로 로그인해 탈퇴를 취소할 수 있습니다.
+          복구 가능 기간에는 같은 이메일이나 카카오 계정으로 새로 가입할 수 없습니다.
+          작성한 게시글, 채팅, 거래 기록, 신고 처리 기록은 서비스 운영과 분쟁 대응을
+          위해 일부 보관될 수 있습니다.
         </Text>
 
         <View style={styles.warningBox}>
           <Text style={styles.warningTitle}>탈퇴 시 제한</Text>
-          <Text style={styles.warningText}>계정 복구가 어렵습니다.</Text>
+          <Text style={styles.warningText}>3일 동안 복구 또는 취소할 수 있습니다.</Text>
           <Text style={styles.warningText}>진행 중인 거래가 있다면 먼저 정리해 주세요.</Text>
-          <Text style={styles.warningText}>탈퇴 후 같은 계정으로 후기나 채팅을 이어갈 수 없습니다.</Text>
+          <Text style={styles.warningText}>탈퇴 대기 중에는 같은 이메일/카카오 계정으로 재가입할 수 없습니다.</Text>
         </View>
 
         <TouchableOpacity

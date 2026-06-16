@@ -37,6 +37,7 @@ import InlineMap from '../../../../components/InlineMap';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { getOrCreateRoom } from '../../../../lib/chat';
 import { canChatToListing } from '../../../../lib/chat_guard';
+import { canUseApp } from '../../../../lib/guard';
 import { supabase } from '../../../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -60,12 +61,14 @@ function formatTimeAgo(dateString?: string) {
 }
 function getTradeStatusLabel(status?: string, category?: string) {
   const isShare = category === 'share';
+  if (status === 'hidden') return '숨김';
   if (status === 'reserved') return '예약중';
   if (status === 'done') return isShare ? '나눔완료' : '거래완료';
   return isShare ? '나눔중' : '거래중';
 }
 
 function getTradeStatusStyle(status?: string) {
+  if (status === 'hidden') return styles.hiddenStatusBadge;
   if (status === 'reserved') return styles.reservedStatusBadge;
   if (status === 'done') return styles.soldStatusBadge;
   return styles.activeStatusBadge;
@@ -83,6 +86,30 @@ function getListingQuantityInfo(item?: any | null) {
     sold,
     isMultiQuantity: total > 1,
   };
+}
+
+function showPostAlert(title: string, message = '') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n${message}` : title);
+    return;
+  }
+
+  Alert.alert(title, message);
+}
+
+async function confirmBlockAuthor(name: string) {
+  const message = `${name}님을 차단할까요?\n차단한 사용자는 내정보에서 해제할 수 있습니다.`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('작성자 차단', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '차단', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
 }
 
 function ZoomableImage({
@@ -217,8 +244,11 @@ export default function PostDetailScreen() {
     if (!id) return;
 
     const init = async () => {
-      await fetchItem();
-      await increaseViewCount();
+      const visible = await fetchItem();
+
+      if (visible) {
+        await increaseViewCount();
+      }
     };
 
     init();
@@ -249,10 +279,19 @@ export default function PostDetailScreen() {
 
     if (error) {
       console.log('게시글 조회 실패:', error);
-      return;
+      return false;
     }
 
-    if (!data) return;
+    if (!data) return false;
+
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = user?.id ?? authData.user?.id;
+
+    if (data.status === 'hidden' && data.author_id !== currentUserId) {
+      showPostAlert('숨김 게시글', '작성자가 숨긴 게시글입니다.');
+      router.replace('/(tabs)/home' as any);
+      return false;
+    }
 
     const sortedImages = [...(data.listing_images || [])].sort(
       (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
@@ -269,6 +308,8 @@ export default function PostDetailScreen() {
       fetchLiked(listingId),
       fetchSimilar(data.category, data.region, listingId),
     ]);
+
+    return true;
   };
 
   const isOwner = user?.id === item?.author_id;
@@ -547,12 +588,148 @@ const handleEdit = () => {
   const handleReport = async () => {
     setMenuOpen(false);
 
+    if (!item) return;
+
     if (!user) {
       router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
       return;
     }
 
-    Alert.alert('신고 접수', '신고 기능은 다음 단계에서 DB와 연결하면 됩니다.');
+    if (!item.author_id) {
+      showPostAlert('신고하기', '신고할 작성자를 찾을 수 없습니다.');
+      return;
+    }
+
+    if (item.author_id === user.id) {
+      showPostAlert('신고하기', '본인 게시글은 신고할 수 없습니다.');
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      showPostAlert('신고 제한', guard.reason || '현재 신고를 접수할 수 없습니다.');
+      return;
+    }
+
+    const { error } = await supabase.from('reports').insert({
+      reporter_id: user.id,
+      target_user_id: item.author_id,
+      listing_id: item.id,
+      reason: '게시글 신고',
+      content: item.title || null,
+    });
+
+    if (error) {
+      console.log('게시글 신고 실패:', error);
+      showPostAlert(
+        '신고 실패',
+        error.message.includes('reports')
+          ? 'Supabase SQL 설정이 필요합니다. report_restrictions.sql을 실행해 주세요.'
+          : '신고를 접수하지 못했습니다.'
+      );
+      return;
+    }
+
+    showPostAlert('신고 접수 완료', '신고가 접수되었습니다.');
+  };
+
+  const handleHidePost = async () => {
+    setMenuOpen(false);
+
+    if (!item) return;
+
+    if (!user) {
+      showPostAlert('게시글 숨기기', '로그인이 필요합니다.');
+      router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      showPostAlert('게시글 숨기기 제한', guard.reason || '현재 게시글 숨기기를 사용할 수 없습니다.');
+      return;
+    }
+
+    const { error } = await supabase.from('hidden_listings').upsert(
+      {
+        user_id: user.id,
+        listing_id: item.id,
+      },
+      {
+        onConflict: 'user_id,listing_id',
+      }
+    );
+
+    if (error) {
+      console.log('게시글 숨기기 실패:', error);
+      showPostAlert(
+        '게시글 숨기기 실패',
+        error.message.includes('hidden_listings')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '게시글을 숨기지 못했습니다.'
+      );
+      return;
+    }
+
+    router.replace('/(tabs)/home' as any);
+  };
+
+  const handleBlockAuthor = async () => {
+    setMenuOpen(false);
+
+    if (!item) return;
+
+    if (!user) {
+      showPostAlert('작성자 차단', '로그인이 필요합니다.');
+      router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+      return;
+    }
+
+    if (!item.author_id) {
+      showPostAlert('작성자 차단', '차단할 작성자를 찾을 수 없습니다.');
+      return;
+    }
+
+    if (item.author_id === user.id) {
+      showPostAlert('작성자 차단', '본인은 차단할 수 없습니다.');
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      showPostAlert('작성자 차단 제한', guard.reason || '현재 작성자 차단을 사용할 수 없습니다.');
+      return;
+    }
+
+    const ok = await confirmBlockAuthor(sellerName || '작성자');
+    if (!ok) return;
+
+    const { error } = await supabase.from('user_blocks').upsert(
+      {
+        blocker_id: user.id,
+        blocked_id: item.author_id,
+      },
+      {
+        onConflict: 'blocker_id,blocked_id',
+      }
+    );
+
+    if (error) {
+      console.log('작성자 차단 실패:', error);
+      showPostAlert(
+        '작성자 차단 실패',
+        error.message.includes('user_blocks')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '차단하지 못했습니다.'
+      );
+      return;
+    }
+
+    showPostAlert('차단 완료', `${sellerName || '작성자'}님을 차단했습니다.`);
+    router.replace('/(tabs)/home' as any);
   };
 
   const handleToggleLike = async () => {
@@ -560,6 +737,13 @@ const handleEdit = () => {
 
     if (!user) {
       router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      showPostAlert('관심 등록 제한', guard.reason || '현재 관심 등록을 사용할 수 없습니다.');
       return;
     }
 
@@ -616,6 +800,7 @@ const handleEdit = () => {
     .update({
       status: nextStatus,
       buyer_id: null,
+      listing_hidden_previous_status: null,
     })
     .eq('id', item.id);
 
@@ -626,7 +811,57 @@ const handleEdit = () => {
   }
 
   setItem((prev: any) =>
-    prev ? { ...prev, status: nextStatus, buyer_id: null } : prev
+    prev ? { ...prev, status: nextStatus, buyer_id: null, listing_hidden_previous_status: null } : prev
+  );
+
+  setStatusMenuOpen(false);
+};
+
+const toggleListingVisibility = async () => {
+  if (!item || !isOwner) return;
+
+  const isHidden = item.status === 'hidden';
+  const restoreStatus =
+    item.listing_hidden_previous_status &&
+    ['active', 'reserved', 'done'].includes(item.listing_hidden_previous_status)
+      ? item.listing_hidden_previous_status
+      : 'active';
+
+  const nextValues = isHidden
+    ? {
+        status: restoreStatus,
+        listing_hidden_previous_status: null,
+      }
+    : {
+        status: 'hidden',
+        listing_hidden_previous_status:
+          item.status && item.status !== 'hidden' ? item.status : 'active',
+      };
+
+  const { error } = await supabase
+    .from('listings')
+    .update(nextValues)
+    .eq('id', item.id)
+    .eq('author_id', user?.id);
+
+  if (error) {
+    console.log(`${isHidden ? '숨김취소' : '숨김'} 실패:`, error);
+    Alert.alert(
+      '오류',
+      error.message.includes('listing_hidden_previous_status')
+        ? 'Supabase SQL 설정이 필요합니다. listing_owner_visibility.sql을 실행해 주세요.'
+        : `${isHidden ? '숨김취소' : '숨김'} 처리에 실패했습니다.`
+    );
+    return;
+  }
+
+  setItem((prev: any) =>
+    prev
+      ? {
+          ...prev,
+          ...nextValues,
+        }
+      : prev
   );
 
   setStatusMenuOpen(false);
@@ -1086,6 +1321,14 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.menuBox}>
+                <TouchableOpacity style={styles.menuItem} onPress={handleHidePost}>
+                  <Text style={styles.menuText}>게시글 숨기기</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuItem} onPress={handleBlockAuthor}>
+                  <Text style={[styles.menuText, styles.reportText]}>작성자 차단하기</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
                   <Text style={[styles.menuText, styles.reportText]}>신고하기</Text>
                 </TouchableOpacity>
@@ -1127,6 +1370,15 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           >
             <Text style={styles.menuText}>
               {isShareListing ? '나눔 완료 처리하기' : '판매 처리하기'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={toggleListingVisibility}
+          >
+            <Text style={[styles.menuText, item?.status === 'hidden' ? styles.restoreText : styles.reportText]}>
+              {item?.status === 'hidden' ? '숨김 취소하기' : '게시글 숨기기'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1385,6 +1637,11 @@ zoomGestureBox: {
 soldStatusBadge: {
   backgroundColor: '#f3f4f6',
   color: '#6b7280',
+},
+
+hiddenStatusBadge: {
+  backgroundColor: '#e5e7eb',
+  color: '#374151',
 },
 
   sellerType: {
@@ -1755,6 +2012,10 @@ fullImageCount: {
 
   reportText: {
     color: '#dc2626',
+  },
+
+  restoreText: {
+    color: '#15803d',
   },
 
   center: {

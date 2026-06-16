@@ -22,6 +22,7 @@ export default function SupportStackLayout() {
         headerShown: true,
         headerTitleAlign: 'center',
         headerBackTitle: '',
+        headerBackButtonDisplayMode: 'minimal',
       }}
     >
       <Stack.Screen name="notices/index" options={{ title: '공지사항', headerLeft: () => <BackButton />, }} />

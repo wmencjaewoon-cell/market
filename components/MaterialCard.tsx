@@ -11,6 +11,7 @@ import {
   TouchableWithoutFeedback,
   View
 } from 'react-native';
+import { canUseApp } from '../lib/guard';
 import { supabase } from '../lib/supabase';
 
 type Props = {
@@ -153,6 +154,13 @@ export default function MaterialCard({
       const { data } = await supabase.auth.getUser();
       if (!data.user) return;
 
+      const guard = await canUseApp();
+
+      if (!guard.ok) {
+        showCardAlert('관심 등록 제한', guard.reason || '현재 관심 등록을 사용할 수 없습니다.');
+        return;
+      }
+
       if (liked) {
         await supabase
           .from('favorites')
@@ -176,7 +184,48 @@ export default function MaterialCard({
   };
 
   const handleHide = async () => {
+    const { data } = await supabase.auth.getUser();
+    const currentUserId = data.user?.id;
+
+    if (!currentUserId) {
+      setMenuOpen(false);
+      showCardAlert('게시글 숨기기', '로그인이 필요합니다.');
+      router.push('/login' as any);
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      setMenuOpen(false);
+      showCardAlert('게시글 숨기기 제한', guard.reason || '현재 게시글 숨기기를 사용할 수 없습니다.');
+      return;
+    }
+
+    const { error } = await supabase.from('hidden_listings').upsert(
+      {
+        user_id: currentUserId,
+        listing_id: item.id,
+      },
+      {
+        onConflict: 'user_id,listing_id',
+      }
+    );
+
     setMenuOpen(false);
+
+    if (error) {
+      console.log('게시글 숨기기 실패:', error);
+      showCardAlert(
+        '게시글 숨기기 실패',
+        error.message.includes('hidden_listings')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '게시글을 숨기지 못했습니다.'
+      );
+      return;
+    }
+
+    onRefresh?.();
   };
 
   const handleReport = async () => {
@@ -192,6 +241,14 @@ export default function MaterialCard({
       setMenuOpen(false);
       showCardAlert('판매자 차단', '로그인이 필요합니다.');
       router.push('/login' as any);
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      setMenuOpen(false);
+      showCardAlert('판매자 차단 제한', guard.reason || '현재 판매자 차단을 사용할 수 없습니다.');
       return;
     }
 

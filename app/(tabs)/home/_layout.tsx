@@ -15,7 +15,12 @@ function BackButton() {
 
 export default function HomeStackLayout() {
   return (
-    <Stack>
+    <Stack
+      screenOptions={{
+        headerBackTitle: '',
+        headerBackButtonDisplayMode: 'minimal',
+      }}
+    >
       <Stack.Screen
         name="index"
         options={{ headerShown: false }}
@@ -27,6 +32,14 @@ export default function HomeStackLayout() {
     headerShown: false,
   }}
 />
+
+      <Stack.Screen
+        name="region-search"
+        options={{
+          headerShown: true,
+          title: '동네 추가',
+        }}
+      />
 
       <Stack.Screen
         name="user/[userId]"
@@ -51,6 +64,16 @@ export default function HomeStackLayout() {
           headerLeft: () => <BackButton />,
         }}
       />
+
+      <Stack.Screen
+        name="post/edit/[id]"
+        options={{
+          title: '게시글 수정',
+          headerShown: true,
+          headerLeft: () => <BackButton />,
+        }}
+      />
+
 
       <Stack.Screen
         name="create/sell"

@@ -1,5 +1,6 @@
 import { getCurrentCoords, getDistanceKm } from './region';
 import { supabase } from './supabase';
+import { canStartChat } from './guard';
 
 export async function canChatToListing(listing: any, currentUserId?: string) {
   let userId = currentUserId;
@@ -11,6 +12,12 @@ export async function canChatToListing(listing: any, currentUserId?: string) {
 
   if (!userId) {
     return { ok: false, reason: '로그인이 필요합니다.' };
+  }
+
+  const appGuard = await canStartChat();
+
+  if (!appGuard.ok) {
+    return appGuard;
   }
 
   const { data: myRegions, error } = await supabase

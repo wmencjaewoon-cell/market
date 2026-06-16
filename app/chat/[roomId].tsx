@@ -39,6 +39,7 @@ import Reanimated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
+import { canStartChat, canUseApp } from '../../lib/guard';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -339,16 +340,16 @@ function normalizeChatImageItem(value: unknown): ChatImageItem | null {
     typeof value === 'string'
       ? { url: value, thumbnailUrl: makeChatImageThumbnailUrl(value) }
       : value &&
-          typeof value === 'object' &&
-          'url' in value &&
-          typeof value.url === 'string'
+        typeof value === 'object' &&
+        'url' in value &&
+        typeof value.url === 'string'
         ? {
-            url: value.url,
-            thumbnailUrl:
-              'thumbnailUrl' in value && typeof value.thumbnailUrl === 'string'
-                ? value.thumbnailUrl
-                : makeChatImageThumbnailUrl(value.url),
-          }
+          url: value.url,
+          thumbnailUrl:
+            'thumbnailUrl' in value && typeof value.thumbnailUrl === 'string'
+              ? value.thumbnailUrl
+              : makeChatImageThumbnailUrl(value.url),
+        }
         : null;
 
   if (!image?.url) return null;
@@ -698,8 +699,8 @@ export default function ChatRoomScreen() {
   }, [selectedImageUrls.length]);
 
   const targetUserId =
-  roomInfo?.members?.find((m) => m.user_id !== user?.id)?.user_id ||
-  (user?.id === listing?.author_id ? listing?.buyer_id : listing?.author_id);
+    roomInfo?.members?.find((m) => m.user_id !== user?.id)?.user_id ||
+    (user?.id === listing?.author_id ? listing?.buyer_id : listing?.author_id);
 
   const goToChatTargetProfile = () => {
     if (!targetUserId) return;
@@ -874,7 +875,9 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     if (!roomId || !lat || !lng) return;
-    sendMessage(roomId, `📍 거래 장소\n위도: ${lat}\n경도: ${lng}`);
+    sendMessage(roomId, `📍 거래 장소\n위도: ${lat}\n경도: ${lng}`).catch((e: any) => {
+      showChatAlert('장소 전송 실패', e?.message || '거래 장소를 전송하지 못했습니다.');
+    });
   }, [roomId, lat, lng]);
 
   useEffect(() => {
@@ -973,8 +976,8 @@ export default function ChatRoomScreen() {
     if (!roomId) return;
 
     const { data, error } = await supabase
-  .from('chat_rooms')
-  .select(`
+      .from('chat_rooms')
+      .select(`
     id,
     listing_id,
     created_by,
@@ -1022,33 +1025,33 @@ export default function ChatRoomScreen() {
     );
 
     setRoomInfo({
-  ...data,
-  members: data?.chat_room_members || [],
-  listing: listingData ? { ...listingData, listing_images: sortedImages } : null,
-  sellerProfile: listingData?.profiles
+      ...data,
+      members: data?.chat_room_members || [],
+      listing: listingData ? { ...listingData, listing_images: sortedImages } : null,
+      sellerProfile: listingData?.profiles
         ? {
-            display_name: listingData.profiles.display_name,
-            phone: listingData.profiles.phone,
-            is_phone_public: listingData.profiles.is_phone_public,
-            account: listingData.profiles.account,
-          }
+          display_name: listingData.profiles.display_name,
+          phone: listingData.profiles.phone,
+          is_phone_public: listingData.profiles.is_phone_public,
+          account: listingData.profiles.account,
+        }
         : null,
     } as RoomInfo);
 
   };
 
   const fetchMuteState = async () => {
-  if (!user || !roomId) return;
+    if (!user || !roomId) return;
 
-  const { data } = await supabase
-    .from('chat_room_settings')
-    .select('muted')
-    .eq('room_id', roomId)
-    .eq('user_id', user.id)
-    .maybeSingle();
+    const { data } = await supabase
+      .from('chat_room_settings')
+      .select('muted')
+      .eq('room_id', roomId)
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-  setIsMuted(data?.muted ?? false);
-};
+    setIsMuted(data?.muted ?? false);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -1378,6 +1381,10 @@ export default function ChatRoomScreen() {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 120);
     } catch (e) {
       console.log('메시지 전송 실패:', e);
+      showChatAlert(
+        '메시지 전송 실패',
+        e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'
+      );
     } finally {
       setSending(false);
     }
@@ -1400,81 +1407,81 @@ export default function ChatRoomScreen() {
   };
 
   const uploadChatImage = async (asset: ImagePicker.ImagePickerAsset) => {
-  if (!roomId || !user) return null;
+    if (!roomId || !user) return null;
 
-  let prepared: Awaited<ReturnType<typeof prepareChatImageForUpload>>;
+    let prepared: Awaited<ReturnType<typeof prepareChatImageForUpload>>;
 
-  try {
-    prepared = await prepareChatImageForUpload(asset);
-  } catch (error) {
-    console.log('채팅 이미지 변환 실패:', error);
-    Alert.alert('오류', '사진을 전송하기 좋은 크기로 변환하지 못했습니다.');
-    return null;
-  }
-
-  const { ext, contentType } = prepared;
-  const filePath = `${roomId}/${Date.now()}-${Math.random()
-    .toString(36)
-    .slice(2)}.${ext}`;
-
-  let fileData: Blob | ArrayBuffer;
-
-  try {
-    if (Platform.OS === 'web') {
-      let blob: Blob;
-
-      if (prepared.file) {
-        blob = prepared.file;
-      } else {
-        const response = await fetch(prepared.uri);
-        blob = await response.blob();
-      }
-
-      if (blob.size === 0) {
-        throw new Error('선택한 사진 파일이 비어 있습니다.');
-      }
-
-      fileData = blob;
-    } else {
-      const base64 =
-        prepared.base64 ||
-        (await FileSystem.readAsStringAsync(prepared.uri, {
-          encoding: 'base64',
-        }));
-
-      if (!base64) {
-        throw new Error('사진 데이터를 읽지 못했습니다.');
-      }
-
-      const decoded = decode(base64);
-
-      if (decoded.byteLength === 0) {
-        throw new Error('선택한 사진 파일이 비어 있습니다.');
-      }
-
-      fileData = decoded;
+    try {
+      prepared = await prepareChatImageForUpload(asset);
+    } catch (error) {
+      console.log('채팅 이미지 변환 실패:', error);
+      Alert.alert('오류', '사진을 전송하기 좋은 크기로 변환하지 못했습니다.');
+      return null;
     }
-  } catch (error) {
-    console.log('채팅 이미지 읽기 실패:', error);
-    Alert.alert('오류', '사진 데이터를 읽지 못했습니다.');
-    return null;
-  }
 
-  const { error: uploadError } = await supabase.storage
-    .from('chat-images')
-    .upload(filePath, fileData, {
-      contentType,
-    });
+    const { ext, contentType } = prepared;
+    const filePath = `${roomId}/${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}.${ext}`;
 
-  if (uploadError) {
-    console.log('채팅 이미지 업로드 실패:', uploadError);
-    Alert.alert('오류', '사진을 업로드하지 못했습니다.');
-    return null;
-  }
+    let fileData: Blob | ArrayBuffer;
 
-  const { data } = supabase.storage.from('chat-images').getPublicUrl(filePath);
-  return data.publicUrl;
-};
+    try {
+      if (Platform.OS === 'web') {
+        let blob: Blob;
+
+        if (prepared.file) {
+          blob = prepared.file;
+        } else {
+          const response = await fetch(prepared.uri);
+          blob = await response.blob();
+        }
+
+        if (blob.size === 0) {
+          throw new Error('선택한 사진 파일이 비어 있습니다.');
+        }
+
+        fileData = blob;
+      } else {
+        const base64 =
+          prepared.base64 ||
+          (await FileSystem.readAsStringAsync(prepared.uri, {
+            encoding: 'base64',
+          }));
+
+        if (!base64) {
+          throw new Error('사진 데이터를 읽지 못했습니다.');
+        }
+
+        const decoded = decode(base64);
+
+        if (decoded.byteLength === 0) {
+          throw new Error('선택한 사진 파일이 비어 있습니다.');
+        }
+
+        fileData = decoded;
+      }
+    } catch (error) {
+      console.log('채팅 이미지 읽기 실패:', error);
+      Alert.alert('오류', '사진 데이터를 읽지 못했습니다.');
+      return null;
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from('chat-images')
+      .upload(filePath, fileData, {
+        contentType,
+      });
+
+    if (uploadError) {
+      console.log('채팅 이미지 업로드 실패:', uploadError);
+      Alert.alert('오류', '사진을 업로드하지 못했습니다.');
+      return null;
+    }
+
+    const { data } = supabase.storage.from('chat-images').getPublicUrl(filePath);
+    return data.publicUrl;
+  };
 
   const productImageUrl = useMemo(() => {
     const path = roomInfo?.listing?.listing_images?.[0]?.image_path;
@@ -1499,106 +1506,128 @@ export default function ChatRoomScreen() {
     !!chatTargetProfile?.phone;
 
   const openPhone = async () => {
-  if (!targetUserId) {
-    Alert.alert('전화하기', '전화할 상대를 찾을 수 없습니다.');
-    return;
-  }
-
-  try {
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('display_name, phone, is_phone_public, user_type')
-      .eq('id', targetUserId)
-      .maybeSingle();
-
-    if (error) {
-      console.log('전화번호 조회 실패:', error);
-      Alert.alert('전화하기', '전화번호를 확인하지 못했습니다.');
+    if (!targetUserId) {
+      Alert.alert('전화하기', '전화할 상대를 찾을 수 없습니다.');
       return;
     }
 
-    const publicPhone =
-      profile?.user_type === 'store' && profile?.is_phone_public ? profile.phone : null;
-    const phoneNumber = String(publicPhone || '').replace(/[^0-9+]/g, '');
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('display_name, phone, is_phone_public, user_type')
+        .eq('id', targetUserId)
+        .maybeSingle();
 
-    if (!phoneNumber) {
-      Alert.alert(
-        '전화하기',
-        `${profile?.display_name || '상대방'}님이 전화번호를 등록하지 않았거나 공개하지 않았습니다.`
-      );
-      return;
+      if (error) {
+        console.log('전화번호 조회 실패:', error);
+        Alert.alert('전화하기', '전화번호를 확인하지 못했습니다.');
+        return;
+      }
+
+      const publicPhone =
+        profile?.user_type === 'store' && profile?.is_phone_public ? profile.phone : null;
+      const phoneNumber = String(publicPhone || '').replace(/[^0-9+]/g, '');
+
+      if (!phoneNumber) {
+        Alert.alert(
+          '전화하기',
+          `${profile?.display_name || '상대방'}님이 전화번호를 등록하지 않았거나 공개하지 않았습니다.`
+        );
+        return;
+      }
+
+      const url = `tel:${phoneNumber}`;
+      const supported = await Linking.canOpenURL(url);
+
+      if (!supported) {
+        Alert.alert('전화하기', '이 기기에서는 전화 앱을 열 수 없습니다.');
+        return;
+      }
+
+      await Linking.openURL(url);
+    } catch (e) {
+      console.log('전화 앱 열기 실패:', e);
+      Alert.alert('오류', '전화 앱을 열지 못했습니다.');
     }
-
-    const url = `tel:${phoneNumber}`;
-    const supported = await Linking.canOpenURL(url);
-
-    if (!supported) {
-      Alert.alert('전화하기', '이 기기에서는 전화 앱을 열 수 없습니다.');
-      return;
-    }
-
-    await Linking.openURL(url);
-  } catch (e) {
-    console.log('전화 앱 열기 실패:', e);
-    Alert.alert('오류', '전화 앱을 열지 못했습니다.');
-  }
-};
+  };
 
   const handleAlbum = async () => {
-  setPlusMenuOpen(false);
+    setPlusMenuOpen(false);
 
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) {
-    Alert.alert('권한 필요', '앨범 접근 권한이 필요합니다.');
-    return;
-  }
+    const guard = await canStartChat();
 
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ImagePicker.MediaTypeOptions.Images,
-    quality: CHAT_IMAGE_PICKER_QUALITY,
-    allowsMultipleSelection: true,
-    selectionLimit: 10,
-    preferredAssetRepresentationMode:
-      ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-  });
+    if (!guard.ok) {
+      showChatAlert('채팅 제한', guard.reason || '채팅 이용이 제한되어 있습니다.');
+      return;
+    }
 
-  if (result.canceled) return;
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('권한 필요', '앨범 접근 권한이 필요합니다.');
+      return;
+    }
 
-  const urls: string[] = [];
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: CHAT_IMAGE_PICKER_QUALITY,
+      allowsMultipleSelection: true,
+      selectionLimit: 10,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
 
-  for (const asset of result.assets) {
-    const url = await uploadChatImage(asset);
-    if (url) urls.push(url);
-  }
+    if (result.canceled) return;
 
-  if (urls.length > 0 && roomId) {
-    await sendMessage(roomId, makeImageMessage(urls));
-  }
-};
+    const urls: string[] = [];
+
+    for (const asset of result.assets) {
+      const url = await uploadChatImage(asset);
+      if (url) urls.push(url);
+    }
+
+    if (urls.length > 0 && roomId) {
+      try {
+        await sendMessage(roomId, makeImageMessage(urls));
+      } catch (e: any) {
+        showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
+      }
+    }
+  };
 
   const handleCamera = async () => {
-  setPlusMenuOpen(false);
+    setPlusMenuOpen(false);
 
-  const permission = await ImagePicker.requestCameraPermissionsAsync();
-  if (!permission.granted) {
-    Alert.alert('권한 필요', '카메라 권한이 필요합니다.');
-    return;
-  }
+    const guard = await canStartChat();
 
-  const result = await ImagePicker.launchCameraAsync({
-    quality: CHAT_IMAGE_PICKER_QUALITY,
-    preferredAssetRepresentationMode:
-      ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-  });
+    if (!guard.ok) {
+      showChatAlert('채팅 제한', guard.reason || '채팅 이용이 제한되어 있습니다.');
+      return;
+    }
 
-  if (result.canceled) return;
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('권한 필요', '카메라 권한이 필요합니다.');
+      return;
+    }
 
-  const url = await uploadChatImage(result.assets[0]);
+    const result = await ImagePicker.launchCameraAsync({
+      quality: CHAT_IMAGE_PICKER_QUALITY,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
 
-  if (url && roomId) {
-    await sendMessage(roomId, makeImageMessage([url]));
-  }
-};
+    if (result.canceled) return;
+
+    const url = await uploadChatImage(result.assets[0]);
+
+    if (url && roomId) {
+      try {
+        await sendMessage(roomId, makeImageMessage([url]));
+      } catch (e: any) {
+        showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
+      }
+    }
+  };
 
   const handlePlace = () => {
     setPlusMenuOpen(false);
@@ -1663,7 +1692,13 @@ export default function ChatRoomScreen() {
       return;
     }
 
-    await sendMessage(roomId, `${APPOINTMENT_REQUEST_PREFIX}${formatAppointmentValue(appointmentDate)}`);
+    try {
+      await sendMessage(roomId, `${APPOINTMENT_REQUEST_PREFIX}${formatAppointmentValue(appointmentDate)}`);
+    } catch (e: any) {
+      showChatAlert('약속 전송 실패', e?.message || '약속 메시지를 보내지 못했습니다.');
+      return;
+    }
+
     setAppointmentModalOpen(false);
   };
 
@@ -1725,6 +1760,13 @@ export default function ChatRoomScreen() {
       return;
     }
 
+    const guard = await canStartChat();
+
+    if (!guard.ok) {
+      Alert.alert('채팅 제한', guard.reason || '채팅 이용이 제한되어 있습니다.');
+      return;
+    }
+
     const { error } = await supabase.from('profiles').update({ account }).eq('id', user.id);
 
     if (error) {
@@ -1733,7 +1775,13 @@ export default function ChatRoomScreen() {
       return;
     }
 
-    await sendMessage(roomId, `${PAYMENT_REQUEST_PREFIX}${account}`);
+    try {
+      await sendMessage(roomId, `${PAYMENT_REQUEST_PREFIX}${account}`);
+    } catch (e: any) {
+      Alert.alert('송금 요청 실패', e?.message || '송금 요청 메시지를 보내지 못했습니다.');
+      return;
+    }
+
     setAccountModalOpen(false);
   };
 
@@ -1952,13 +2000,13 @@ export default function ChatRoomScreen() {
       setRoomInfo((prev) =>
         prev?.listing
           ? {
-              ...prev,
-              listing: {
-                ...prev.listing,
-                ...(data || {}),
-                listing_images: prev.listing.listing_images,
-              },
-            }
+            ...prev,
+            listing: {
+              ...prev.listing,
+              ...(data || {}),
+              listing_images: prev.listing.listing_images,
+            },
+          }
           : prev
       );
 
@@ -1975,184 +2023,191 @@ export default function ChatRoomScreen() {
   };
 
   const handleBlock = async () => {
-  setHeaderMenuOpen(false);
+    setHeaderMenuOpen(false);
 
-  if (!user || !targetUserId) {
-    Alert.alert('차단하기', '차단할 상대를 찾을 수 없습니다.');
-    return;
-  }
-
-  if (targetUserId === user.id) {
-    Alert.alert('차단하기', '본인은 차단할 수 없습니다.');
-    return;
-  }
-
-  const ok = await confirmBlockChatTarget();
-  if (!ok) return;
-
-  const { error } = await supabase.from('user_blocks').upsert(
-    {
-      blocker_id: user.id,
-      blocked_id: targetUserId,
-    },
-    {
-      onConflict: 'blocker_id,blocked_id',
-    }
-  );
-
-  if (error) {
-    console.log('차단 실패:', error);
-    Alert.alert(
-      '오류',
-      error.message.includes('user_blocks')
-        ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
-        : '차단하지 못했습니다.'
-    );
-    return;
-  }
-
-  Alert.alert('차단 완료', '상대방을 차단했습니다.');
-};
-
-const fetchReportTargetName = async (targetId: string) => {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('display_name')
-    .eq('id', targetId)
-    .maybeSingle();
-
-  if (error) {
-    console.log('신고 대상 닉네임 조회 실패:', error);
-    return '상대방';
-  }
-
-  return data?.display_name || '상대방';
-};
-
-const handleReport = () => {
-  setHeaderMenuOpen(false);
-
-  setTimeout(async () => {
     if (!user || !targetUserId) {
-      Alert.alert('신고하기', '신고할 상대를 찾을 수 없습니다.');
+      Alert.alert('차단하기', '차단할 상대를 찾을 수 없습니다.');
       return;
     }
 
     if (targetUserId === user.id) {
-      Alert.alert('신고하기', '본인은 신고할 수 없습니다.');
+      Alert.alert('차단하기', '본인은 차단할 수 없습니다.');
       return;
     }
 
-    const name = await fetchReportTargetName(targetUserId);
+    const ok = await confirmBlockChatTarget();
+    if (!ok) return;
 
-    setReportTargetName(name);
-    setReportReason('');
-    setReportContent('');
-    setReportModalOpen(true);
-  }, 300);
-};
-
-const submitReport = async () => {
-  if (!user || !targetUserId) return;
-
-  if (!reportReason) {
-    Alert.alert('신고 항목 선택', '신고 항목을 선택해 주세요.');
-    return;
-  }
-
-  const { error } = await supabase.from('reports').insert({
-    reporter_id: user.id,
-    target_user_id: targetUserId,
-    room_id: roomId,
-    listing_id: listing?.id ?? null,
-    reason: reportReason,
-    content: reportContent.trim(),
-  });
-
-  if (error) {
-    console.log('신고 실패:', error);
-    Alert.alert('오류', '신고를 접수하지 못했습니다.');
-    return;
-  }
-
-  setReportModalOpen(false);
-  await fetchUserReportCount(targetUserId);
-  Alert.alert('신고 접수 완료', '신고가 접수되었습니다.');
-};
-
-const handleFraudHistory = async () => {
-  setHeaderMenuOpen(false);
-
-  const url = 'https://thecheat.co.kr/rb/?mod=_search';
-
-  const supported = await Linking.canOpenURL(url);
-  if (!supported) {
-    Alert.alert('오류', '사이트를 열 수 없습니다.');
-    return;
-  }
-
-  await Linking.openURL(url);
-};
-
-const handleMute = async () => {
-  setHeaderMenuOpen(false);
-
-  if (!user || !roomId) return;
-
-  const nextMuted = !isMuted;
-
-  const { error } = await supabase.from('chat_room_settings').upsert(
-    {
-      room_id: roomId,
-      user_id: user.id,
-      muted: nextMuted,
-    },
-    {
-      onConflict: 'room_id,user_id',
-    }
-  );
-
-  if (error) {
-    console.log('알림 설정 실패:', error);
-    Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
-    return;
-  }
-
-  setIsMuted(nextMuted);
-
-  Alert.alert(
-    '알림 설정',
-    nextMuted ? '알림을 껐습니다.' : '알림을 켰습니다.'
-  );
-};
-
-const handleExitRoom = () => {
-  setHeaderMenuOpen(false);
-
-  Alert.alert('채팅방 나가기', '채팅방을 나가시겠어요?', [
-    { text: '취소', style: 'cancel' },
-    {
-      text: '나가기',
-      style: 'destructive',
-      onPress: async () => {
-        if (!user || !roomId) return;
-
-        const { error } = await supabase.from('chat_room_members').delete().match({
-          room_id: roomId,
-          user_id: user.id,
-        });
-
-        if (error) {
-          console.log('채팅방 나가기 실패:', error);
-          Alert.alert('오류', '채팅방을 나가지 못했습니다.');
-          return;
-        }
-
-        router.replace('/(tabs)/chat' as any);
+    const { error } = await supabase.from('user_blocks').upsert(
+      {
+        blocker_id: user.id,
+        blocked_id: targetUserId,
       },
-    },
-  ]);
-};
+      {
+        onConflict: 'blocker_id,blocked_id',
+      }
+    );
+
+    if (error) {
+      console.log('차단 실패:', error);
+      Alert.alert(
+        '오류',
+        error.message.includes('user_blocks')
+          ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
+          : '차단하지 못했습니다.'
+      );
+      return;
+    }
+
+    Alert.alert('차단 완료', '상대방을 차단했습니다.');
+  };
+
+  const fetchReportTargetName = async (targetId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('id', targetId)
+      .maybeSingle();
+
+    if (error) {
+      console.log('신고 대상 닉네임 조회 실패:', error);
+      return '상대방';
+    }
+
+    return data?.display_name || '상대방';
+  };
+
+  const handleReport = () => {
+    setHeaderMenuOpen(false);
+
+    setTimeout(async () => {
+      if (!user || !targetUserId) {
+        Alert.alert('신고하기', '신고할 상대를 찾을 수 없습니다.');
+        return;
+      }
+
+      if (targetUserId === user.id) {
+        Alert.alert('신고하기', '본인은 신고할 수 없습니다.');
+        return;
+      }
+
+      const name = await fetchReportTargetName(targetUserId);
+
+      setReportTargetName(name);
+      setReportReason('');
+      setReportContent('');
+      setReportModalOpen(true);
+    }, 300);
+  };
+
+  const submitReport = async () => {
+    if (!user || !targetUserId) return;
+
+    if (!reportReason) {
+      Alert.alert('신고 항목 선택', '신고 항목을 선택해 주세요.');
+      return;
+    }
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      Alert.alert('신고 제한', guard.reason || '현재 신고를 접수할 수 없습니다.');
+      return;
+    }
+
+    const { error } = await supabase.from('reports').insert({
+      reporter_id: user.id,
+      target_user_id: targetUserId,
+      room_id: roomId,
+      listing_id: listing?.id ?? null,
+      reason: reportReason,
+      content: reportContent.trim(),
+    });
+
+    if (error) {
+      console.log('신고 실패:', error);
+      Alert.alert('오류', '신고를 접수하지 못했습니다.');
+      return;
+    }
+
+    setReportModalOpen(false);
+    await fetchUserReportCount(targetUserId);
+    Alert.alert('신고 접수 완료', '신고가 접수되었습니다.');
+  };
+
+  const handleFraudHistory = async () => {
+    setHeaderMenuOpen(false);
+
+    const url = 'https://thecheat.co.kr/rb/?mod=_search';
+
+    const supported = await Linking.canOpenURL(url);
+    if (!supported) {
+      Alert.alert('오류', '사이트를 열 수 없습니다.');
+      return;
+    }
+
+    await Linking.openURL(url);
+  };
+
+  const handleMute = async () => {
+    setHeaderMenuOpen(false);
+
+    if (!user || !roomId) return;
+
+    const nextMuted = !isMuted;
+
+    const { error } = await supabase.from('chat_room_settings').upsert(
+      {
+        room_id: roomId,
+        user_id: user.id,
+        muted: nextMuted,
+      },
+      {
+        onConflict: 'room_id,user_id',
+      }
+    );
+
+    if (error) {
+      console.log('알림 설정 실패:', error);
+      Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
+      return;
+    }
+
+    setIsMuted(nextMuted);
+
+    Alert.alert(
+      '알림 설정',
+      nextMuted ? '알림을 껐습니다.' : '알림을 켰습니다.'
+    );
+  };
+
+  const handleExitRoom = () => {
+    setHeaderMenuOpen(false);
+
+    Alert.alert('채팅방 나가기', '채팅방을 나가시겠어요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '나가기',
+        style: 'destructive',
+        onPress: async () => {
+          if (!user || !roomId) return;
+
+          const { error } = await supabase.from('chat_room_members').delete().match({
+            room_id: roomId,
+            user_id: user.id,
+          });
+
+          if (error) {
+            console.log('채팅방 나가기 실패:', error);
+            Alert.alert('오류', '채팅방을 나가지 못했습니다.');
+            return;
+          }
+
+          router.replace('/(tabs)/chat' as any);
+        },
+      },
+    ]);
+  };
 
   const handleSearchInChat = () => {
     setHeaderMenuOpen(false);
@@ -2162,16 +2217,16 @@ const handleExitRoom = () => {
 
 
   const getUnreadCount = (messageId: string) => {
-  if (!user) return 1;
+    if (!user) return 1;
 
-  const readByOther = reads.some(
-    (r) =>
-      String(r.message_id) === String(messageId) &&
-      r.user_id !== user.id
-  );
+    const readByOther = reads.some(
+      (r) =>
+        String(r.message_id) === String(messageId) &&
+        r.user_id !== user.id
+    );
 
-  return readByOther ? 0 : 1;
-};
+    return readByOther ? 0 : 1;
+  };
 
   const handleAppointmentCompletionAnswer = async (
     completed: boolean,
@@ -2186,14 +2241,17 @@ const handleExitRoom = () => {
 
     const appointmentValue = formatAppointmentValue(appointmentDate);
 
-    await sendMessage(
-      roomId,
-      `${APPOINTMENT_COMPLETION_RESPONSE_PREFIX}${
-        completed ? '예' : '아니요'
-      }\n약속 시간: ${appointmentValue}\n${
-        completed ? '거래가 완료되었습니다.' : '거래가 아직 완료되지 않았습니다.'
-      }`
-    );
+    try {
+      await sendMessage(
+        roomId,
+        `${APPOINTMENT_COMPLETION_RESPONSE_PREFIX}${completed ? '예' : '아니요'
+        }\n약속 시간: ${appointmentValue}\n${completed ? '거래가 완료되었습니다.' : '거래가 아직 완료되지 않았습니다.'
+        }`
+      );
+    } catch (e: any) {
+      showChatAlert('응답 전송 실패', e?.message || '거래 완료 응답을 보내지 못했습니다.');
+      return;
+    }
 
     if (completed) {
       setTimeout(() => {
@@ -2202,117 +2260,198 @@ const handleExitRoom = () => {
     }
   };
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
-  const isMine = item.sender_id === user?.id;
-  const unreadCount = isMine ? getUnreadCount(item.id) : 0;
+  const URL_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
 
-  const imageItems = parseImageMessage(item.message);
-  const isImageMessage = imageItems.length > 0;
-  const appointmentCompletionDate = item.message.startsWith(
-    APPOINTMENT_COMPLETION_PROMPT_PREFIX
-  )
-    ? parseAppointmentCompletionDate(item.message)
-    : null;
-  const isAppointmentCompletionPrompt = Boolean(appointmentCompletionDate);
-  const appointmentCompletionAnswered = appointmentCompletionDate
-    ? hasAppointmentCompletionResponseForDate(appointmentCompletionDate, messages, user?.id)
-    : false;
+  const normalizeUrl = (url: string) => {
+    return url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `https://${url}`;
+  };
 
-  return (
-    <View style={[styles.messageRow, isMine ? styles.myRow : styles.otherRow]}>
-      <View
-  style={[
-    styles.bubble,
-    isMine ? styles.myBubble : styles.otherBubble,
-    isImageMessage && styles.imageBubble,
-  ]}
->
-        {isAppointmentCompletionPrompt && appointmentCompletionDate ? (
-          <View>
-            <Text style={[styles.messageText, isMine && styles.myMessageText]}>
-              {item.message}
+  const confirmAndOpenUrl = async (rawUrl: string) => {
+    const url = normalizeUrl(rawUrl);
+
+    const openUrl = async () => {
+      try {
+        const supported = await Linking.canOpenURL(url);
+
+        if (!supported) {
+          showChatAlert('링크 열기 실패', '이 링크를 열 수 없습니다.');
+          return;
+        }
+
+        await Linking.openURL(url);
+      } catch (error) {
+        console.log('링크 열기 실패:', error);
+        showChatAlert('링크 열기 실패', '링크를 여는 중 오류가 발생했습니다.');
+      }
+    };
+
+    const warningMessage =
+      `외부 링크로 이동합니다.\n\n${url}\n\n` +
+      '사기, 피싱, 개인정보 탈취 위험이 있을 수 있으니 신뢰할 수 있는 링크인지 확인해 주세요.';
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const ok = window.confirm(warningMessage);
+      if (ok) {
+        await openUrl();
+      }
+      return;
+    }
+
+    Alert.alert('외부 링크 주의', warningMessage, [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '열기',
+        style: 'destructive',
+        onPress: () => {
+          void openUrl();
+        },
+      },
+    ]);
+  };
+
+  const renderMessageTextWithLinks = (message: string, isMine: boolean) => {
+    const parts = message.split(URL_REGEX);
+
+    return (
+      <Text style={[styles.messageText, isMine && styles.myMessageText]}>
+        {parts.map((part, index) => {
+          const isUrl = URL_REGEX.test(part);
+          URL_REGEX.lastIndex = 0;
+
+          if (!isUrl) {
+            return part;
+          }
+
+          return (
+            <Text
+              key={`${part}-${index}`}
+              style={[
+                styles.linkText,
+                isMine && styles.myLinkText,
+              ]}
+              onPress={() => {
+                void confirmAndOpenUrl(part);
+              }}
+            >
+              {part}
             </Text>
+          );
+        })}
+      </Text>
+    );
+  };
 
-            {appointmentCompletionAnswered ? (
-              <Text
+  const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const isMine = item.sender_id === user?.id;
+    const unreadCount = isMine ? getUnreadCount(item.id) : 0;
+
+    const imageItems = parseImageMessage(item.message);
+    const isImageMessage = imageItems.length > 0;
+    const appointmentCompletionDate = item.message.startsWith(
+      APPOINTMENT_COMPLETION_PROMPT_PREFIX
+    )
+      ? parseAppointmentCompletionDate(item.message)
+      : null;
+    const isAppointmentCompletionPrompt = Boolean(appointmentCompletionDate);
+    const appointmentCompletionAnswered = appointmentCompletionDate
+      ? hasAppointmentCompletionResponseForDate(appointmentCompletionDate, messages, user?.id)
+      : false;
+
+    return (
+      <View style={[styles.messageRow, isMine ? styles.myRow : styles.otherRow]}>
+        <View
+          style={[
+            styles.bubble,
+            isMine ? styles.myBubble : styles.otherBubble,
+            isImageMessage && styles.imageBubble,
+          ]}
+        >
+          {isAppointmentCompletionPrompt && appointmentCompletionDate ? (
+            <View>
+              <Text style={[styles.messageText, isMine && styles.myMessageText]}>
+                {item.message}
+              </Text>
+
+              {appointmentCompletionAnswered ? (
+                <Text
+                  style={[
+                    styles.completionAnsweredText,
+                    isMine && styles.myCompletionAnsweredText,
+                  ]}
+                >
+                  응답 완료
+                </Text>
+              ) : (
+                <View style={styles.completionActions}>
+                  <TouchableOpacity
+                    style={styles.completionYesBtn}
+                    onPress={() => handleAppointmentCompletionAnswer(true, appointmentCompletionDate)}
+                  >
+                    <Text style={styles.completionYesText}>예</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.completionNoBtn}
+                    onPress={() => handleAppointmentCompletionAnswer(false, appointmentCompletionDate)}
+                  >
+                    <Text style={styles.completionNoText}>아니요</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : isImageMessage ? (
+            <TouchableOpacity
+              onPress={() => {
+                const imageUrls = imageItems.map((image) => image.url);
+                console.log('이미지 URL:', imageUrls);
+                setSelectedImageUrls(imageUrls);
+                setSelectedImageIndex(0);
+                setImageViewerOpen(true);
+              }}
+            >
+              <View
                 style={[
-                  styles.completionAnsweredText,
-                  isMine && styles.myCompletionAnsweredText,
+                  styles.imageGrid,
+                  imageItems.length === 1 && styles.singleImageGrid,
                 ]}
               >
-                응답 완료
-              </Text>
-            ) : (
-              <View style={styles.completionActions}>
-                <TouchableOpacity
-                  style={styles.completionYesBtn}
-                  onPress={() => handleAppointmentCompletionAnswer(true, appointmentCompletionDate)}
-                >
-                  <Text style={styles.completionYesText}>예</Text>
-                </TouchableOpacity>
+                {imageItems.slice(0, 4).map((image, index) => (
+                  <View
+                    key={`${image.url}-${index}`}
+                    style={[
+                      styles.gridImageWrap,
+                      imageItems.length === 1 && styles.singleImageWrap,
+                    ]}
+                  >
+                    <ChatThumbnailImage image={image} />
 
-                <TouchableOpacity
-                  style={styles.completionNoBtn}
-                  onPress={() => handleAppointmentCompletionAnswer(false, appointmentCompletionDate)}
-                >
-                  <Text style={styles.completionNoText}>아니요</Text>
-                </TouchableOpacity>
+                    {index === 3 && imageItems.length > 4 ? (
+                      <View style={styles.moreImageOverlay}>
+                        <Text style={styles.moreImageText}>
+                          +{imageItems.length - 4}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
               </View>
-            )}
-          </View>
-        ) : isImageMessage ? (
-          <TouchableOpacity
-            onPress={() => {
-              const imageUrls = imageItems.map((image) => image.url);
-              console.log('이미지 URL:', imageUrls);
-              setSelectedImageUrls(imageUrls);
-              setSelectedImageIndex(0);
-              setImageViewerOpen(true);
-            }}
-          >
-            <View
-  style={[
-    styles.imageGrid,
-    imageItems.length === 1 && styles.singleImageGrid,
-  ]}
->
-              {imageItems.slice(0, 4).map((image, index) => (
-                <View
-  key={`${image.url}-${index}`}
-  style={[
-    styles.gridImageWrap,
-    imageItems.length === 1 && styles.singleImageWrap,
-  ]}
->
-                  <ChatThumbnailImage image={image} />
+            </TouchableOpacity>
+          ) : (
+            renderMessageTextWithLinks(item.message, isMine)
+          )}
+        </View>
 
-                  {index === 3 && imageItems.length > 4 ? (
-                    <View style={styles.moreImageOverlay}>
-                      <Text style={styles.moreImageText}>
-                        +{imageItems.length - 4}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          </TouchableOpacity>
-        ) : (
-          <Text style={[styles.messageText, isMine && styles.myMessageText]}>
-            {item.message}
-          </Text>
-        )}
+        <View style={styles.metaRow}>
+          {isMine && unreadCount > 0 ? (
+            <Text style={styles.unreadText}>{unreadCount}</Text>
+          ) : null}
+          <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
+        </View>
       </View>
-
-      <View style={styles.metaRow}>
-        {isMine && unreadCount > 0 ? (
-          <Text style={styles.unreadText}>{unreadCount}</Text>
-        ) : null}
-        <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
-      </View>
-    </View>
-  );
-};
+    );
+  };
 
   // const inputBarBottom =
   // Platform.OS === 'android'
@@ -2341,22 +2480,22 @@ const handleExitRoom = () => {
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
-  {isMuted ? (
-    <View style={styles.mutedIconWrap}>
-      <Ionicons name="notifications-off-outline" size={18} color="#6b7280" />
-    </View>
-  ) : null}
+          {isMuted ? (
+            <View style={styles.mutedIconWrap}>
+              <Ionicons name="notifications-off-outline" size={18} color="#6b7280" />
+            </View>
+          ) : null}
 
-  {canCallChatTarget ? (
-    <TouchableOpacity style={styles.headerBtn} onPress={openPhone}>
-      <Ionicons name="call-outline" size={20} color="#111827" />
-    </TouchableOpacity>
-  ) : null}
+          {canCallChatTarget ? (
+            <TouchableOpacity style={styles.headerBtn} onPress={openPhone}>
+              <Ionicons name="call-outline" size={20} color="#111827" />
+            </TouchableOpacity>
+          ) : null}
 
-  <TouchableOpacity style={styles.headerBtn} onPress={() => setHeaderMenuOpen(true)}>
-    <Ionicons name="ellipsis-vertical" size={20} color="#111827" />
-  </TouchableOpacity>
-</View>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => setHeaderMenuOpen(true)}>
+            <Ionicons name="ellipsis-vertical" size={20} color="#111827" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {listing ? (
@@ -2407,10 +2546,10 @@ const handleExitRoom = () => {
       ) : null}
 
       <KeyboardAvoidingView
-  style={styles.flex}
-  behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-  keyboardVerticalOffset={0}
->
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        keyboardVerticalOffset={0}
+      >
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -2418,11 +2557,11 @@ const handleExitRoom = () => {
           renderItem={renderMessage}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={[
-  styles.list,
-  {
-    paddingBottom: keyboardVisible ? 80 : 100,
-  },
-]}
+            styles.list,
+            {
+              paddingBottom: keyboardVisible ? 80 : 100,
+            },
+          ]}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           ListEmptyComponent={
             <View style={styles.emptyBox}>
@@ -2432,20 +2571,20 @@ const handleExitRoom = () => {
         />
 
         <View
-  style={[
-    styles.inputRow,
-    {
-      paddingBottom:
-        Platform.OS === 'android'
-          ? keyboardVisible
-            ? 8
-            : 24
-          : keyboardVisible
-          ? 8
-          : Math.max(insets.bottom, 8),
-    },
-  ]}
->
+          style={[
+            styles.inputRow,
+            {
+              paddingBottom:
+                Platform.OS === 'android'
+                  ? keyboardVisible
+                    ? 8
+                    : 24
+                  : keyboardVisible
+                    ? 8
+                    : Math.max(insets.bottom, 8),
+            },
+          ]}
+        >
           <TouchableOpacity style={styles.plusBtn} onPress={openPlusMenu}>
             <Ionicons name="add" size={24} color="#111827" />
           </TouchableOpacity>
@@ -2474,305 +2613,305 @@ const handleExitRoom = () => {
       </KeyboardAvoidingView>
 
       <Modal visible={appointmentModalOpen} transparent animationType="fade">
-  <TouchableWithoutFeedback onPress={() => setAppointmentModalOpen(false)}>
-    <View style={styles.centerModalOverlay}>
-      <TouchableWithoutFeedback>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.centerModalKeyboard}
-        >
-          <View style={styles.centerFormModalBox}>
-            <Text style={styles.modalTitle}>
-              {appointmentStep === 'date' ? '약속 날짜 선택' : '약속 시간 선택'}
-            </Text>
+        <TouchableWithoutFeedback onPress={() => setAppointmentModalOpen(false)}>
+          <View style={styles.centerModalOverlay}>
+            <TouchableWithoutFeedback>
+              <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={styles.centerModalKeyboard}
+              >
+                <View style={styles.centerFormModalBox}>
+                  <Text style={styles.modalTitle}>
+                    {appointmentStep === 'date' ? '약속 날짜 선택' : '약속 시간 선택'}
+                  </Text>
 
-            {appointmentStep === 'date' ? (
-              <>
-                <Text style={styles.modalDesc}>
-                  약속 시간 5분 전까지는 다시 약속잡기를 눌러 날짜와 시간을 바꿀 수 있습니다.
-                </Text>
+                  {appointmentStep === 'date' ? (
+                    <>
+                      <Text style={styles.modalDesc}>
+                        약속 시간 5분 전까지는 다시 약속잡기를 눌러 날짜와 시간을 바꿀 수 있습니다.
+                      </Text>
 
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.appointmentDateOptions}
-                >
-                  {appointmentDateOptions.map((option) => {
-                    const selected = selectedDateText === option.value;
-
-                    return (
-                      <TouchableOpacity
-                        key={option.value}
-                        style={[
-                          styles.appointmentDateBtn,
-                          selected && styles.appointmentDateBtnActive,
-                        ]}
-                        onPress={() => setSelectedDateText(option.value)}
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.appointmentDateOptions}
                       >
-                        <Text
-                          style={[
-                            styles.appointmentDateLabel,
-                            selected && styles.appointmentDateTextActive,
-                          ]}
-                        >
-                          {option.label}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.appointmentDateValue,
-                            selected && styles.appointmentDateTextActive,
-                          ]}
-                        >
-                          {option.value}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                        {appointmentDateOptions.map((option) => {
+                          const selected = selectedDateText === option.value;
 
-                <TouchableOpacity
-                  style={styles.primaryModalBtn}
-                  onPress={() => {
-                    if (!selectedDateText.trim()) {
-                      Alert.alert('날짜 선택', '날짜를 선택해 주세요.');
-                      return;
-                    }
-                    setAppointmentStep('time');
-                  }}
-                >
-                  <Text style={styles.primaryModalBtnText}>시간 선택하기</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.modalDesc}>
-                  선택한 날짜: {selectedDateText}
-                </Text>
+                          return (
+                            <TouchableOpacity
+                              key={option.value}
+                              style={[
+                                styles.appointmentDateBtn,
+                                selected && styles.appointmentDateBtnActive,
+                              ]}
+                              onPress={() => setSelectedDateText(option.value)}
+                            >
+                              <Text
+                                style={[
+                                  styles.appointmentDateLabel,
+                                  selected && styles.appointmentDateTextActive,
+                                ]}
+                              >
+                                {option.label}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.appointmentDateValue,
+                                  selected && styles.appointmentDateTextActive,
+                                ]}
+                              >
+                                {option.value}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
 
-                <ScrollView
-                  style={styles.appointmentTimeScroll}
-                  contentContainerStyle={styles.appointmentTimeOptions}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {appointmentTimeOptions.map((timeOption) => {
-                    const selected = selectedTimeText === timeOption;
-                    const disabled = isAppointmentTimeOptionDisabled(timeOption);
-
-                    return (
                       <TouchableOpacity
-                        key={timeOption}
-                        style={[
-                          styles.appointmentTimeBtn,
-                          selected && styles.appointmentTimeBtnActive,
-                          disabled && styles.appointmentTimeBtnDisabled,
-                        ]}
+                        style={styles.primaryModalBtn}
                         onPress={() => {
-                          if (disabled) return;
-                          setSelectedTimeText(timeOption);
+                          if (!selectedDateText.trim()) {
+                            Alert.alert('날짜 선택', '날짜를 선택해 주세요.');
+                            return;
+                          }
+                          setAppointmentStep('time');
                         }}
-                        disabled={disabled}
                       >
-                        <Text
-                          style={[
-                            styles.appointmentTimeText,
-                            selected && styles.appointmentTimeTextActive,
-                            disabled && styles.appointmentTimeTextDisabled,
-                          ]}
-                        >
-                          {timeOption}
+                        <Text style={styles.primaryModalBtnText}>시간 선택하기</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.modalDesc}>
+                        선택한 날짜: {selectedDateText}
+                      </Text>
+
+                      <ScrollView
+                        style={styles.appointmentTimeScroll}
+                        contentContainerStyle={styles.appointmentTimeOptions}
+                        showsVerticalScrollIndicator={false}
+                      >
+                        {appointmentTimeOptions.map((timeOption) => {
+                          const selected = selectedTimeText === timeOption;
+                          const disabled = isAppointmentTimeOptionDisabled(timeOption);
+
+                          return (
+                            <TouchableOpacity
+                              key={timeOption}
+                              style={[
+                                styles.appointmentTimeBtn,
+                                selected && styles.appointmentTimeBtnActive,
+                                disabled && styles.appointmentTimeBtnDisabled,
+                              ]}
+                              onPress={() => {
+                                if (disabled) return;
+                                setSelectedTimeText(timeOption);
+                              }}
+                              disabled={disabled}
+                            >
+                              <Text
+                                style={[
+                                  styles.appointmentTimeText,
+                                  selected && styles.appointmentTimeTextActive,
+                                  disabled && styles.appointmentTimeTextDisabled,
+                                ]}
+                              >
+                                {timeOption}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+
+                      <TouchableOpacity
+                        style={styles.primaryModalBtn}
+                        onPress={submitAppointment}
+                      >
+                        <Text style={styles.primaryModalBtnText}>
+                          {latestAppointmentDate ? '약속 변경 보내기' : '약속 보내기'}
                         </Text>
                       </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                    </>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.secondaryModalBtn}
+                    onPress={() => {
+                      if (appointmentStep === 'time') {
+                        setAppointmentStep('date');
+                        return;
+                      }
+                      setAppointmentModalOpen(false);
+                    }}
+                  >
+                    <Text style={styles.secondaryModalBtnText}>
+                      {appointmentStep === 'time' ? '날짜 다시 입력' : '취소'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+      <Modal visible={saleCompleteModalOpen} transparent animationType="fade">
+        <TouchableWithoutFeedback
+          onPress={closeSaleCompleteModal}
+        >
+          <View style={styles.centerModalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.formModalBox}>
+                <Text style={styles.modalTitle}>
+                  {isShareListing ? '나눔 수량 선택' : '판매 수량 선택'}
+                </Text>
+                <Text style={styles.modalDesc}>
+                  {isShareListing ? '나눔한' : '거래한'} 수량을 입력하면 남은 수량이 차감됩니다.
+                </Text>
+
+                <Text style={styles.stockSummaryText}>
+                  남은 수량 {listingQuantityInfo.remaining}개 / 전체 {listingQuantityInfo.total}개
+                </Text>
+
+                <TextInput
+                  style={styles.accountInput}
+                  placeholder="1"
+                  value={saleQuantityText}
+                  keyboardType="number-pad"
+                  onChangeText={(value) => {
+                    const onlyNumber = value.replace(/[^0-9]/g, '');
+                    setSaleQuantityText(onlyNumber);
+                  }}
+                />
 
                 <TouchableOpacity
-                  style={styles.primaryModalBtn}
-                  onPress={submitAppointment}
+                  style={[styles.primaryModalBtn, saleCompleting && styles.sendBtnDisabled]}
+                  onPress={completeSaleAndGoToReview}
+                  disabled={saleCompleting}
                 >
                   <Text style={styles.primaryModalBtnText}>
-                    {latestAppointmentDate ? '약속 변경 보내기' : '약속 보내기'}
+                    {saleCompleting
+                      ? '처리 중...'
+                      : `${isShareListing ? '나눔완료' : '거래완료'}하고 후기 남기기`}
                   </Text>
                 </TouchableOpacity>
-              </>
-            )}
 
-            <TouchableOpacity
-              style={styles.secondaryModalBtn}
-              onPress={() => {
-                if (appointmentStep === 'time') {
-                  setAppointmentStep('date');
-                  return;
-                }
-                setAppointmentModalOpen(false);
-              }}
-            >
-              <Text style={styles.secondaryModalBtnText}>
-                {appointmentStep === 'time' ? '날짜 다시 입력' : '취소'}
-              </Text>
-            </TouchableOpacity>
+                {reviewOnlySaleId ? (
+                  <TouchableOpacity
+                    style={styles.secondaryModalBtn}
+                    onPress={() => {
+                      if (saleCompleting || !pendingReviewTargetId) return;
+
+                      const reviewTargetId = pendingReviewTargetId;
+                      const saleId = reviewOnlySaleId;
+
+                      setSaleCompleteModalOpen(false);
+                      setPendingReviewTargetId(null);
+                      setReviewOnlySaleId(null);
+                      setSaleQuantityText('1');
+                      goToReviewCreate(reviewTargetId, saleId);
+                    }}
+                  >
+                    <Text style={styles.secondaryModalBtnText}>기존 거래 후기만 남기기</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  style={styles.secondaryModalBtn}
+                  onPress={closeSaleCompleteModal}
+                >
+                  <Text style={styles.secondaryModalBtnText}>취소</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </KeyboardAvoidingView>
-      </TouchableWithoutFeedback>
-    </View>
-  </TouchableWithoutFeedback>
-</Modal>
-<Modal visible={saleCompleteModalOpen} transparent animationType="fade">
-  <TouchableWithoutFeedback
-    onPress={closeSaleCompleteModal}
-  >
-    <View style={styles.centerModalOverlay}>
-      <TouchableWithoutFeedback>
-        <View style={styles.formModalBox}>
-          <Text style={styles.modalTitle}>
-            {isShareListing ? '나눔 수량 선택' : '판매 수량 선택'}
-          </Text>
-          <Text style={styles.modalDesc}>
-            {isShareListing ? '나눔한' : '거래한'} 수량을 입력하면 남은 수량이 차감됩니다.
-          </Text>
-
-          <Text style={styles.stockSummaryText}>
-            남은 수량 {listingQuantityInfo.remaining}개 / 전체 {listingQuantityInfo.total}개
-          </Text>
-
-          <TextInput
-            style={styles.accountInput}
-            placeholder="1"
-            value={saleQuantityText}
-            keyboardType="number-pad"
-            onChangeText={(value) => {
-              const onlyNumber = value.replace(/[^0-9]/g, '');
-              setSaleQuantityText(onlyNumber);
-            }}
-          />
-
-          <TouchableOpacity
-            style={[styles.primaryModalBtn, saleCompleting && styles.sendBtnDisabled]}
-            onPress={completeSaleAndGoToReview}
-            disabled={saleCompleting}
-          >
-            <Text style={styles.primaryModalBtnText}>
-              {saleCompleting
-                ? '처리 중...'
-                : `${isShareListing ? '나눔완료' : '거래완료'}하고 후기 남기기`}
-            </Text>
-          </TouchableOpacity>
-
-          {reviewOnlySaleId ? (
+        </TouchableWithoutFeedback>
+      </Modal>
+      <Modal
+        visible={imageViewerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeImageViewer}
+      >
+        <GestureHandlerRootView style={styles.imageViewerRoot}>
+          <View style={styles.imageViewerOverlay}>
             <TouchableOpacity
-              style={styles.secondaryModalBtn}
-              onPress={() => {
-                if (saleCompleting || !pendingReviewTargetId) return;
-
-                const reviewTargetId = pendingReviewTargetId;
-                const saleId = reviewOnlySaleId;
-
-                setSaleCompleteModalOpen(false);
-                setPendingReviewTargetId(null);
-                setReviewOnlySaleId(null);
-                setSaleQuantityText('1');
-                goToReviewCreate(reviewTargetId, saleId);
-              }}
+              style={styles.imageViewerBack}
+              onPress={closeImageViewer}
             >
-              <Text style={styles.secondaryModalBtnText}>기존 거래 후기만 남기기</Text>
+              <Ionicons name="chevron-back" size={32} color="#fff" />
             </TouchableOpacity>
-          ) : null}
 
-          <TouchableOpacity
-            style={styles.secondaryModalBtn}
-            onPress={closeSaleCompleteModal}
-          >
-            <Text style={styles.secondaryModalBtnText}>취소</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableWithoutFeedback>
-    </View>
-  </TouchableWithoutFeedback>
-</Modal>
-<Modal
-  visible={imageViewerOpen}
-  transparent
-  animationType="fade"
-  onRequestClose={closeImageViewer}
->
-  <GestureHandlerRootView style={styles.imageViewerRoot}>
-    <View style={styles.imageViewerOverlay}>
-      <TouchableOpacity
-        style={styles.imageViewerBack}
-        onPress={closeImageViewer}
-      >
-        <Ionicons name="chevron-back" size={32} color="#fff" />
-      </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.imageViewerClose}
+              onPress={closeImageViewer}
+            >
+              <Ionicons name="close" size={30} color="#fff" />
+            </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.imageViewerClose}
-        onPress={closeImageViewer}
-      >
-        <Ionicons name="close" size={30} color="#fff" />
-      </TouchableOpacity>
-
-      {Platform.OS === 'web' ? (
-        <FlatList
-          data={selectedImageUrls}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          keyExtractor={(item, index) => `${item}-${index}`}
-          getItemLayout={(_, index) => ({
-            length: SCREEN_WIDTH,
-            offset: SCREEN_WIDTH * index,
-            index,
-          })}
-          onMomentumScrollEnd={(e) => {
-            const width = e.nativeEvent.layoutMeasurement.width;
-            const index = Math.round(e.nativeEvent.contentOffset.x / width);
-            setSelectedImageIndex(index);
-          }}
-          renderItem={({ item }) => (
-            <View style={styles.fullImagePage}>
-              <Image
-                source={{ uri: item }}
-                style={styles.fullImage}
-                resizeMode="contain"
-                resizeMethod="resize"
-                onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
+            {Platform.OS === 'web' ? (
+              <FlatList
+                data={selectedImageUrls}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(item, index) => `${item}-${index}`}
+                getItemLayout={(_, index) => ({
+                  length: SCREEN_WIDTH,
+                  offset: SCREEN_WIDTH * index,
+                  index,
+                })}
+                onMomentumScrollEnd={(e) => {
+                  const width = e.nativeEvent.layoutMeasurement.width;
+                  const index = Math.round(e.nativeEvent.contentOffset.x / width);
+                  setSelectedImageIndex(index);
+                }}
+                renderItem={({ item }) => (
+                  <View style={styles.fullImagePage}>
+                    <Image
+                      source={{ uri: item }}
+                      style={styles.fullImage}
+                      resizeMode="contain"
+                      resizeMethod="resize"
+                      onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
+                    />
+                  </View>
+                )}
               />
-            </View>
-          )}
-        />
-      ) : selectedImageUrls[selectedImageIndex] ? (
-        <View style={styles.fullImagePage}>
-          <ZoomableChatImage
-            key={`${selectedImageUrls[selectedImageIndex]}-${selectedImageIndex}`}
-            uri={selectedImageUrls[selectedImageIndex]}
-            onClose={closeImageViewer}
-            onPrev={goPrevImage}
-            onNext={goNextImage}
-          />
-        </View>
-      ) : null}
+            ) : selectedImageUrls[selectedImageIndex] ? (
+              <View style={styles.fullImagePage}>
+                <ZoomableChatImage
+                  key={`${selectedImageUrls[selectedImageIndex]}-${selectedImageIndex}`}
+                  uri={selectedImageUrls[selectedImageIndex]}
+                  onClose={closeImageViewer}
+                  onPrev={goPrevImage}
+                  onNext={goNextImage}
+                />
+              </View>
+            ) : null}
 
-      {selectedImageUrls.length > 1 ? (
-        <Text style={styles.imageCountText}>
-          {selectedImageIndex + 1} / {selectedImageUrls.length}
-        </Text>
-      ) : null}
-    </View>
-  </GestureHandlerRootView>
-</Modal>
+            {selectedImageUrls.length > 1 ? (
+              <Text style={styles.imageCountText}>
+                {selectedImageIndex + 1} / {selectedImageUrls.length}
+              </Text>
+            ) : null}
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
       <Modal visible={accountModalOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setAccountModalOpen(false)}>
           <View
-  style={[
-    styles.modalOverlay,
-    {
-      paddingBottom:
-        Platform.OS === 'android'
-          ? Math.max(insets.bottom, 34)
-          : Math.max(insets.bottom, 16),
-    },
-  ]}
->
+            style={[
+              styles.modalOverlay,
+              {
+                paddingBottom:
+                  Platform.OS === 'android'
+                    ? Math.max(insets.bottom, 34)
+                    : Math.max(insets.bottom, 16),
+              },
+            ]}
+          >
             <TouchableWithoutFeedback>
               <View style={styles.formModalBox}>
                 <Text style={styles.modalTitle}>송금요청</Text>
@@ -2845,14 +2984,14 @@ const handleExitRoom = () => {
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={handleMute}>
                   <View style={styles.menuRow}>
-  <Text style={styles.menuText}>
-    {isMuted ? '알림 켜기' : '알림 끄기'}
-  </Text>
+                    <Text style={styles.menuText}>
+                      {isMuted ? '알림 켜기' : '알림 끄기'}
+                    </Text>
 
-  {isMuted ? (
-    <Ionicons name="notifications-off-outline" size={18} color="#6b7280" />
-  ) : null}
-</View>
+                    {isMuted ? (
+                      <Ionicons name="notifications-off-outline" size={18} color="#6b7280" />
+                    ) : null}
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={handleExitRoom}>
                   <Text style={[styles.menuText, styles.warnText]}>채팅방 나가기</Text>
@@ -2863,70 +3002,70 @@ const handleExitRoom = () => {
         </TouchableWithoutFeedback>
       </Modal>
       <Modal visible={reportModalOpen} transparent animationType="fade">
-  <TouchableWithoutFeedback onPress={() => setReportModalOpen(false)}>
-    <View style={styles.centerModalOverlay}>
-      <TouchableWithoutFeedback>
-        <View style={styles.formModalBox}>
-          <Text style={styles.modalTitle}>신고하기</Text>
-          
-          <Text style={styles.modalDesc}>
-            신고 항목을 선택하고 내용을 작성해 주세요.
-          </Text>
+        <TouchableWithoutFeedback onPress={() => setReportModalOpen(false)}>
+          <View style={styles.centerModalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.formModalBox}>
+                <Text style={styles.modalTitle}>신고하기</Text>
 
-          <Text style={styles.reportTargetText}>
-  신고 대상: {reportTargetName}
-</Text>
+                <Text style={styles.modalDesc}>
+                  신고 항목을 선택하고 내용을 작성해 주세요.
+                </Text>
 
-          <View style={styles.reportReasonWrap}>
-            {reportReasons.map((reason) => {
-              const selected = reportReason === reason;
+                <Text style={styles.reportTargetText}>
+                  신고 대상: {reportTargetName}
+                </Text>
 
-              return (
-                <TouchableOpacity
-                  key={reason}
-                  style={[
-                    styles.reportReasonBtn,
-                    selected && styles.reportReasonBtnActive,
-                  ]}
-                  onPress={() => setReportReason(reason)}
-                >
-                  <Text
-                    style={[
-                      styles.reportReasonText,
-                      selected && styles.reportReasonTextActive,
-                    ]}
-                  >
-                    {reason}
-                  </Text>
+                <View style={styles.reportReasonWrap}>
+                  {reportReasons.map((reason) => {
+                    const selected = reportReason === reason;
+
+                    return (
+                      <TouchableOpacity
+                        key={reason}
+                        style={[
+                          styles.reportReasonBtn,
+                          selected && styles.reportReasonBtnActive,
+                        ]}
+                        onPress={() => setReportReason(reason)}
+                      >
+                        <Text
+                          style={[
+                            styles.reportReasonText,
+                            selected && styles.reportReasonTextActive,
+                          ]}
+                        >
+                          {reason}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <TextInput
+                  style={styles.reportInput}
+                  placeholder="신고 내용을 자세히 적어주세요."
+                  value={reportContent}
+                  onChangeText={setReportContent}
+                  multiline
+                  textAlignVertical="top"
+                />
+
+                <TouchableOpacity style={styles.primaryModalBtn} onPress={submitReport}>
+                  <Text style={styles.primaryModalBtnText}>신고 접수하기</Text>
                 </TouchableOpacity>
-              );
-            })}
+
+                <TouchableOpacity
+                  style={styles.secondaryModalBtn}
+                  onPress={() => setReportModalOpen(false)}
+                >
+                  <Text style={styles.secondaryModalBtnText}>취소</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-
-          <TextInput
-            style={styles.reportInput}
-            placeholder="신고 내용을 자세히 적어주세요."
-            value={reportContent}
-            onChangeText={setReportContent}
-            multiline
-            textAlignVertical="top"
-          />
-
-          <TouchableOpacity style={styles.primaryModalBtn} onPress={submitReport}>
-            <Text style={styles.primaryModalBtnText}>신고 접수하기</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.secondaryModalBtn}
-            onPress={() => setReportModalOpen(false)}
-          >
-            <Text style={styles.secondaryModalBtnText}>취소</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableWithoutFeedback>
-    </View>
-  </TouchableWithoutFeedback>
-</Modal>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2945,11 +3084,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   reportTargetText: {
-  marginTop: 10,
-  fontSize: 14,
-  fontWeight: '800',
-  color: '#111827',
-},
+    marginTop: 10,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+  },
 
   headerCenter: {
     flex: 1,
@@ -2972,7 +3111,7 @@ const styles = StyleSheet.create({
     maxWidth: 180,
   },
 
-  
+
 
   headerRight: {
     flexDirection: 'row',
@@ -2980,120 +3119,120 @@ const styles = StyleSheet.create({
   },
 
   centerModalOverlay: {
-  flex: 1,
-  backgroundColor: 'rgba(0,0,0,0.18)',
-  justifyContent: 'center',
-  padding: 20,
-},
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'center',
+    padding: 20,
+  },
 
-mutedIconWrap: {
-  width: 32,
-  height: 40,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  mutedIconWrap: {
+    width: 32,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-menuRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-},
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 
-centerModalKeyboard: {
-  width: '100%',
-},
+  centerModalKeyboard: {
+    width: '100%',
+  },
 
-imageViewerOverlay: {
-  flex: 1,
-  backgroundColor: 'rgba(0,0,0,0.95)',
-},
+  imageViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+  },
 
-imageViewerRoot: {
-  flex: 1,
-},
+  imageViewerRoot: {
+    flex: 1,
+  },
 
-imageViewerClose: {
-  position: 'absolute',
-  top: 50,
-  right: 20,
-  zIndex: 10,
-},
+  imageViewerClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    zIndex: 10,
+  },
 
-imageViewerBack: {
-  position: 'absolute',
-  top: 50,
-  left: 16,
-  zIndex: 10,
-},
+  imageViewerBack: {
+    position: 'absolute',
+    top: 50,
+    left: 16,
+    zIndex: 10,
+  },
 
-fullImagePage: {
-  width: SCREEN_WIDTH,
-  height: SCREEN_HEIGHT,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  fullImagePage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-zoomGestureBox: {
-  width: SCREEN_WIDTH,
-  height: SCREEN_HEIGHT,
-  alignItems: 'center',
-  justifyContent: 'center',
-  overflow: 'hidden',
-},
+  zoomGestureBox: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
 
-reportReasonWrap: {
-  marginTop: 14,
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  gap: 8,
-},
+  reportReasonWrap: {
+    marginTop: 14,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
 
-reportReasonBtn: {
-  borderWidth: 1,
-  borderColor: '#e5e7eb',
-  borderRadius: 999,
-  paddingHorizontal: 12,
-  paddingVertical: 8,
-  backgroundColor: '#fff',
-},
+  reportReasonBtn: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
 
-reportReasonBtnActive: {
-  backgroundColor: '#111827',
-  borderColor: '#111827',
-},
+  reportReasonBtnActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
 
-reportReasonText: {
-  fontSize: 13,
-  fontWeight: '700',
-  color: '#374151',
-},
+  reportReasonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+  },
 
-reportReasonTextActive: {
-  color: '#fff',
-},
+  reportReasonTextActive: {
+    color: '#fff',
+  },
 
-reportInput: {
-  marginTop: 14,
-  minHeight: 110,
-  borderWidth: 1,
-  borderColor: '#d1d5db',
-  borderRadius: 12,
-  paddingHorizontal: 12,
-  paddingVertical: 12,
-  fontSize: 14,
-},
+  reportInput: {
+    marginTop: 14,
+    minHeight: 110,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 14,
+  },
 
-fullImage: {
-  width: SCREEN_WIDTH,
-  height: SCREEN_HEIGHT * 0.85,
-},
+  fullImage: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.85,
+  },
 
-centerFormModalBox: {
-  backgroundColor: '#fff',
-  borderRadius: 18,
-  padding: 18,
-  width: '100%',
-},
+  centerFormModalBox: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 18,
+    width: '100%',
+  },
 
   headerBtn: {
     width: 40,
@@ -3103,9 +3242,9 @@ centerFormModalBox: {
   },
 
   imageBubble: {
-  paddingHorizontal: 4,
-  paddingVertical: 4,
-},
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
 
   productCard: {
     flexDirection: 'row',
@@ -3119,62 +3258,74 @@ centerFormModalBox: {
   },
 
   imageGrid: {
-  width: 200,
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  gap: 4,
-},
+    width: 200,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
 
-singleImageGrid: {
-  width: 160,
-},
+  singleImageGrid: {
+    width: 160,
+  },
 
-singleImageWrap: {
-  width: 160,
-  height: 160,
-},
+  singleImageWrap: {
+    width: 160,
+    height: 160,
+  },
 
-gridImageWrap: {
-  width: 98,
-  height: 98,
-  borderRadius: 10,
-  overflow: 'hidden',
-  backgroundColor: '#e5e7eb',
-},
+  gridImageWrap: {
+    width: 98,
+    height: 98,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#e5e7eb',
+  },
 
-gridImage: {
-  width: '100%',
-  height: '100%',
-},
+  gridImage: {
+    width: '100%',
+    height: '100%',
+  },
 
-moreImageOverlay: {
-  position: 'absolute',
-  left: 0,
-  right: 0,
-  top: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.45)',
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  linkText: {
+    color: '#2563eb',
+    textDecorationLine: 'underline',
+    fontWeight: '800',
+  },
 
-moreImageText: {
-  color: '#fff',
-  fontSize: 22,
-  fontWeight: '900',
-},
+  myLinkText: {
+    color: '#dbeafe',
+    textDecorationLine: 'underline',
+    fontWeight: '800',
+  },
+
+  moreImageOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  moreImageText: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '900',
+  },
 
 
 
 
-imageCountText: {
-  position: 'absolute',
-  bottom: 40,
-  alignSelf: 'center',
-  color: '#fff',
-  fontSize: 14,
-  fontWeight: '800',
-},
+  imageCountText: {
+    position: 'absolute',
+    bottom: 40,
+    alignSelf: 'center',
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
 
 
 
@@ -3376,15 +3527,15 @@ imageCountText: {
 
   inputRow: {
 
-  flexDirection: 'row',
-  gap: 8,
-  paddingHorizontal: 12,
-  paddingTop: 10,
-  borderTopWidth: 1,
-  borderTopColor: '#e5e7eb',
-  backgroundColor: '#fff',
-  alignItems: 'flex-end',
-},
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    alignItems: 'flex-end',
+  },
 
   plusBtn: {
     width: 42,
@@ -3428,20 +3579,20 @@ imageCountText: {
   },
 
   modalOverlay: {
-  flex: 1,
-  backgroundColor: 'rgba(0,0,0,0.18)',
-  justifyContent: 'flex-end',
-  paddingHorizontal: 16,
-  paddingTop: 16,
-  paddingBottom: Platform.OS === 'android' ? 34 : 16,
-},
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'android' ? 34 : 16,
+  },
 
   bottomMenuBox: {
-  backgroundColor: '#fff',
-  borderRadius: 18,
-  paddingVertical: 8,
-  marginBottom: Platform.OS === 'android' ? 36 : 0,
-},
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingVertical: 8,
+    marginBottom: Platform.OS === 'android' ? 36 : 0,
+  },
 
   formModalBox: {
     backgroundColor: '#fff',

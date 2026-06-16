@@ -75,17 +75,33 @@ const [regionMessage, setRegionMessage] = useState('');
     const { data: authData } = await supabase.auth.getUser();
     const currentUserId = authData.user?.id;
     let blockedIds = new Set<string>();
+    let hiddenListingIds = new Set<number>();
 
     if (currentUserId) {
-      const { data: blockRows, error: blockError } = await supabase
-        .from('user_blocks')
-        .select('blocked_id')
-        .eq('blocker_id', currentUserId);
+      const [blockResult, hiddenResult] = await Promise.all([
+        supabase
+          .from('user_blocks')
+          .select('blocked_id')
+          .eq('blocker_id', currentUserId),
+        supabase
+          .from('hidden_listings')
+          .select('listing_id')
+          .eq('user_id', currentUserId),
+      ]);
+
+      const { data: blockRows, error: blockError } = blockResult;
+      const { data: hiddenRows, error: hiddenError } = hiddenResult;
 
       if (blockError) {
         console.log('홈 차단 목록 조회 실패:', blockError);
       } else {
         blockedIds = new Set((blockRows || []).map((row: any) => row.blocked_id));
+      }
+
+      if (hiddenError) {
+        console.log('홈 숨김 게시글 조회 실패:', hiddenError);
+      } else {
+        hiddenListingIds = new Set((hiddenRows || []).map((row: any) => Number(row.listing_id)));
       }
     }
 
@@ -112,6 +128,7 @@ const [regionMessage, setRegionMessage] = useState('');
     if (!error && data) {
       const mapped = (data as any[])
         .filter((item) => !blockedIds.has(item.author_id))
+        .filter((item) => !hiddenListingIds.has(Number(item.id)))
         .map((item) => ({
           ...item,
           favorites_count: item.favorites_count ?? 0,

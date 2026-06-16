@@ -19,6 +19,8 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
 import { supabase } from '../../../../lib/supabase';
 
+type ListingFilter = 'all' | 'selling' | 'done';
+
 function showProfileAlert(title: string, message = '') {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.alert(message ? `${title}\n${message}` : title);
@@ -54,6 +56,13 @@ export default function UserProfileScreen() {
 
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [listingStats, setListingStats] = useState({
+    total: 0,
+    selling: 0,
+    done: 0,
+  });
+  const [selectedListingFilter, setSelectedListingFilter] =
+    useState<ListingFilter>('all');
 
   useEffect(() => {
     if (!userId) return;
@@ -77,22 +86,40 @@ export default function UserProfileScreen() {
   
 
   const fetchUserListings = async () => {
-    const { data, error } = await supabase
-      .from('listings')
-      .select(`
-        *,
-        listing_images (
-          id,
-          image_path,
-          sort_order
-        )
-      `)
-      .eq('author_id', userId)
-      .eq('status', 'active')
-      .order('created_at', { ascending: false });
+    const [listingResult, statsResult] = await Promise.all([
+      supabase
+        .from('listings')
+        .select(`
+          *,
+          listing_images (
+            id,
+            image_path,
+            sort_order
+          )
+        `)
+        .eq('author_id', userId)
+        .in('status', ['active', 'reserved', 'done'])
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('listings')
+        .select('id, status')
+        .eq('author_id', userId)
+        .in('status', ['active', 'reserved', 'done']),
+    ]);
 
-    if (!error && data) {
-      setItems(data);
+    if (!listingResult.error && listingResult.data) {
+      setItems(listingResult.data);
+    }
+
+    if (!statsResult.error && statsResult.data) {
+      const statsRows = statsResult.data || [];
+
+      setListingStats({
+        total: statsRows.length,
+        selling: statsRows.filter((item: any) => item.status === 'active' || item.status === 'reserved')
+          .length,
+        done: statsRows.filter((item: any) => item.status === 'done').length,
+      });
     }
   };
 
@@ -131,6 +158,28 @@ export default function UserProfileScreen() {
     !!profile?.is_phone_public &&
     !!profile?.phone;
   const isMyProfile = user?.id === userId;
+
+  const filteredItems = items.filter((item) => {
+    if (selectedListingFilter === 'all') return true;
+    if (selectedListingFilter === 'selling') {
+      return item.status === 'active' || item.status === 'reserved';
+    }
+    if (selectedListingFilter === 'done') return item.status === 'done';
+    return true;
+  });
+
+  const sectionTitle =
+    selectedListingFilter === 'selling'
+      ? '판매중인 물건'
+      : selectedListingFilter === 'done'
+      ? '거래완료된 물건'
+      : '전체 물건';
+
+  const getListingStatusLabel = (status?: string | null) => {
+    if (status === 'reserved') return '예약중';
+    if (status === 'done') return '거래완료';
+    return '판매중';
+  };
 
   const handleCall = async () => {
   if (!canCallStore) return;
@@ -286,13 +335,98 @@ export default function UserProfileScreen() {
     </Text>
   </View>
 </View>
+
+        <View style={styles.listingStatsRow}>
+          <TouchableOpacity
+            style={[
+              styles.listingStatBox,
+              selectedListingFilter === 'all' && styles.listingStatBoxActive,
+            ]}
+            onPress={() => setSelectedListingFilter('all')}
+          >
+            <Text
+              style={[
+                styles.listingStatValue,
+                selectedListingFilter === 'all' && styles.listingStatValueActive,
+              ]}
+            >
+              {listingStats.total}
+            </Text>
+            <Text
+              style={[
+                styles.listingStatLabel,
+                selectedListingFilter === 'all' && styles.listingStatLabelActive,
+              ]}
+            >
+              전체 물품
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.listingStatDivider} />
+
+          <TouchableOpacity
+            style={[
+              styles.listingStatBox,
+              selectedListingFilter === 'selling' && styles.listingStatBoxActive,
+            ]}
+            onPress={() => setSelectedListingFilter('selling')}
+          >
+            <Text
+              style={[
+                styles.listingStatValue,
+                selectedListingFilter === 'selling' && styles.listingStatValueActive,
+              ]}
+            >
+              {listingStats.selling}
+            </Text>
+            <Text
+              style={[
+                styles.listingStatLabel,
+                selectedListingFilter === 'selling' && styles.listingStatLabelActive,
+              ]}
+            >
+              판매중
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.listingStatDivider} />
+
+          <TouchableOpacity
+            style={[
+              styles.listingStatBox,
+              selectedListingFilter === 'done' && styles.listingStatBoxActive,
+            ]}
+            onPress={() => setSelectedListingFilter('done')}
+          >
+            <Text
+              style={[
+                styles.listingStatValue,
+                selectedListingFilter === 'done' && styles.listingStatValueActive,
+              ]}
+            >
+              {listingStats.done}
+            </Text>
+            <Text
+              style={[
+                styles.listingStatLabel,
+                selectedListingFilter === 'done' && styles.listingStatLabelActive,
+              ]}
+            >
+              거래완료
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>판매 중인 물건</Text>
+        <Text style={styles.sectionTitle}>{sectionTitle}</Text>
 
         <View style={styles.list}>
-          {items.map((item) => {
+          {filteredItems.length === 0 ? (
+            <Text style={styles.emptyText}>해당 상태의 물품이 없습니다.</Text>
+          ) : null}
+
+          {filteredItems.map((item) => {
             const imagePath = item.listing_images?.[0]?.image_path;
             const imageUrl = imagePath
               ? supabase.storage.from('listing-images').getPublicUrl(imagePath).data.publicUrl
@@ -318,6 +452,7 @@ export default function UserProfileScreen() {
                   <Text style={styles.itemTitle} numberOfLines={2}>
                     {item.title}
                   </Text>
+                  <Text style={styles.itemStatus}>{getListingStatusLabel(item.status)}</Text>
                   <Text style={styles.itemMeta} numberOfLines={1}>
                     {item.region || ''}
                   </Text>
@@ -471,6 +606,13 @@ const styles = StyleSheet.create({
   list: {
     gap: 12,
   },
+  emptyText: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingVertical: 18,
+  },
   itemCard: {
     flexDirection: 'row',
     gap: 12,
@@ -505,6 +647,52 @@ statText: {
   color: '#374151',
 },
 
+  listingStatsRow: {
+    width: '100%',
+    marginTop: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  listingStatBox: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 10,
+    paddingVertical: 8,
+  },
+
+  listingStatBoxActive: {
+    backgroundColor: '#111827',
+  },
+
+  listingStatValue: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+
+  listingStatValueActive: {
+    color: '#fff',
+  },
+
+  listingStatLabel: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  listingStatLabelActive: {
+    color: '#fff',
+  },
+
+  listingStatDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: '#e5e7eb',
+  },
+
   thumbWrap: {
     width: 88,
     height: 88,
@@ -535,6 +723,17 @@ statText: {
   itemMeta: {
     color: '#6b7280',
     fontSize: 13,
+  },
+  itemStatus: {
+    alignSelf: 'flex-start',
+    color: '#2563eb',
+    backgroundColor: '#dbeafe',
+    borderRadius: 8,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 12,
+    fontWeight: '900',
   },
   itemPrice: {
     fontSize: 14,

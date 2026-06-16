@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { canStartChat } from './guard';
 
 async function ensureRoomMembers(roomId: string, me: string, sellerId: string) {
   const { error } = await supabase
@@ -35,30 +36,20 @@ export async function getOrCreateRoom(
     throw new Error('내 글에는 채팅할 수 없습니다.');
   }
 
-  const [profileResult, existingRoomResult] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('status, can_start_chat')
-      .eq('id', me)
-      .single(),
-    supabase
-      .from('chat_rooms')
-      .select('id')
-      .eq('listing_id', listingId)
-      .eq('created_by', me)
-      .maybeSingle(),
-  ]);
+  const guard = await canStartChat();
 
-  const { data: profile, error: profileError } = profileResult;
-  const { data: existingRoom, error: existingError } = existingRoomResult;
+  if (!guard.ok) {
+    throw new Error(guard.reason || '채팅 이용이 제한된 계정입니다.');
+  }
 
-  if (profileError) throw profileError;
+  const { data: existingRoom, error: existingError } = await supabase
+    .from('chat_rooms')
+    .select('id')
+    .eq('listing_id', listingId)
+    .eq('created_by', me)
+    .maybeSingle();
 
   if (existingError) throw existingError;
-
-  if (profile?.status === 'suspended' || profile?.can_start_chat === false) {
-    throw new Error('신고 누적으로 채팅 이용이 제한된 계정입니다.');
-  }
 
   if (existingRoom?.id) {
     ensureRoomMembers(existingRoom.id, me, sellerId).catch((error) => {
@@ -89,6 +80,12 @@ export async function sendMessage(roomId: string, message: string) {
 
   if (!senderId) {
     throw new Error('로그인이 필요합니다.');
+  }
+
+  const guard = await canStartChat();
+
+  if (!guard.ok) {
+    throw new Error(guard.reason || '채팅 이용이 제한된 계정입니다.');
   }
 
   const { error } = await supabase.from('chat_messages').insert({

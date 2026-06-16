@@ -1,9 +1,11 @@
 import type { User } from '@supabase/supabase-js';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import * as Crypto from 'expo-crypto';
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Platform,
   ScrollView,
@@ -19,6 +21,33 @@ WebBrowser.maybeCompleteAuthSession();
 
 type UserType = 'store' | 'personal';
 type AuthMode = 'login' | 'signup';
+type OAuthProvider = 'kakao' | 'apple' | 'custom:naver';
+type ExistingProfile = {
+  id: string;
+  status: string | null;
+  deletion_requested_at: string | null;
+  deletion_scheduled_at: string | null;
+};
+
+const socialProviderLabel: Record<OAuthProvider, string> = {
+  kakao: '카카오',
+  apple: 'Apple',
+  'custom:naver': '네이버',
+};
+
+function formatDeletionDate(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return date.toLocaleString('ko-KR', {
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export default function LoginScreen() {
   const { redirect } = useLocalSearchParams<{ redirect?: string }>();
@@ -38,8 +67,27 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [profileSetupRequired, setProfileSetupRequired] = useState(false);
+  const [deletionPendingProfile, setDeletionPendingProfile] =
+    useState<ExistingProfile | null>(null);
+  const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
 
   const showProfileFields = authMode === 'signup' || profileSetupRequired;
+
+  useEffect(() => {
+    let mounted = true;
+
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (mounted) setIsAppleSignInAvailable(available);
+      })
+      .catch(() => {
+        if (mounted) setIsAppleSignInAvailable(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const goNext = () => {
     if (typeof redirect === 'string' && redirect.length > 0) {
@@ -56,6 +104,14 @@ export default function LoginScreen() {
 
     if (errorCode) {
       throw new Error(errorCode);
+    }
+
+    const code = (params as any)?.code;
+
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(String(code));
+      if (error) throw error;
+      return;
     }
 
     let access_token = (params as any)?.access_token;
@@ -89,16 +145,32 @@ export default function LoginScreen() {
     return data.user;
   };
 
+  const getOAuthRedirectTo = () =>
+    Platform.OS === 'web'
+      ? Linking.createURL('/auth/callback')
+      : 'interiormarket://auth/callback';
+
+  const getAppleNonce = async () => {
+    const rawBytes = Crypto.getRandomBytes(32);
+    const rawNonce = Array.from(rawBytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce
+    );
+
+    return { rawNonce, hashedNonce };
+  };
+
   const fetchExistingProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, status, deletion_requested_at, deletion_scheduled_at')
       .eq('id', userId)
       .maybeSingle();
 
     if (error) throw error;
 
-    return data;
+    return data as ExistingProfile | null;
   };
 
   const getFormProfileInput = () => ({
@@ -174,6 +246,14 @@ export default function LoginScreen() {
     const existingProfile = await fetchExistingProfile(currentUser.id);
 
     if (existingProfile) {
+      if (existingProfile.status === 'deletion_pending') {
+        setProfileSetupRequired(false);
+        setDeletionPendingProfile(existingProfile);
+        setMessage('탈퇴 대기 중인 계정입니다. 복구하려면 아래 버튼을 눌러 주세요.');
+        return false;
+      }
+
+      setDeletionPendingProfile(null);
       setProfileSetupRequired(false);
       return true;
     }
@@ -187,6 +267,7 @@ export default function LoginScreen() {
       formProfileInput.phone
     ) {
       await saveProfile(formProfileInput, currentUser);
+      setDeletionPendingProfile(null);
       setProfileSetupRequired(false);
       return true;
     }
@@ -195,10 +276,12 @@ export default function LoginScreen() {
 
     if (metadataProfileInput) {
       await saveProfile(metadataProfileInput, currentUser);
+      setDeletionPendingProfile(null);
       setProfileSetupRequired(false);
       return true;
     }
 
+    setDeletionPendingProfile(null);
     setProfileSetupRequired(true);
     setMessage('처음 로그인이라 프로필 정보가 필요합니다. 닉네임과 전화번호를 입력해 주세요.');
     return false;
@@ -218,6 +301,7 @@ export default function LoginScreen() {
         await saveProfile(getFormProfileInput(), currentUser);
       }
 
+      setDeletionPendingProfile(null);
       setProfileSetupRequired(false);
       goNext();
     } catch (e: any) {
@@ -227,22 +311,20 @@ export default function LoginScreen() {
     }
   };
 
-  const handleKakaoLogin = async () => {
+  const runOAuthLogin = async (provider: OAuthProvider) => {
     if (authMode === 'signup' && !validateProfileInput()) return;
 
     try {
       setLoading(true);
       setMessage('');
+      setDeletionPendingProfile(null);
 
-      const redirectTo =
-  Platform.OS === 'web'
-    ? Linking.createURL('/auth/callback')
-    : 'interiormarket://auth/callback';
+      const redirectTo = getOAuthRedirectTo();
 
       console.log('redirectTo:', redirectTo);
 
       const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'kakao',
+        provider,
         options: {
           redirectTo,
           skipBrowserRedirect: true,
@@ -250,13 +332,15 @@ export default function LoginScreen() {
       });
 
       if (error) throw error;
-      if (!data?.url) throw new Error('카카오 로그인 URL을 받지 못했습니다.');
+      if (!data?.url) {
+        throw new Error(`${socialProviderLabel[provider]} 로그인 URL을 받지 못했습니다.`);
+      }
 
       const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
       console.log('auth result:', result);
 
       if (result.type !== 'success') {
-        setMessage('카카오 로그인이 완료되지 않았습니다.');
+        setMessage(`${socialProviderLabel[provider]} 로그인이 완료되지 않았습니다.`);
         return;
       }
 
@@ -267,8 +351,64 @@ export default function LoginScreen() {
         goNext();
       }
     } catch (e: any) {
-      console.log('카카오 로그인 오류:', e);
-      setMessage(e?.message || '카카오 로그인 중 오류가 발생했습니다.');
+      console.log(`${socialProviderLabel[provider]} 로그인 오류:`, e);
+      setMessage(e?.message || `${socialProviderLabel[provider]} 로그인 중 오류가 발생했습니다.`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKakaoLogin = () => runOAuthLogin('kakao');
+
+  // const handleNaverLogin = () => runOAuthLogin('custom:naver');
+
+  const handleAppleLogin = async () => {
+    if (authMode === 'signup' && !validateProfileInput()) return;
+
+    if (Platform.OS !== 'ios' || !isAppleSignInAvailable) {
+      await runOAuthLogin('apple');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage('');
+      setDeletionPendingProfile(null);
+
+      const { rawNonce, hashedNonce } = await getAppleNonce();
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+
+      if (!credential.identityToken) {
+        throw new Error('Apple 로그인 토큰을 받지 못했습니다.');
+      }
+
+      const { error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: credential.identityToken,
+        nonce: rawNonce,
+      });
+
+      if (error) throw error;
+
+      const profileReady = await ensureProfileAfterLogin();
+
+      if (profileReady) {
+        goNext();
+      }
+    } catch (e: any) {
+      console.log('Apple 로그인 오류:', e);
+
+      if (e?.code === 'ERR_REQUEST_CANCELED') {
+        setMessage('Apple 로그인이 취소되었습니다.');
+      } else {
+        setMessage(e?.message || 'Apple 로그인 중 오류가 발생했습니다.');
+      }
     } finally {
       setLoading(false);
     }
@@ -289,6 +429,8 @@ export default function LoginScreen() {
 
     try {
       setLoading(true);
+      setMessage('');
+      setDeletionPendingProfile(null);
 
       if (authMode === 'signup') {
         const { data, error } = await supabase.auth.signUp({
@@ -305,6 +447,13 @@ export default function LoginScreen() {
         });
 
         if (error) throw error;
+
+        if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          setMessage(
+            '이미 가입되었거나 탈퇴 대기 중인 이메일입니다. 기존 계정으로 로그인해 복구하거나 3일 후 다시 시도해 주세요.'
+          );
+          return;
+        }
 
         if (data.session) {
           const profileReady = await ensureProfileAfterLogin();
@@ -333,37 +482,114 @@ export default function LoginScreen() {
         goNext();
       }
     } catch (e: any) {
-      setMessage(e?.message || '이메일 로그인 중 오류가 발생했습니다.');
+      const errorMessage = e?.message || '이메일 로그인 중 오류가 발생했습니다.';
+
+      if (
+        authMode === 'signup' &&
+        (errorMessage.includes('already') || errorMessage.includes('registered'))
+      ) {
+        setMessage(
+          '이미 가입되었거나 탈퇴 대기 중인 이메일입니다. 기존 계정으로 로그인해 복구하거나 3일 후 다시 시도해 주세요.'
+        );
+      } else {
+        setMessage(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const cancelAccountDeletion = async () => {
+    if (loading) return;
+
+    try {
+      setLoading(true);
+      setMessage('');
+
+      const { error } = await supabase.rpc('cancel_current_user_deletion');
+
+      if (error) {
+        setMessage(
+          error.message.includes('grace period')
+            ? '탈퇴 취소 가능 기간이 지나 복구할 수 없습니다.'
+            : error.message
+        );
+        return;
+      }
+
+      setDeletionPendingProfile(null);
+      goNext();
+    } catch (e: any) {
+      setMessage(e?.message || '탈퇴 취소 중 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signOutPendingAccount = async () => {
+    await supabase.auth.signOut();
+    setDeletionPendingProfile(null);
+    setProfileSetupRequired(false);
+    setMessage('');
   };
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title}>로그인 / 회원가입</Text>
 
-      <View style={styles.modeRow}>
-        <TouchableOpacity
-          style={[styles.modeBtn, authMode === 'login' && styles.modeBtnActive]}
-          onPress={() => setAuthMode('login')}
-        >
-          <Text style={[styles.modeText, authMode === 'login' && styles.modeTextActive]}>
-            이메일 로그인
+      {deletionPendingProfile ? (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>탈퇴 진행 중입니다</Text>
+          <Text style={styles.pendingText}>
+            탈퇴 대기 중에는 채팅, 게시글 작성 등 서비스 이용이 제한됩니다.
+            탈퇴 요청 후 3일 동안은 계정을 복구할 수 있습니다.
           </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.modeBtn, authMode === 'signup' && styles.modeBtnActive]}
-          onPress={() => setAuthMode('signup')}
-        >
-          <Text style={[styles.modeText, authMode === 'signup' && styles.modeTextActive]}>
-            이메일 회원가입
+          <Text style={styles.pendingDate}>
+            복구 가능 기한:{' '}
+            {formatDeletionDate(deletionPendingProfile.deletion_scheduled_at) || '확인 필요'}
           </Text>
-        </TouchableOpacity>
-      </View>
 
-      {showProfileFields ? (
+          <TouchableOpacity
+            style={[styles.darkBtn, loading && styles.disabledBtn]}
+            onPress={cancelAccountDeletion}
+            disabled={loading}
+          >
+            <Text style={styles.darkBtnText}>
+              {loading ? '처리 중...' : '탈퇴 취소'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.outlineBtn}
+            onPress={signOutPendingAccount}
+            disabled={loading}
+          >
+            <Text style={styles.outlineBtnText}>확인</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          <View style={styles.modeRow}>
+            <TouchableOpacity
+              style={[styles.modeBtn, authMode === 'login' && styles.modeBtnActive]}
+              onPress={() => setAuthMode('login')}
+            >
+              <Text style={[styles.modeText, authMode === 'login' && styles.modeTextActive]}>
+                이메일 로그인
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modeBtn, authMode === 'signup' && styles.modeBtnActive]}
+              onPress={() => setAuthMode('signup')}
+            >
+              <Text style={[styles.modeText, authMode === 'signup' && styles.modeTextActive]}>
+                이메일 회원가입
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {showProfileFields ? (
         <>
           <View style={styles.row}>
             <TouchableOpacity
@@ -414,49 +640,91 @@ export default function LoginScreen() {
             keyboardType="phone-pad"
           />
         </>
-      ) : null}
+          ) : null}
 
-      {profileSetupRequired ? (
-        <TouchableOpacity style={styles.darkBtn} onPress={completeProfileSetup} disabled={loading}>
-          <Text style={styles.darkBtnText}>
-            {loading ? '처리 중...' : '프로필 저장하고 시작하기'}
-          </Text>
-        </TouchableOpacity>
-      ) : (
-        <>
-          <TouchableOpacity style={styles.kakaoBtn} onPress={handleKakaoLogin} disabled={loading}>
-            <Text style={styles.kakaoText}>{loading ? '처리 중...' : '카카오로 시작하기'}</Text>
-          </TouchableOpacity>
+          {profileSetupRequired ? (
+            <TouchableOpacity style={styles.darkBtn} onPress={completeProfileSetup} disabled={loading}>
+              <Text style={styles.darkBtnText}>
+                {loading ? '처리 중...' : '프로필 저장하고 시작하기'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.kakaoBtn, loading && styles.disabledBtn]}
+                onPress={handleKakaoLogin}
+                disabled={loading}
+              >
+                <Text style={styles.kakaoText}>
+                  {loading ? '처리 중...' : '카카오계정으로 로그인'}
+                </Text>
+              </TouchableOpacity>
 
-          <View style={styles.divider} />
+              {Platform.OS === 'ios' && isAppleSignInAvailable ? (
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={
+                    authMode === 'signup'
+                      ? AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP
+                      : AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN
+                  }
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                  cornerRadius={14}
+                  style={[styles.appleNativeBtn, loading && styles.disabledNativeBtn]}
+                  onPress={loading ? () => {} : handleAppleLogin}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={[styles.appleBtn, loading && styles.disabledBtn]}
+                  onPress={handleAppleLogin}
+                  disabled={loading}
+                >
+                  <Text style={styles.appleText}>
+                    {loading ? '처리 중...' : 'Apple로 로그인'}
+                  </Text>
+                </TouchableOpacity>
+              )}
 
-          <TextInput
-            style={styles.input}
-            placeholder="이메일"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+              {/* <TouchableOpacity
+                style={[styles.naverBtn, loading && styles.disabledBtn]}
+                onPress={handleNaverLogin}
+                disabled={loading}
+              >
+                <Text style={styles.naverText}>
+                  {loading ? '처리 중...' : '네이버로 로그인'}
+                </Text>
+              </TouchableOpacity> */}
 
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-          />
+              <View style={styles.divider} />
 
-          <TouchableOpacity style={styles.darkBtn} onPress={handleEmailAuth} disabled={loading}>
-            <Text style={styles.darkBtnText}>
-              {loading
-                ? '처리 중...'
-                : authMode === 'signup'
-                ? '이메일로 회원가입'
-                : '이메일로 로그인'}
-            </Text>
-          </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                placeholder="이메일"
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              <TextInput
+                style={styles.input}
+                placeholder="비밀번호"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                autoCapitalize="none"
+              />
+
+              <TouchableOpacity style={styles.darkBtn} onPress={handleEmailAuth} disabled={loading}>
+                <Text style={styles.darkBtnText}>
+                  {loading
+                    ? '처리 중...'
+                    : authMode === 'signup'
+                    ? '이메일로 회원가입'
+                    : '이메일로 로그인'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
         </>
       )}
 
@@ -518,6 +786,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   kakaoText: { color: '#191919', fontWeight: '800' },
+  appleNativeBtn: {
+    width: '100%',
+    height: 50,
+  },
+  appleBtn: {
+    backgroundColor: '#000',
+    borderRadius: 14,
+    padding: 15,
+    alignItems: 'center',
+  },
+  appleText: { color: '#fff', fontWeight: '800' },
+  naverBtn: {
+    backgroundColor: '#03c75a',
+    borderRadius: 14,
+    padding: 15,
+    alignItems: 'center',
+  },
+  naverText: { color: '#fff', fontWeight: '800' },
 
   divider: {
     height: 1,
@@ -532,6 +818,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   darkBtnText: { color: '#fff', fontWeight: '800' },
+  disabledBtn: {
+    opacity: 0.65,
+  },
+  disabledNativeBtn: {
+    opacity: 0.65,
+  },
+  outlineBtn: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 14,
+    padding: 15,
+    alignItems: 'center',
+  },
+  outlineBtnText: {
+    color: '#374151',
+    fontWeight: '800',
+  },
+  pendingBox: {
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: '#fff7f7',
+    gap: 12,
+  },
+  pendingTitle: {
+    color: '#991b1b',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  pendingText: {
+    color: '#7f1d1d',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  pendingDate: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '800',
+  },
 
   message: {
     color: '#dc2626',

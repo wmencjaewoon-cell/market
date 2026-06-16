@@ -53,6 +53,9 @@ type AdminListing = {
   status: string | null;
   author_id: string;
   created_at: string;
+  admin_deleted_at: string | null;
+  admin_delete_scheduled_at: string | null;
+  admin_delete_previous_status: string | null;
   profiles?:
     | {
         display_name: string | null;
@@ -90,6 +93,52 @@ async function confirmAdminAction(title: string, message: string) {
 function getListingAuthorText(item: AdminListing) {
   const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
   return profile?.display_name || profile?.email || item.author_id;
+}
+
+function isUserRestricted(item: AdminUser) {
+  return (
+    item.status === 'suspended' ||
+    item.status === 'blocked' ||
+    item.can_start_chat === false ||
+    item.can_create_listing === false
+  );
+}
+
+function isDeletionPendingUser(item: AdminUser) {
+  return item.status === 'deletion_pending';
+}
+
+function getUserStatusLabel(item: AdminUser) {
+  if (isDeletionPendingUser(item)) return '탈퇴 대기';
+  if (isUserRestricted(item)) return '이용 제한';
+  return '정상';
+}
+
+function formatAdminDate(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return date.toLocaleString('ko-KR', {
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function isListingHidden(item: AdminListing) {
+  return item.status === 'hidden';
+}
+
+function isListingDeletePending(item: AdminListing) {
+  return item.status === 'delete_pending';
+}
+
+function canCancelListingDelete(item: AdminListing) {
+  if (!isListingDeletePending(item) || !item.admin_delete_scheduled_at) return false;
+  return new Date(item.admin_delete_scheduled_at).getTime() > Date.now();
 }
 
 export default function AdminScreen() {
@@ -136,6 +185,9 @@ export default function AdminScreen() {
           status,
           author_id,
           created_at,
+          admin_deleted_at,
+          admin_delete_scheduled_at,
+          admin_delete_previous_status,
           profiles!listings_author_id_fkey (
             display_name,
             email
@@ -289,12 +341,18 @@ export default function AdminScreen() {
   };
 
   const toggleUserSuspended = async (item: AdminUser) => {
-    const nextStatus = item.status === 'suspended' ? 'active' : 'suspended';
+    if (isDeletionPendingUser(item)) {
+      showAdminAlert('사용자 상태 변경', '탈퇴 대기 중인 계정은 이 화면에서 이용제한을 변경할 수 없습니다.');
+      return;
+    }
+
+    const restricted = isUserRestricted(item);
+    const nextStatus = restricted ? 'active' : 'suspended';
     const enabled = nextStatus === 'active';
     const ok = await confirmAdminAction(
-      nextStatus === 'active' ? '사용자 제한 해제' : '사용자 이용 제한',
+      nextStatus === 'active' ? '이용제한 취소' : '사용자 이용 제한',
       `${item.display_name || item.email || item.id} 계정을 ${
-        nextStatus === 'active' ? '정상 상태로 변경할까요?' : '이용 제한할까요?'
+        nextStatus === 'active' ? '정상 상태로 되돌릴까요?' : '이용 제한할까요?'
       }`
     );
 
@@ -316,10 +374,15 @@ export default function AdminScreen() {
   };
 
   const toggleListingHidden = async (item: AdminListing) => {
-    const nextStatus = item.status === 'hidden' ? 'active' : 'hidden';
+    if (isListingDeletePending(item)) {
+      showAdminAlert('게시글 숨김', '삭제 대기 중인 게시글은 숨김 상태를 변경할 수 없습니다.');
+      return;
+    }
+
+    const nextStatus = isListingHidden(item) ? 'active' : 'hidden';
     const ok = await confirmAdminAction(
-      nextStatus === 'hidden' ? '게시글 숨김' : '게시글 복구',
-      `"${item.title}" 게시글을 ${nextStatus === 'hidden' ? '숨길까요?' : '판매중으로 복구할까요?'}`
+      nextStatus === 'hidden' ? '게시글 숨김' : '숨김 취소',
+      `"${item.title}" 게시글을 ${nextStatus === 'hidden' ? '숨길까요?' : '다시 보이게 할까요?'}`
     );
 
     if (!ok) return;
@@ -331,6 +394,61 @@ export default function AdminScreen() {
 
     if (error) {
       showAdminAlert('게시글 상태 변경 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const requestListingDelete = async (item: AdminListing) => {
+    const ok = await confirmAdminAction(
+      '게시글 삭제',
+      `"${item.title}" 게시글을 삭제 대기 상태로 변경할까요?\n3일 동안 삭제 취소가 가능합니다.`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_request_listing_delete', {
+      p_listing_id: item.id,
+    });
+
+    if (error) {
+      showAdminAlert(
+        '게시글 삭제 실패',
+        error.message.includes('function')
+          ? 'Supabase SQL 설정이 필요합니다. admin_setup.sql을 실행해 주세요.'
+          : error.message
+      );
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const cancelListingDelete = async (item: AdminListing) => {
+    if (!canCancelListingDelete(item)) {
+      showAdminAlert('삭제 취소 불가', '삭제 취소 가능 기간 3일이 지났습니다.');
+      return;
+    }
+
+    const ok = await confirmAdminAction(
+      '삭제 취소',
+      `"${item.title}" 게시글 삭제를 취소하고 이전 상태로 복구할까요?`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_cancel_listing_delete', {
+      p_listing_id: item.id,
+    });
+
+    if (error) {
+      showAdminAlert(
+        '삭제 취소 실패',
+        error.message.includes('period')
+          ? '삭제 취소 가능 기간 3일이 지났습니다.'
+          : error.message
+      );
       return;
     }
 
@@ -493,13 +611,30 @@ export default function AdminScreen() {
                   {item.reports_count ?? 0}
                 </Text>
                 <Text style={styles.metaText}>상태: {item.status || 'active'}</Text>
+                <Text style={styles.metaText}>표시 상태: {getUserStatusLabel(item)}</Text>
                 <Text style={styles.metaText}>이메일: {item.email || '-'}</Text>
                 <TouchableOpacity
-                  style={item.status === 'suspended' ? styles.secondaryBtn : styles.dangerBtn}
+                  style={[
+                    isUserRestricted(item) || isDeletionPendingUser(item)
+                      ? styles.secondaryBtn
+                      : styles.dangerBtn,
+                    isDeletionPendingUser(item) && styles.disabledBtn,
+                  ]}
                   onPress={() => toggleUserSuspended(item)}
+                  disabled={isDeletionPendingUser(item)}
                 >
-                  <Text style={item.status === 'suspended' ? styles.secondaryText : styles.dangerText}>
-                    {item.status === 'suspended' ? '제한 해제' : '이용 제한'}
+                  <Text
+                    style={
+                      isUserRestricted(item) || isDeletionPendingUser(item)
+                        ? styles.secondaryText
+                        : styles.dangerText
+                    }
+                  >
+                    {isDeletionPendingUser(item)
+                      ? '탈퇴 대기'
+                      : isUserRestricted(item)
+                      ? '이용제한 취소'
+                      : '이용 제한'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -518,14 +653,61 @@ export default function AdminScreen() {
                 <Text style={styles.metaText}>
                   작성자: {getListingAuthorText(item)}
                 </Text>
-                <TouchableOpacity
-                  style={item.status === 'hidden' ? styles.secondaryBtn : styles.dangerBtn}
-                  onPress={() => toggleListingHidden(item)}
-                >
-                  <Text style={item.status === 'hidden' ? styles.secondaryText : styles.dangerText}>
-                    {item.status === 'hidden' ? '복구' : '숨김'}
-                  </Text>
-                </TouchableOpacity>
+
+                {isListingDeletePending(item) ? (
+                  <>
+                    <Text style={styles.metaText}>
+                      삭제 요청: {formatAdminDate(item.admin_deleted_at) || '-'}
+                    </Text>
+                    <Text style={styles.metaText}>
+                      삭제 취소 가능 기한: {formatAdminDate(item.admin_delete_scheduled_at) || '-'}
+                    </Text>
+                  </>
+                ) : null}
+
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={[
+                      isListingHidden(item) ? styles.secondaryBtn : styles.dangerBtn,
+                      isListingDeletePending(item) && styles.disabledBtn,
+                    ]}
+                    onPress={() => toggleListingHidden(item)}
+                    disabled={isListingDeletePending(item)}
+                  >
+                    <Text style={isListingHidden(item) ? styles.secondaryText : styles.dangerText}>
+                      {isListingHidden(item) ? '숨김취소' : '숨김'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      isListingDeletePending(item) ? styles.secondaryBtn : styles.dangerBtn,
+                      isListingDeletePending(item) &&
+                        !canCancelListingDelete(item) &&
+                        styles.disabledBtn,
+                    ]}
+                    onPress={() =>
+                      isListingDeletePending(item)
+                        ? cancelListingDelete(item)
+                        : requestListingDelete(item)
+                    }
+                    disabled={isListingDeletePending(item) && !canCancelListingDelete(item)}
+                  >
+                    <Text
+                      style={
+                        isListingDeletePending(item)
+                          ? styles.secondaryText
+                          : styles.dangerText
+                      }
+                    >
+                      {isListingDeletePending(item)
+                        ? canCancelListingDelete(item)
+                          ? '삭제 취소'
+                          : '삭제 취소 만료'
+                        : '삭제'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ))}
           </View>
@@ -712,5 +894,8 @@ const styles = StyleSheet.create({
   dangerText: {
     color: '#dc2626',
     fontWeight: '900',
+  },
+  disabledBtn: {
+    opacity: 0.55,
   },
 });

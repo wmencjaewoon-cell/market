@@ -1,18 +1,17 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    FlatList,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  FlatList,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import {
-    addMyRegionBySearch,
-    getNearbyRegionCandidatesByGps,
-    searchRegionMaster,
+  addMyRegionBySearch,
+  getNearbyRegionCandidatesByGps,
+  searchRegionMaster,
 } from '../../../lib/region';
 
 export default function RegionSearchScreen() {
@@ -71,11 +70,11 @@ const loadNearbyRegions = async () => {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        {/* <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.title}>동네 추가</Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: 24 }} /> */}
       </View>
 
       <TextInput

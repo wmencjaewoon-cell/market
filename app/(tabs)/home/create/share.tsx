@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { getMyActiveRegion } from '../../../../lib/active_region';
+import { canCreateListing } from '../../../../lib/guard';
 import { checkProhibitedContent } from '../../../../lib/prohibited';
 import { supabase } from '../../../../lib/supabase';
 
@@ -237,6 +238,13 @@ const isTooFarFromRegion =
 
       if (!data.user) {
         setErrorMessage('로그인이 필요합니다.');
+        return;
+      }
+
+      const guard = await canCreateListing();
+
+      if (!guard.ok) {
+        setErrorMessage(guard.reason || '게시글 등록이 제한되어 있습니다.');
         return;
       }
 

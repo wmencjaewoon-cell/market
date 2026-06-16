@@ -53,3 +53,9 @@ entrypoint = "./functions/send-favorite-listing-update/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send-favorite-listing-update/*.html" ]
+
+[functions.naver-userinfo]
+enabled = true
+verify_jwt = false
+import_map = "./functions/naver-userinfo/deno.json"
+entrypoint = "./functions/naver-userinfo/index.ts"

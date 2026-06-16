@@ -15,6 +15,7 @@ import {
     View,
 } from 'react-native';
 import { useAuth } from '../../../../../contexts/AuthContext';
+import { canUseApp } from '../../../../../lib/guard';
 import { sendFavoriteListingUpdate } from '../../../../../lib/listingNotifications';
 import { supabase } from '../../../../../lib/supabase';
 
@@ -219,6 +220,13 @@ export default function EditPostScreen() {
     try {
       setSaving(true);
 
+      const guard = await canUseApp();
+
+      if (!guard.ok) {
+        Alert.alert('게시글 수정 제한', guard.reason || '현재 게시글을 수정할 수 없습니다.');
+        return;
+      }
+
       const quantityTotal = Number(quantityTotalText);
       const rawQuantityRemaining = Number(quantityRemainingText);
 
@@ -334,11 +342,11 @@ export default function EditPostScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        {/* <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#111827" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>게시글 수정</Text>
+        <Text style={styles.headerTitle}>게시글 수정</Text> */}
 
         <View style={{ width: 24 }} />
       </View>

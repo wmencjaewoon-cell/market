@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+    Image,
     Modal,
     Platform,
     Pressable,
@@ -26,6 +27,11 @@ type ListingMapItem = {
   price_text: string | null;
   latitude: number;
   longitude: number;
+  listing_images?: {
+    id: number;
+    image_path: string;
+    sort_order: number | null;
+  }[];
 };
 
 type GroupedMarker = {
@@ -69,7 +75,20 @@ export default function MapTabScreen() {
   const fetchListings = async () => {
     const { data, error } = await supabase
       .from('listings')
-      .select('id, title, category, region, price_text, latitude, longitude')
+      .select(`
+        id,
+        title,
+        category,
+        region,
+        price_text,
+        latitude,
+        longitude,
+        listing_images (
+          id,
+          image_path,
+          sort_order
+        )
+      `)
       .eq('status', 'active')
       .not('latitude', 'is', null)
       .not('longitude', 'is', null);
@@ -79,7 +98,14 @@ export default function MapTabScreen() {
       return;
     }
 
-    setItems((data || []) as ListingMapItem[]);
+    const mapped = (data || []).map((item: any) => ({
+      ...item,
+      listing_images: [...(item.listing_images || [])].sort(
+        (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      ),
+    }));
+
+    setItems(mapped as ListingMapItem[]);
   };
 
   const loadMyLocation = async () => {
@@ -198,6 +224,14 @@ export default function MapTabScreen() {
     return '#d97706';
   };
 
+  const getListingImageUrl = (item: ListingMapItem) => {
+    const imagePath = item.listing_images?.[0]?.image_path;
+    if (!imagePath) return null;
+
+    const { data } = supabase.storage.from('listing-images').getPublicUrl(imagePath);
+    return data.publicUrl;
+  };
+
   const handleMarkerPress = (group: GroupedMarker) => {
     if (group.items.length === 1) {
       setSelectedGroup([]);
@@ -297,17 +331,34 @@ export default function MapTabScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.itemTitle} numberOfLines={2}>
-            {selectedItem.title}
-          </Text>
+          <View style={styles.cardBody}>
+            <View style={styles.thumbnailWrap}>
+              {getListingImageUrl(selectedItem) ? (
+                <Image
+                  source={{ uri: getListingImageUrl(selectedItem) as string }}
+                  style={styles.thumbnail}
+                />
+              ) : (
+                <View style={styles.thumbnailPlaceholder}>
+                  <Text style={styles.thumbnailPlaceholderText}>사진 없음</Text>
+                </View>
+              )}
+            </View>
 
-          <Text style={styles.itemMeta}>
-            {selectedItem.region || '지역 정보 없음'}
-          </Text>
+            <View style={styles.cardInfo}>
+              <Text style={styles.itemTitle} numberOfLines={2}>
+                {selectedItem.title}
+              </Text>
 
-          <Text style={styles.itemPrice}>
-            {selectedItem.price_text || '가격 문의'}
-          </Text>
+              <Text style={styles.itemMeta} numberOfLines={1}>
+                {selectedItem.region || '지역 정보 없음'}
+              </Text>
+
+              <Text style={styles.itemPrice} numberOfLines={1}>
+                {selectedItem.price_text || '가격 문의'}
+              </Text>
+            </View>
+          </View>
 
           <TouchableOpacity
             style={styles.detailBtn}
@@ -335,15 +386,28 @@ export default function MapTabScreen() {
                         setSelectedItem(item);
                       }}
                     >
-                      <Text style={styles.groupBadge}>
-                        {getCategoryLabel(item.category)}
-                      </Text>
-                      <Text style={styles.groupTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text style={styles.groupMeta} numberOfLines={1}>
-                        {item.region || '지역 정보 없음'} · {item.price_text || '가격 문의'}
-                      </Text>
+                      <View style={styles.groupThumbWrap}>
+                        {getListingImageUrl(item) ? (
+                          <Image
+                            source={{ uri: getListingImageUrl(item) as string }}
+                            style={styles.groupThumb}
+                          />
+                        ) : (
+                          <View style={styles.groupThumbPlaceholder} />
+                        )}
+                      </View>
+
+                      <View style={styles.groupInfo}>
+                        <Text style={styles.groupBadge}>
+                          {getCategoryLabel(item.category)}
+                        </Text>
+                        <Text style={styles.groupTitle} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.groupMeta} numberOfLines={1}>
+                          {item.region || '지역 정보 없음'} · {item.price_text || '가격 문의'}
+                        </Text>
+                      </View>
                     </Pressable>
                   ))}
                 </ScrollView>
@@ -440,6 +504,36 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
   },
+  cardBody: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  cardInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  thumbnailWrap: {
+    width: 86,
+    height: 86,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f3f4f6',
+  },
+  thumbnail: {
+    width: '100%',
+    height: '100%',
+  },
+  thumbnailPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbnailPlaceholderText: {
+    color: '#9ca3af',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -507,9 +601,31 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   groupItem: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
+  },
+  groupThumbWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#f3f4f6',
+  },
+  groupThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  groupThumbPlaceholder: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+  },
+  groupInfo: {
+    flex: 1,
+    minWidth: 0,
   },
   groupBadge: {
     alignSelf: 'flex-start',

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { canUseApp } from '../../lib/guard';
 import { supabase } from '../../lib/supabase';
 
 export default function KeywordScreen() {
@@ -27,6 +28,13 @@ export default function KeywordScreen() {
 
   const handleAdd = async () => {
     if (!keyword.trim()) return;
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      Alert.alert('키워드 추가 제한', guard.reason || '현재 키워드를 추가할 수 없습니다.');
+      return;
+    }
 
     const { error } = await supabase.from('keyword_alerts').insert({
       user_id: user?.id,

@@ -17,6 +17,7 @@ export default function MyStackLayout() {
     headerShown: true,
     headerTitleAlign: 'center',
     headerBackTitle: '',
+    headerBackButtonDisplayMode: 'minimal',
     headerLeft: () => <BackButton />,
   }}
 >

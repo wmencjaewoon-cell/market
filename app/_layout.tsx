@@ -1,9 +1,10 @@
-import { Stack } from 'expo-router';
+import { router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 // iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
 // 알림 테스트를 다시 할 때 true로 바꾸면 됩니다.
@@ -37,6 +38,40 @@ function PushNotificationRegister() {
   return null;
 }
 
+function AccountStatusGate() {
+  const { isReady, user } = useAuth();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (!isReady || !user) return;
+    if (pathname === '/auth/callback' || pathname === '/account-deletion-pending') return;
+
+    let cancelled = false;
+
+    const checkAccountStatus = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('status')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (cancelled || error) return;
+
+      if (data?.status === 'deletion_pending') {
+        router.replace('/account-deletion-pending' as any);
+      }
+    };
+
+    checkAccountStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, pathname, user]);
+
+  return null;
+}
+
 function RootNavigator() {
   const { isReady } = useAuth();
 
@@ -52,9 +87,22 @@ function RootNavigator() {
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack
+        screenOptions={{
+          headerBackTitle: '',
+          headerBackButtonDisplayMode: 'minimal',
+        }}
+      >
+        <Stack.Screen name="(tabs)" options={{ headerShown: false, title: '' }} />
         <Stack.Screen name="login" options={{ title: '로그인' }} />
+        <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="account-deletion-pending"
+          options={{
+            title: '탈퇴 진행 중',
+            gestureEnabled: false,
+          }}
+        />
         <Stack.Screen name="profile/edit" options={{ title: '프로필수정' }} />
         <Stack.Screen name="admin" options={{ title: '관리자' }} />
         <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
@@ -81,6 +129,7 @@ export default function RootLayout() {
 
       <AuthProvider>
         <PushNotificationRegister />
+        <AccountStatusGate />
         <RootNavigator />
       </AuthProvider>
     </SafeAreaProvider>

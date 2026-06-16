@@ -25,7 +25,18 @@ end $$;
 
 alter table public.listings
   add constraint listings_status_check
-  check (status is null or status in ('active', 'reserved', 'done', 'hidden'));
+  check (status is null or status in ('active', 'reserved', 'done', 'hidden', 'delete_pending'));
+
+alter table public.listings
+  add column if not exists admin_deleted_at timestamptz,
+  add column if not exists admin_delete_scheduled_at timestamptz,
+  add column if not exists admin_delete_cancelled_at timestamptz,
+  add column if not exists admin_delete_previous_status text,
+  add column if not exists admin_deleted_by uuid references public.profiles(id) on delete set null;
+
+create index if not exists listings_admin_delete_scheduled_idx
+on public.listings (admin_delete_scheduled_at)
+where status = 'delete_pending';
 
 create or replace function public.is_admin()
 returns boolean
@@ -323,12 +334,16 @@ begin
     raise exception 'Only admins can update listing status';
   end if;
 
-  if p_status not in ('active', 'reserved', 'done', 'hidden') then
+  if p_status not in ('active', 'reserved', 'done', 'hidden', 'delete_pending') then
     raise exception 'Invalid listing status';
   end if;
 
   update public.listings
-  set status = p_status
+  set
+    status = p_status,
+    admin_deleted_at = case when p_status = 'delete_pending' then now() else admin_deleted_at end,
+    admin_delete_scheduled_at = case when p_status = 'delete_pending' then now() + interval '3 days' else admin_delete_scheduled_at end,
+    admin_deleted_by = case when p_status = 'delete_pending' then auth.uid() else admin_deleted_by end
   where id = p_listing_id
   returning * into v_listing;
 
@@ -348,6 +363,139 @@ begin
 end;
 $$;
 
+create or replace function public.admin_request_listing_delete(
+  p_listing_id bigint
+)
+returns public.listings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_listing public.listings%rowtype;
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can delete listings';
+  end if;
+
+  select *
+  into v_listing
+  from public.listings
+  where id = p_listing_id
+  for update;
+
+  if not found then
+    raise exception 'Listing not found';
+  end if;
+
+  if coalesce(v_listing.status, 'active') = 'delete_pending' then
+    return v_listing;
+  end if;
+
+  update public.listings
+  set
+    status = 'delete_pending',
+    admin_deleted_at = now(),
+    admin_delete_scheduled_at = now() + interval '3 days',
+    admin_delete_cancelled_at = null,
+    admin_delete_previous_status = coalesce(v_listing.status, 'active'),
+    admin_deleted_by = auth.uid()
+  where id = p_listing_id
+  returning * into v_listing;
+
+  insert into public.admin_logs (action, target_table, target_id, detail)
+  values (
+    'admin_request_listing_delete',
+    'listings',
+    p_listing_id::text,
+    jsonb_build_object(
+      'previous_status', v_listing.admin_delete_previous_status,
+      'delete_scheduled_at', v_listing.admin_delete_scheduled_at
+    )
+  );
+
+  return v_listing;
+end;
+$$;
+
+create or replace function public.admin_cancel_listing_delete(
+  p_listing_id bigint
+)
+returns public.listings
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_listing public.listings%rowtype;
+begin
+  if not public.is_admin() then
+    raise exception 'Only admins can cancel listing deletion';
+  end if;
+
+  select *
+  into v_listing
+  from public.listings
+  where id = p_listing_id
+  for update;
+
+  if not found then
+    raise exception 'Listing not found';
+  end if;
+
+  if coalesce(v_listing.status, 'active') <> 'delete_pending' then
+    return v_listing;
+  end if;
+
+  if v_listing.admin_delete_scheduled_at is not null
+     and v_listing.admin_delete_scheduled_at <= now() then
+    raise exception 'Listing deletion cancellation period has ended';
+  end if;
+
+  update public.listings
+  set
+    status = coalesce(v_listing.admin_delete_previous_status, 'active'),
+    admin_delete_cancelled_at = now(),
+    admin_deleted_at = null,
+    admin_delete_scheduled_at = null,
+    admin_delete_previous_status = null,
+    admin_deleted_by = null
+  where id = p_listing_id
+  returning * into v_listing;
+
+  insert into public.admin_logs (action, target_table, target_id, detail)
+  values (
+    'admin_cancel_listing_delete',
+    'listings',
+    p_listing_id::text,
+    jsonb_build_object('restored_status', v_listing.status)
+  );
+
+  return v_listing;
+end;
+$$;
+
+create or replace function public.permanently_delete_expired_listings()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_count integer := 0;
+begin
+  with deleted_listings as (
+    delete from public.listings
+    where status = 'delete_pending'
+      and admin_delete_scheduled_at <= now()
+    returning id
+  )
+  select count(*) into v_count from deleted_listings;
+
+  return v_count;
+end;
+$$;
+
 grant select, insert, update, delete on public.notices to authenticated;
 grant usage, select on sequence public.notices_id_seq to authenticated;
 grant select, insert on public.admin_logs to authenticated;
@@ -356,6 +504,9 @@ grant execute on function public.admin_set_user_status(uuid, text, boolean, bool
 grant execute on function public.admin_update_report_status(bigint, text, text) to authenticated;
 grant execute on function public.admin_delete_report(bigint) to authenticated;
 grant execute on function public.admin_set_listing_status(bigint, text) to authenticated;
+grant execute on function public.admin_request_listing_delete(bigint) to authenticated;
+grant execute on function public.admin_cancel_listing_delete(bigint) to authenticated;
+grant execute on function public.permanently_delete_expired_listings() to service_role;
 
 -- After running the migration, make your account an admin.
 -- Replace the email and run:

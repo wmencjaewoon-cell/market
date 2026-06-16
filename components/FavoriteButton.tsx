@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Text, TouchableOpacity } from 'react-native';
+import { Alert, Platform, Text, TouchableOpacity } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { canUseApp } from '../lib/guard';
 import { supabase } from '../lib/supabase';
+
+function showFavoriteAlert(title: string, message = '') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    window.alert(message ? `${title}\n${message}` : title);
+    return;
+  }
+
+  Alert.alert(title, message);
+}
 
 export default function FavoriteButton({ listingId }: { listingId: number }) {
   const { user } = useAuth();
@@ -25,6 +35,13 @@ export default function FavoriteButton({ listingId }: { listingId: number }) {
 
   const toggleFavorite = async () => {
     if (!user) return;
+
+    const guard = await canUseApp();
+
+    if (!guard.ok) {
+      showFavoriteAlert('관심 등록 제한', guard.reason || '현재 관심 등록을 사용할 수 없습니다.');
+      return;
+    }
 
     if (liked) {
       await supabase

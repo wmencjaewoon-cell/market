@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { canUseApp } from '../../lib/guard';
 import { supabase } from '../../lib/supabase';
 
 export default function ReviewCreateScreen() {
@@ -78,6 +79,13 @@ export default function ReviewCreateScreen() {
       if (!me) {
         showAlert('로그인이 필요합니다.');
         router.push('/login' as any);
+        return;
+      }
+
+      const guard = await canUseApp();
+
+      if (!guard.ok) {
+        showAlert('후기 작성 제한', guard.reason || '현재 후기를 작성할 수 없습니다.');
         return;
       }
 

@@ -1,15 +1,115 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
-export async function fetchMyRegions() {
+const GUEST_REGIONS_KEY = 'guest_regions';
+const GUEST_REGION_SETTINGS_KEY = 'guest_region_settings';
+
+type RegionInput = {
+  region_name: string;
+  full_name?: string;
+  latitude: number;
+  longitude: number;
+};
+
+type GuestRegion = {
+  id: number;
+  region_name: string;
+  latitude: number;
+  longitude: number;
+  verified: boolean;
+  created_at: string;
+};
+
+type GuestRegionSettings = {
+  active_region_id: number | null;
+  radius_km: number;
+};
+
+async function getCurrentUserId() {
   const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) return [];
+  return authData.user?.id ?? null;
+}
+
+async function getGuestRegions() {
+  const raw = await AsyncStorage.getItem(GUEST_REGIONS_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as GuestRegion[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function setGuestRegions(regions: GuestRegion[]) {
+  await AsyncStorage.setItem(GUEST_REGIONS_KEY, JSON.stringify(regions));
+}
+
+async function getGuestRegionSettings() {
+  const raw = await AsyncStorage.getItem(GUEST_REGION_SETTINGS_KEY);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as GuestRegionSettings;
+  } catch {
+    return null;
+  }
+}
+
+async function setGuestRegionSettings(activeRegionId: number | null, radiusKm: number) {
+  await AsyncStorage.setItem(
+    GUEST_REGION_SETTINGS_KEY,
+    JSON.stringify({
+      active_region_id: activeRegionId,
+      radius_km: radiusKm,
+    })
+  );
+}
+
+function createGuestRegion(region: RegionInput, verified: boolean): GuestRegion {
+  return {
+    id: -(Date.now() + Math.floor(Math.random() * 1000)),
+    region_name: region.full_name || region.region_name,
+    latitude: region.latitude,
+    longitude: region.longitude,
+    verified,
+    created_at: new Date().toISOString(),
+  };
+}
+
+async function addGuestRegion(region: RegionInput, verified: boolean) {
+  const regions = await getGuestRegions();
+
+  if (regions.length >= 3) {
+    throw new Error('동네는 최대 3개까지 등록할 수 있습니다.');
+  }
+
+  const regionName = region.full_name || region.region_name;
+  const duplicated = regions.find((item) => item.region_name === regionName);
+
+  if (duplicated) {
+    await setGuestRegionSettings(duplicated.id, 5);
+    return duplicated;
+  }
+
+  const nextRegion = createGuestRegion(region, verified);
+  await setGuestRegions([...regions, nextRegion]);
+  await setGuestRegionSettings(nextRegion.id, 5);
+
+  return nextRegion;
+}
+
+export async function fetchMyRegions() {
+  const userId = await getCurrentUserId();
+  if (!userId) return getGuestRegions();
 
   const { data, error } = await supabase
     .from('user_regions')
     .select('*')
-    .eq('user_id', authData.user.id)
+    .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
   if (error) throw error;
@@ -17,13 +117,13 @@ export async function fetchMyRegions() {
 }
 
 export async function fetchMyRegionSettings() {
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) return null;
+  const userId = await getCurrentUserId();
+  if (!userId) return getGuestRegionSettings();
 
   const { data, error } = await supabase
     .from('user_region_settings')
     .select('*')
-    .eq('user_id', authData.user.id)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (error) throw error;
@@ -31,13 +131,17 @@ export async function fetchMyRegionSettings() {
 }
 
 export async function saveMyRegionSettings(activeRegionId: number | null, radiusKm: number) {
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error('로그인이 필요합니다.');
+  const userId = await getCurrentUserId();
+
+  if (!userId) {
+    await setGuestRegionSettings(activeRegionId, radiusKm);
+    return;
+  }
 
   const { error } = await supabase
     .from('user_region_settings')
     .upsert({
-      user_id: authData.user.id,
+      user_id: userId,
       active_region_id: activeRegionId,
       radius_km: radiusKm,
       updated_at: new Date().toISOString(),
@@ -67,8 +171,7 @@ export async function addMyRegionByGps() {
     throw new Error('웹에서는 위치 인증 대신 지역 검색을 사용해 주세요.');
   }
 
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error('로그인이 필요합니다.');
+  const userId = await getCurrentUserId();
 
   const regions = await fetchMyRegions();
   if (regions.length >= 3) {
@@ -104,10 +207,21 @@ if (!regionName) {
     throw new Error('이미 등록된 동네입니다.');
   }
 
+  if (!userId) {
+    return addGuestRegion(
+      {
+        region_name: regionName,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      },
+      true
+    );
+  }
+
   const { data, error } = await supabase
     .from('user_regions')
     .insert({
-      user_id: authData.user.id,
+      user_id: userId,
       region_name: regionName,
       latitude: coords.latitude,
       longitude: coords.longitude,
@@ -170,8 +284,7 @@ export async function addMyRegionByCandidate(candidate: {
   latitude: number;
   longitude: number;
 }) {
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error('로그인이 필요합니다.');
+  const userId = await getCurrentUserId();
 
   const regions = await fetchMyRegions();
 
@@ -190,10 +303,14 @@ const duplicated = regions.find(
     return duplicated;
   }
 
+  if (!userId) {
+    return addGuestRegion(candidate, true);
+  }
+
   const { data, error } = await supabase
     .from('user_regions')
     .insert({
-      user_id: authData.user.id,
+      user_id: userId,
       region_name: candidateName,
       latitude: candidate.latitude,
       longitude: candidate.longitude,
@@ -235,8 +352,7 @@ export async function addMyRegionBySearch(region: {
   latitude: number;
   longitude: number;
 }) {
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error('로그인이 필요합니다.');
+  const userId = await getCurrentUserId();
 
   const regions = await fetchMyRegions();
 
@@ -253,10 +369,14 @@ export async function addMyRegionBySearch(region: {
     return duplicated;
   }
 
+  if (!userId) {
+    return addGuestRegion(region, false);
+  }
+
   const { data, error } = await supabase
     .from('user_regions')
     .insert({
-      user_id: authData.user.id,
+      user_id: userId,
       region_name: region.full_name,
       latitude: region.latitude,
       longitude: region.longitude,
@@ -273,6 +393,21 @@ export async function addMyRegionBySearch(region: {
 }
 
 export async function deleteMyRegion(regionId: number) {
+  const userId = await getCurrentUserId();
+
+  if (!userId) {
+    const regions = await getGuestRegions();
+    const nextRegions = regions.filter((region) => region.id !== regionId);
+    await setGuestRegions(nextRegions);
+
+    const settings = await getGuestRegionSettings();
+    if (settings?.active_region_id === regionId) {
+      await setGuestRegionSettings(nextRegions[0]?.id ?? null, settings.radius_km ?? 5);
+    }
+
+    return;
+  }
+
   const { error } = await supabase
     .from('user_regions')
     .delete()
