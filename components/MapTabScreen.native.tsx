@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { checkProhibitedContent } from '../lib/prohibited';
 import { supabase } from '../lib/supabase';
 import { useTabRefresh } from '../lib/tabRefresh';
 
@@ -52,6 +53,7 @@ export default function MapTabScreen() {
 
   const [items, setItems] = useState<ListingMapItem[]>([]);
   const [search, setSearch] = useState('');
+  const [searchBlockedMessage, setSearchBlockedMessage] = useState('');
   const [selectedItem, setSelectedItem] = useState<ListingMapItem | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ListingMapItem[]>([]);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
@@ -259,6 +261,22 @@ export default function MapTabScreen() {
     );
   };
 
+  const handleSearchChange = (value: string) => {
+    const blockedKeyword = checkProhibitedContent(value);
+
+    if (blockedKeyword) {
+      setSearch('');
+      setSelectedItem(null);
+      setSelectedGroup([]);
+      setGroupModalOpen(false);
+      setSearchBlockedMessage(`"${blockedKeyword}" 관련 판매금지 물품은 검색할 수 없습니다.`);
+      return;
+    }
+
+    setSearchBlockedMessage('');
+    setSearch(value);
+  };
+
   return (
     <View style={styles.screen}>
       <MapView
@@ -303,8 +321,11 @@ export default function MapTabScreen() {
           placeholder="제목, 지역, 물품, 가격으로 검색"
           placeholderTextColor="#9ca3af"
           value={search}
-          onChangeText={setSearch}
+          onChangeText={handleSearchChange}
         />
+        {searchBlockedMessage ? (
+          <Text style={styles.searchBlockedText}>{searchBlockedMessage}</Text>
+        ) : null}
       </View>
 
       <TouchableOpacity style={styles.myLocationBtn} onPress={moveToMyLocation}>
@@ -443,6 +464,13 @@ const styles = StyleSheet.create({
   searchInput: {
     fontSize: 15,
     color: '#111827',
+  },
+  searchBlockedText: {
+    marginTop: 8,
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
   },
 
   myLocationBtn: {

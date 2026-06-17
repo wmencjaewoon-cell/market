@@ -165,10 +165,15 @@ const isTooFarFromRegion =
   return;
 }
 
-      const blockedKeyword = checkProhibitedContent(title, description);
+      const blockedKeyword = checkProhibitedContent(
+        title,
+        priceText,
+        description,
+        detailLocation
+      );
 
       if (blockedKeyword) {
-        setErrorMessage(`"${blockedKeyword}" 관련 물품은 등록할 수 없습니다.`);
+        setErrorMessage(`"${blockedKeyword}" 관련 판매금지 물품은 등록할 수 없습니다.`);
         return;
       }
 

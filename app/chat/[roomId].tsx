@@ -40,6 +40,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAuth } from '../../contexts/AuthContext';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
 import { canStartChat, canUseApp } from '../../lib/guard';
+import { checkProhibitedContent } from '../../lib/prohibited';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -826,7 +827,9 @@ export default function ChatRoomScreen() {
           return;
         }
 
-        await sendMessage(roomId, makeAppointmentCompletionPrompt(appointmentDate));
+        await sendMessage(roomId, makeAppointmentCompletionPrompt(appointmentDate), {
+          skipProhibitedCheck: true,
+        });
       } catch (error) {
         console.log('거래완료 확인 메시지 전송 실패:', error);
       } finally {
@@ -875,7 +878,9 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     if (!roomId || !lat || !lng) return;
-    sendMessage(roomId, `📍 거래 장소\n위도: ${lat}\n경도: ${lng}`).catch((e: any) => {
+    sendMessage(roomId, `📍 거래 장소\n위도: ${lat}\n경도: ${lng}`, {
+      skipProhibitedCheck: true,
+    }).catch((e: any) => {
       showChatAlert('장소 전송 실패', e?.message || '거래 장소를 전송하지 못했습니다.');
     });
   }, [roomId, lat, lng]);
@@ -1374,6 +1379,16 @@ export default function ChatRoomScreen() {
   const sendTextMessage = async (messageText: string) => {
     if (!roomId || sending) return;
 
+    const blockedKeyword = checkProhibitedContent(messageText);
+
+    if (blockedKeyword) {
+      showChatAlert(
+        '전송 차단',
+        `"${blockedKeyword}" 관련 판매금지 물품이나 내용은 채팅으로 보낼 수 없습니다.`
+      );
+      return;
+    }
+
     try {
       setSending(true);
       await sendMessage(roomId, messageText);
@@ -1587,7 +1602,9 @@ export default function ChatRoomScreen() {
 
     if (urls.length > 0 && roomId) {
       try {
-        await sendMessage(roomId, makeImageMessage(urls));
+        await sendMessage(roomId, makeImageMessage(urls), {
+          skipProhibitedCheck: true,
+        });
       } catch (e: any) {
         showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
       }
@@ -1622,7 +1639,9 @@ export default function ChatRoomScreen() {
 
     if (url && roomId) {
       try {
-        await sendMessage(roomId, makeImageMessage([url]));
+        await sendMessage(roomId, makeImageMessage([url]), {
+          skipProhibitedCheck: true,
+        });
       } catch (e: any) {
         showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
       }
@@ -1693,7 +1712,11 @@ export default function ChatRoomScreen() {
     }
 
     try {
-      await sendMessage(roomId, `${APPOINTMENT_REQUEST_PREFIX}${formatAppointmentValue(appointmentDate)}`);
+      await sendMessage(
+        roomId,
+        `${APPOINTMENT_REQUEST_PREFIX}${formatAppointmentValue(appointmentDate)}`,
+        { skipProhibitedCheck: true }
+      );
     } catch (e: any) {
       showChatAlert('약속 전송 실패', e?.message || '약속 메시지를 보내지 못했습니다.');
       return;
@@ -1776,7 +1799,9 @@ export default function ChatRoomScreen() {
     }
 
     try {
-      await sendMessage(roomId, `${PAYMENT_REQUEST_PREFIX}${account}`);
+      await sendMessage(roomId, `${PAYMENT_REQUEST_PREFIX}${account}`, {
+        skipProhibitedCheck: true,
+      });
     } catch (e: any) {
       Alert.alert('송금 요청 실패', e?.message || '송금 요청 메시지를 보내지 못했습니다.');
       return;
@@ -1967,6 +1992,20 @@ export default function ChatRoomScreen() {
 
   const completeSaleAndGoToReview = async () => {
     if (!listing || !user || !roomId || !pendingReviewTargetId || saleCompleting) return;
+
+    const blockedKeyword = checkProhibitedContent(
+      listing.title,
+      listing.price_text,
+      listing.region
+    );
+
+    if (blockedKeyword) {
+      Alert.alert(
+        isShareListing ? '나눔 처리 차단' : '판매 처리 차단',
+        `"${blockedKeyword}" 관련 판매금지 물품은 ${isShareListing ? '나눔완료' : '판매'} 처리할 수 없습니다.`
+      );
+      return;
+    }
 
     const saleQuantity = Number(saleQuantityText);
     const quantityLabel = isShareListing ? '나눔 수량' : '판매 수량';
@@ -2246,7 +2285,8 @@ export default function ChatRoomScreen() {
         roomId,
         `${APPOINTMENT_COMPLETION_RESPONSE_PREFIX}${completed ? '예' : '아니요'
         }\n약속 시간: ${appointmentValue}\n${completed ? '거래가 완료되었습니다.' : '거래가 아직 완료되지 않았습니다.'
-        }`
+        }`,
+        { skipProhibitedCheck: true }
       );
     } catch (e: any) {
       showChatAlert('응답 전송 실패', e?.message || '거래 완료 응답을 보내지 못했습니다.');

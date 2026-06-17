@@ -1,5 +1,10 @@
 import { supabase } from './supabase';
 import { canStartChat } from './guard';
+import { checkProhibitedContent } from './prohibited';
+
+type SendMessageOptions = {
+  skipProhibitedCheck?: boolean;
+};
 
 async function ensureRoomMembers(roomId: string, me: string, sellerId: string) {
   const { error } = await supabase
@@ -74,7 +79,11 @@ export async function getOrCreateRoom(
   return room.id;
 }
 
-export async function sendMessage(roomId: string, message: string) {
+export async function sendMessage(
+  roomId: string,
+  message: string,
+  options: SendMessageOptions = {}
+) {
   const { data: authData } = await supabase.auth.getUser();
   const senderId = authData.user?.id;
 
@@ -86,6 +95,16 @@ export async function sendMessage(roomId: string, message: string) {
 
   if (!guard.ok) {
     throw new Error(guard.reason || '채팅 이용이 제한된 계정입니다.');
+  }
+
+  if (!options.skipProhibitedCheck) {
+    const blockedKeyword = checkProhibitedContent(message);
+
+    if (blockedKeyword) {
+      throw new Error(
+        `"${blockedKeyword}" 관련 판매금지 물품이나 내용은 채팅으로 보낼 수 없습니다.`
+      );
+    }
   }
 
   const { error } = await supabase.from('chat_messages').insert({

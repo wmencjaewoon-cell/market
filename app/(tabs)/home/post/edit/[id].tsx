@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../../../../../contexts/AuthContext';
 import { canUseApp } from '../../../../../lib/guard';
 import { sendFavoriteListingUpdate } from '../../../../../lib/listingNotifications';
+import { checkProhibitedContent } from '../../../../../lib/prohibited';
 import { supabase } from '../../../../../lib/supabase';
 
 export default function EditPostScreen() {
@@ -214,6 +215,16 @@ export default function EditPostScreen() {
 
     if (!title.trim()) {
       Alert.alert('확인', '제목을 입력해 주세요.');
+      return;
+    }
+
+    const blockedKeyword = checkProhibitedContent(title, priceText, description);
+
+    if (blockedKeyword) {
+      Alert.alert(
+        '게시글 수정 차단',
+        `"${blockedKeyword}" 관련 판매금지 물품은 등록하거나 수정할 수 없습니다.`
+      );
       return;
     }
 

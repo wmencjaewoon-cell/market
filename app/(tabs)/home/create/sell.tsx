@@ -19,6 +19,7 @@ import {
 import { getMyActiveRegion } from '../../../../lib/active_region';
 import { canCreateListing } from '../../../../lib/guard';
 import { sendKeywordAlertsForListing } from '../../../../lib/listingNotifications';
+import { checkProhibitedContent } from '../../../../lib/prohibited';
 import { supabase } from '../../../../lib/supabase';
 
 
@@ -342,6 +343,18 @@ const isTooFarFromRegion =
   setErrorMessage('거래 장소와 가까운 동네로 대표 동네를 변경해 주세요.');
   return;
 }
+
+      const blockedKeyword = checkProhibitedContent(
+        title,
+        priceText,
+        description,
+        detailLocation
+      );
+
+      if (blockedKeyword) {
+        setErrorMessage(`"${blockedKeyword}" 관련 판매금지 물품은 등록할 수 없습니다.`);
+        return;
+      }
 
 
       setSubmitting(true);

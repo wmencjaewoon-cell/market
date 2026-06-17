@@ -38,6 +38,7 @@ import { useAuth } from '../../../../contexts/AuthContext';
 import { getOrCreateRoom } from '../../../../lib/chat';
 import { canChatToListing } from '../../../../lib/chat_guard';
 import { canUseApp } from '../../../../lib/guard';
+import { checkProhibitedContent } from '../../../../lib/prohibited';
 import { supabase } from '../../../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -931,6 +932,21 @@ const fetchChatUsers = async () => {
 
 const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) => {
   if (!item || !isOwner) return;
+
+  const blockedKeyword = checkProhibitedContent(
+    item.title,
+    item.price_text,
+    item.description,
+    item.region
+  );
+
+  if (blockedKeyword) {
+    Alert.alert(
+      isShareListing ? '나눔 처리 차단' : '판매 처리 차단',
+      `"${blockedKeyword}" 관련 판매금지 물품은 ${isShareListing ? '나눔완료' : '판매'} 처리할 수 없습니다.`
+    );
+    return;
+  }
 
   const saleQuantity = Number(saleQuantityText);
   const { remaining } = getListingQuantityInfo(item);

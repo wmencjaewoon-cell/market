@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -15,6 +15,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 
 type AdminTab = 'overview' | 'notices' | 'reports' | 'users' | 'listings';
+
+type AdminViewMode = 'grid' | 'list';
+type DateFilter = 'all' | 'today' | '7days' | '30days';
+
+type AdminViewModes = {
+  reports: AdminViewMode;
+  users: AdminViewMode;
+  listings: AdminViewMode;
+};
 
 type NoticeItem = {
   id: number;
@@ -128,6 +137,33 @@ function formatAdminDate(value?: string | null) {
   });
 }
 
+function isWithinDateFilter(createdAt: string, filter: DateFilter) {
+  if (filter === 'all') return true;
+
+  const createdDate = new Date(createdAt);
+  if (Number.isNaN(createdDate.getTime())) return false;
+
+  const now = new Date();
+  const diffMs = now.getTime() - createdDate.getTime();
+  const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+  if (filter === 'today') {
+    return createdDate.toDateString() === now.toDateString();
+  }
+
+  if (filter === '7days') return diffDays <= 7;
+  if (filter === '30days') return diffDays <= 30;
+
+  return true;
+}
+
+function getDateFilterLabel(filter: DateFilter) {
+  if (filter === 'today') return '오늘';
+  if (filter === '7days') return '최근 7일';
+  if (filter === '30days') return '최근 30일';
+  return '전체 날짜';
+}
+
 function isListingHidden(item: AdminListing) {
   return item.status === 'hidden';
 }
@@ -155,6 +191,33 @@ export default function AdminScreen() {
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
   const [noticePublished, setNoticePublished] = useState(true);
+
+  const [viewModes, setViewModes] = useState<AdminViewModes>({
+  reports: 'grid',
+  users: 'grid',
+  listings: 'grid',
+});
+
+const [reportDateFilter, setReportDateFilter] = useState<DateFilter>('all');
+const [reportReasonFilter, setReportReasonFilter] = useState('all');
+const [reportStatusFilter, setReportStatusFilter] = useState('all');
+const [reportIdKeyword, setReportIdKeyword] = useState('');
+
+const [userKeyword, setUserKeyword] = useState('');
+const [listingDateFilter, setListingDateFilter] = useState<DateFilter>('all');
+const [listingStatusFilter, setListingStatusFilter] = useState('all');
+const [listingKeyword, setListingKeyword] = useState('');
+
+const toggleViewMode = (tab: keyof AdminViewModes) => {
+  setViewModes((prev) => ({
+    ...prev,
+    [tab]: prev[tab] === 'grid' ? 'list' : 'grid',
+  }));
+};
+
+const goToListingDetail = (listingId: number) => {
+  router.push(`/(tabs)/home/post/${listingId}` as any);
+};
 
   const loadAdminData = useCallback(async () => {
     const [noticeResult, reportResult, userResult, listingResult] = await Promise.all([
@@ -455,6 +518,73 @@ export default function AdminScreen() {
     await loadAdminData();
   };
 
+  const reportReasons = useMemo(() => {
+  return Array.from(new Set(reports.map((item) => item.reason).filter(Boolean)));
+}, [reports]);
+
+const listingStatuses = useMemo(() => {
+  return Array.from(new Set(listings.map((item) => item.status || 'active')));
+}, [listings]);
+
+const filteredReports = useMemo(() => {
+  const keyword = reportIdKeyword.trim().toLowerCase();
+
+  return reports.filter((item) => {
+    const status = item.status || 'pending';
+
+    const matchesDate = isWithinDateFilter(item.created_at, reportDateFilter);
+    const matchesReason = reportReasonFilter === 'all' || item.reason === reportReasonFilter;
+    const matchesStatus = reportStatusFilter === 'all' || status === reportStatusFilter;
+
+    const matchesKeyword =
+      !keyword ||
+      String(item.id).includes(keyword) ||
+      item.reporter_id.toLowerCase().includes(keyword) ||
+      item.target_user_id.toLowerCase().includes(keyword) ||
+      item.reason.toLowerCase().includes(keyword);
+
+    return matchesDate && matchesReason && matchesStatus && matchesKeyword;
+  });
+}, [reports, reportDateFilter, reportReasonFilter, reportStatusFilter, reportIdKeyword]);
+
+const filteredUsers = useMemo(() => {
+  const keyword = userKeyword.trim().toLowerCase();
+
+  return users.filter((item) => {
+    if (!keyword) return true;
+
+    return (
+      item.id.toLowerCase().includes(keyword) ||
+      (item.email || '').toLowerCase().includes(keyword) ||
+      (item.display_name || '').toLowerCase().includes(keyword) ||
+      (item.user_type || '').toLowerCase().includes(keyword) ||
+      (item.status || '').toLowerCase().includes(keyword)
+    );
+  });
+}, [users, userKeyword]);
+
+const filteredListings = useMemo(() => {
+  const keyword = listingKeyword.trim().toLowerCase();
+
+  return listings.filter((item) => {
+    const status = item.status || 'active';
+
+    const matchesDate = isWithinDateFilter(item.created_at, listingDateFilter);
+    const matchesStatus = listingStatusFilter === 'all' || status === listingStatusFilter;
+
+    const authorText = getListingAuthorText(item).toLowerCase();
+
+    const matchesKeyword =
+      !keyword ||
+      String(item.id).includes(keyword) ||
+      item.title.toLowerCase().includes(keyword) ||
+      item.author_id.toLowerCase().includes(keyword) ||
+      authorText.includes(keyword);
+
+    return matchesDate && matchesStatus && matchesKeyword;
+  });
+}, [listings, listingDateFilter, listingStatusFilter, listingKeyword]);
+
   const stats = [
     { label: '공지', value: notices.length },
     { label: '신고', value: reports.filter((item) => item.status !== 'reviewed').length },
@@ -575,143 +705,307 @@ export default function AdminScreen() {
         ) : null}
 
         {activeTab === 'reports' ? (
-          <View>
-            {reports.map((report) => (
-              <View key={report.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{report.reason}</Text>
-                <Text style={styles.desc}>
-                  상태 {report.status || 'pending'} · {new Date(report.created_at).toLocaleString()}
-                </Text>
-                <Text style={styles.itemText}>{report.content || '내용 없음'}</Text>
-                <Text style={styles.metaText}>신고자: {report.reporter_id}</Text>
-                <Text style={styles.metaText}>대상자: {report.target_user_id}</Text>
-                <View style={styles.actionRow}>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => updateReportStatus(report, 'reviewed')}>
-                    <Text style={styles.secondaryText}>처리완료</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => updateReportStatus(report, 'dismissed')}>
-                    <Text style={styles.secondaryText}>기각</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.dangerBtn} onPress={() => deleteReport(report)}>
-                    <Text style={styles.dangerText}>삭제</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+  <View>
+    <View style={styles.toolCard}>
+      <View style={styles.toolHeader}>
+        <Text style={styles.toolTitle}>신고 목록 {filteredReports.length}건</Text>
+
+        <TouchableOpacity style={styles.viewToggleBtn} onPress={() => toggleViewMode('reports')}>
+          <Text style={styles.viewToggleText}>
+            {viewModes.reports === 'grid' ? '한줄 보기' : '바둑판 보기'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <TextInput
+        style={styles.searchInput}
+        placeholder="신고 ID, 신고자 ID, 대상자 ID, 항목 검색"
+        value={reportIdKeyword}
+        onChangeText={setReportIdKeyword}
+      />
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {(['all', 'today', '7days', '30days'] as DateFilter[]).map((item) => (
+          <TouchableOpacity
+            key={item}
+            style={[styles.filterChip, reportDateFilter === item && styles.filterChipActive]}
+            onPress={() => setReportDateFilter(item)}
+          >
+            <Text style={[styles.filterChipText, reportDateFilter === item && styles.filterChipTextActive]}>
+              {getDateFilterLabel(item)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {['all', ...reportReasons].map((reason) => (
+          <TouchableOpacity
+            key={reason}
+            style={[styles.filterChip, reportReasonFilter === reason && styles.filterChipActive]}
+            onPress={() => setReportReasonFilter(reason)}
+          >
+            <Text style={[styles.filterChipText, reportReasonFilter === reason && styles.filterChipTextActive]}>
+              {reason === 'all' ? '전체 항목' : reason}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {['all', 'pending', 'reviewed', 'dismissed'].map((status) => (
+          <TouchableOpacity
+            key={status}
+            style={[styles.filterChip, reportStatusFilter === status && styles.filterChipActive]}
+            onPress={() => setReportStatusFilter(status)}
+          >
+            <Text style={[styles.filterChipText, reportStatusFilter === status && styles.filterChipTextActive]}>
+              {status === 'all'
+                ? '전체 상태'
+                : status === 'pending'
+                ? '대기'
+                : status === 'reviewed'
+                ? '처리완료'
+                : '기각'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+
+    <View style={viewModes.reports === 'grid' ? styles.gridWrap : styles.listWrap}>
+      {filteredReports.map((report) => (
+        <View
+          key={report.id}
+          style={[
+            styles.card,
+            viewModes.reports === 'grid' ? styles.gridCard : styles.listCard,
+          ]}
+        >
+          <Text style={styles.cardTitle}>{report.reason}</Text>
+          <Text style={styles.desc}>
+            #{report.id} · 상태 {report.status || 'pending'} · {new Date(report.created_at).toLocaleString()}
+          </Text>
+          <Text style={styles.itemText}>{report.content || '내용 없음'}</Text>
+          <Text style={styles.metaText}>신고자: {report.reporter_id}</Text>
+          <Text style={styles.metaText}>대상자: {report.target_user_id}</Text>
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => updateReportStatus(report, 'reviewed')}>
+              <Text style={styles.secondaryText}>확인</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryBtn} onPress={() => updateReportStatus(report, 'dismissed')}>
+              <Text style={styles.secondaryText}>기각</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dangerBtn} onPress={() => deleteReport(report)}>
+              <Text style={styles.dangerText}>삭제</Text>
+            </TouchableOpacity>
           </View>
-        ) : null}
+        </View>
+      ))}
+    </View>
+  </View>
+) : null}
 
         {activeTab === 'users' ? (
-          <View>
-            {users.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{item.display_name || item.email || '사용자'}</Text>
-                <Text style={styles.desc}>
-                  {item.user_type === 'store' ? '가게' : '개인'} · {item.role || 'user'} · 신고{' '}
-                  {item.reports_count ?? 0}
-                </Text>
-                <Text style={styles.metaText}>상태: {item.status || 'active'}</Text>
-                <Text style={styles.metaText}>표시 상태: {getUserStatusLabel(item)}</Text>
-                <Text style={styles.metaText}>이메일: {item.email || '-'}</Text>
-                <TouchableOpacity
-                  style={[
-                    isUserRestricted(item) || isDeletionPendingUser(item)
-                      ? styles.secondaryBtn
-                      : styles.dangerBtn,
-                    isDeletionPendingUser(item) && styles.disabledBtn,
-                  ]}
-                  onPress={() => toggleUserSuspended(item)}
-                  disabled={isDeletionPendingUser(item)}
-                >
-                  <Text
-                    style={
-                      isUserRestricted(item) || isDeletionPendingUser(item)
-                        ? styles.secondaryText
-                        : styles.dangerText
-                    }
-                  >
-                    {isDeletionPendingUser(item)
-                      ? '탈퇴 대기'
-                      : isUserRestricted(item)
-                      ? '이용제한 취소'
-                      : '이용 제한'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : null}
+  <View>
+    <View style={styles.toolCard}>
+      <View style={styles.toolHeader}>
+        <Text style={styles.toolTitle}>사용자 목록 {filteredUsers.length}명</Text>
+
+        <TouchableOpacity style={styles.viewToggleBtn} onPress={() => toggleViewMode('users')}>
+          <Text style={styles.viewToggleText}>
+            {viewModes.users === 'grid' ? '한줄 보기' : '바둑판 보기'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <TextInput
+        style={styles.searchInput}
+        placeholder="아이디, 이메일, 닉네임, 상태 검색"
+        value={userKeyword}
+        onChangeText={setUserKeyword}
+      />
+    </View>
+
+    <View style={viewModes.users === 'grid' ? styles.gridWrap : styles.listWrap}>
+      {filteredUsers.map((item) => (
+        <View
+          key={item.id}
+          style={[
+            styles.card,
+            viewModes.users === 'grid' ? styles.gridCard : styles.listCard,
+          ]}
+        >
+          <Text style={styles.cardTitle}>{item.display_name || item.email || '사용자'}</Text>
+          <Text style={styles.desc}>
+            {item.user_type === 'store' ? '가게' : '개인'} · {item.role || 'user'} · 신고{' '}
+            {item.reports_count ?? 0}
+          </Text>
+          <Text style={styles.metaText}>ID: {item.id}</Text>
+          <Text style={styles.metaText}>상태: {item.status || 'active'}</Text>
+          <Text style={styles.metaText}>표시 상태: {getUserStatusLabel(item)}</Text>
+          <Text style={styles.metaText}>이메일: {item.email || '-'}</Text>
+
+          <TouchableOpacity
+            style={[
+              isUserRestricted(item) || isDeletionPendingUser(item)
+                ? styles.secondaryBtn
+                : styles.dangerBtn,
+              isDeletionPendingUser(item) && styles.disabledBtn,
+            ]}
+            onPress={() => toggleUserSuspended(item)}
+            disabled={isDeletionPendingUser(item)}
+          >
+            <Text
+              style={
+                isUserRestricted(item) || isDeletionPendingUser(item)
+                  ? styles.secondaryText
+                  : styles.dangerText
+              }
+            >
+              {isDeletionPendingUser(item)
+                ? '탈퇴 대기'
+                : isUserRestricted(item)
+                ? '이용제한 취소'
+                : '이용 제한'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+    </View>
+  </View>
+) : null}
 
         {activeTab === 'listings' ? (
-          <View>
-            {listings.map((item) => (
-              <View key={item.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{item.title}</Text>
-                <Text style={styles.desc}>
-                  {item.price_text || '가격 문의'} · 상태 {item.status || 'active'}
-                </Text>
-                <Text style={styles.metaText}>
-                  작성자: {getListingAuthorText(item)}
-                </Text>
+  <View>
+    <View style={styles.toolCard}>
+      <View style={styles.toolHeader}>
+        <Text style={styles.toolTitle}>게시글 목록 {filteredListings.length}개</Text>
 
-                {isListingDeletePending(item) ? (
-                  <>
-                    <Text style={styles.metaText}>
-                      삭제 요청: {formatAdminDate(item.admin_deleted_at) || '-'}
-                    </Text>
-                    <Text style={styles.metaText}>
-                      삭제 취소 가능 기한: {formatAdminDate(item.admin_delete_scheduled_at) || '-'}
-                    </Text>
-                  </>
-                ) : null}
+        <TouchableOpacity style={styles.viewToggleBtn} onPress={() => toggleViewMode('listings')}>
+          <Text style={styles.viewToggleText}>
+            {viewModes.listings === 'grid' ? '한줄 보기' : '바둑판 보기'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={[
-                      isListingHidden(item) ? styles.secondaryBtn : styles.dangerBtn,
-                      isListingDeletePending(item) && styles.disabledBtn,
-                    ]}
-                    onPress={() => toggleListingHidden(item)}
-                    disabled={isListingDeletePending(item)}
-                  >
-                    <Text style={isListingHidden(item) ? styles.secondaryText : styles.dangerText}>
-                      {isListingHidden(item) ? '숨김취소' : '숨김'}
-                    </Text>
-                  </TouchableOpacity>
+      <TextInput
+        style={styles.searchInput}
+        placeholder="게시글 ID, 제목, 작성자 ID 검색"
+        value={listingKeyword}
+        onChangeText={setListingKeyword}
+      />
 
-                  <TouchableOpacity
-                    style={[
-                      isListingDeletePending(item) ? styles.secondaryBtn : styles.dangerBtn,
-                      isListingDeletePending(item) &&
-                        !canCancelListingDelete(item) &&
-                        styles.disabledBtn,
-                    ]}
-                    onPress={() =>
-                      isListingDeletePending(item)
-                        ? cancelListingDelete(item)
-                        : requestListingDelete(item)
-                    }
-                    disabled={isListingDeletePending(item) && !canCancelListingDelete(item)}
-                  >
-                    <Text
-                      style={
-                        isListingDeletePending(item)
-                          ? styles.secondaryText
-                          : styles.dangerText
-                      }
-                    >
-                      {isListingDeletePending(item)
-                        ? canCancelListingDelete(item)
-                          ? '삭제 취소'
-                          : '삭제 취소 만료'
-                        : '삭제'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {(['all', 'today', '7days', '30days'] as DateFilter[]).map((item) => (
+          <TouchableOpacity
+            key={item}
+            style={[styles.filterChip, listingDateFilter === item && styles.filterChipActive]}
+            onPress={() => setListingDateFilter(item)}
+          >
+            <Text style={[styles.filterChipText, listingDateFilter === item && styles.filterChipTextActive]}>
+              {getDateFilterLabel(item)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {['all', ...listingStatuses].map((status) => (
+          <TouchableOpacity
+            key={status}
+            style={[styles.filterChip, listingStatusFilter === status && styles.filterChipActive]}
+            onPress={() => setListingStatusFilter(status)}
+          >
+            <Text style={[styles.filterChipText, listingStatusFilter === status && styles.filterChipTextActive]}>
+              {status === 'all' ? '전체 상태' : status}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+
+    <View style={viewModes.listings === 'grid' ? styles.gridWrap : styles.listWrap}>
+      {filteredListings.map((item) => (
+        <View
+          key={item.id}
+          style={[
+            styles.card,
+            viewModes.listings === 'grid' ? styles.gridCard : styles.listCard,
+          ]}
+        >
+          <TouchableOpacity onPress={() => goToListingDetail(item.id)}>
+            <Text style={styles.cardTitle}>{item.title}</Text>
+            <Text style={styles.openDetailText}>게시글 보기</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.desc}>
+            #{item.id} · {item.price_text || '가격 문의'} · 상태 {item.status || 'active'}
+          </Text>
+          <Text style={styles.metaText}>작성자: {getListingAuthorText(item)}</Text>
+          <Text style={styles.metaText}>작성자 ID: {item.author_id}</Text>
+          <Text style={styles.metaText}>등록일: {new Date(item.created_at).toLocaleString()}</Text>
+
+          {isListingDeletePending(item) ? (
+            <>
+              <Text style={styles.metaText}>
+                삭제 요청: {formatAdminDate(item.admin_deleted_at) || '-'}
+              </Text>
+              <Text style={styles.metaText}>
+                삭제 취소 가능 기한: {formatAdminDate(item.admin_delete_scheduled_at) || '-'}
+              </Text>
+            </>
+          ) : null}
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[
+                isListingHidden(item) ? styles.secondaryBtn : styles.dangerBtn,
+                isListingDeletePending(item) && styles.disabledBtn,
+              ]}
+              onPress={() => toggleListingHidden(item)}
+              disabled={isListingDeletePending(item)}
+            >
+              <Text style={isListingHidden(item) ? styles.secondaryText : styles.dangerText}>
+                {isListingHidden(item) ? '숨김취소' : '숨김'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                isListingDeletePending(item) ? styles.secondaryBtn : styles.dangerBtn,
+                isListingDeletePending(item) &&
+                  !canCancelListingDelete(item) &&
+                  styles.disabledBtn,
+              ]}
+              onPress={() =>
+                isListingDeletePending(item)
+                  ? cancelListingDelete(item)
+                  : requestListingDelete(item)
+              }
+              disabled={isListingDeletePending(item) && !canCancelListingDelete(item)}
+            >
+              <Text
+                style={
+                  isListingDeletePending(item)
+                    ? styles.secondaryText
+                    : styles.dangerText
+                }
+              >
+                {isListingDeletePending(item)
+                  ? canCancelListingDelete(item)
+                    ? '삭제 취소'
+                    : '삭제 취소 만료'
+                  : '삭제'}
+              </Text>
+            </TouchableOpacity>
           </View>
-        ) : null}
+        </View>
+      ))}
+    </View>
+  </View>
+) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -875,7 +1169,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 12,
     backgroundColor: '#f3f4f6',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 10,
     alignItems: 'center',
   },
@@ -883,6 +1177,107 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: '900',
   },
+  toolCard: {
+  borderRadius: 14,
+  backgroundColor: '#fff',
+  padding: 14,
+  borderWidth: 1,
+  borderColor: '#e5e7eb',
+  marginBottom: 12,
+},
+
+toolHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 10,
+},
+
+toolTitle: {
+  fontSize: 15,
+  fontWeight: '900',
+  color: '#111827',
+},
+
+viewToggleBtn: {
+  borderRadius: 999,
+  backgroundColor: '#111827',
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+},
+
+viewToggleText: {
+  color: '#fff',
+  fontSize: 12,
+  fontWeight: '900',
+},
+
+searchInput: {
+  marginTop: 12,
+  borderWidth: 1,
+  borderColor: '#d1d5db',
+  borderRadius: 12,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  backgroundColor: '#fff',
+  fontSize: 14,
+},
+
+filterRow: {
+  gap: 8,
+  paddingTop: 10,
+},
+
+filterChip: {
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: '#e5e7eb',
+  backgroundColor: '#fff',
+  paddingHorizontal: 12,
+  paddingVertical: 8,
+},
+
+filterChipActive: {
+  backgroundColor: '#2563eb',
+  borderColor: '#2563eb',
+},
+
+filterChipText: {
+  fontSize: 12,
+  fontWeight: '800',
+  color: '#374151',
+},
+
+filterChipTextActive: {
+  color: '#fff',
+},
+
+gridWrap: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  gap: 10,
+},
+
+listWrap: {
+  gap: 10,
+},
+
+gridCard: {
+  width: '48%',
+  marginBottom: 0,
+},
+
+listCard: {
+  width: '100%',
+  marginBottom: 0,
+},
+
+openDetailText: {
+  marginTop: 4,
+  fontSize: 12,
+  fontWeight: '900',
+  color: '#2563eb',
+},
   dangerBtn: {
     marginTop: 12,
     borderRadius: 12,
