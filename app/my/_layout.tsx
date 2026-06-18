@@ -28,6 +28,7 @@ export default function MyStackLayout() {
   <Stack.Screen name="notifications" options={{ title: '알림' }} />
   <Stack.Screen name="privacy" options={{ title: '개인정보처리방침' }} />
   <Stack.Screen name="terms" options={{ title: '이용약관' }} />
+  <Stack.Screen name="operation-policy" options={{ title: '운영정책' }} />
   <Stack.Screen name="blocked-users" options={{ title: '차단한 사용자' }} />
   <Stack.Screen name="delete-account" options={{ title: '회원탈퇴' }} />
 </Stack>

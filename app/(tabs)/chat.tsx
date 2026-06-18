@@ -37,6 +37,7 @@ type ChatRoomListItem = {
     price_text: string | null;
     region: string | null;
     author_id: string;
+    seller_name?: string | null;
     listing_images?: {
       id: number;
       image_path: string;
@@ -220,6 +221,9 @@ export default function ChatScreen() {
             price_text,
             region,
             author_id,
+            profiles!listings_author_id_fkey (
+              display_name
+            ),
             listing_images (
               id,
               image_path,
@@ -245,6 +249,9 @@ export default function ChatScreen() {
       }
 
       const mapped: ChatRoomListItem[] = (roomRows || []).map((room: any) => {
+        const sellerProfile = Array.isArray(room.listings?.profiles)
+          ? room.listings.profiles[0]
+          : room.listings?.profiles;
         const sortedImages = [...(room.listings?.listing_images || [])].sort(
           (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
         );
@@ -262,6 +269,7 @@ export default function ChatScreen() {
           listing: room.listings
             ? {
                 ...room.listings,
+                seller_name: sellerProfile?.display_name || null,
                 listing_images: sortedImages,
               }
             : null,
@@ -324,13 +332,15 @@ setRooms(mappedWithUnread);
   };
 
   const getOtherUserLabel = (room: ChatRoomListItem) => {
-    if (!user) return '';
+    const sellerName = room.listing?.seller_name || '판매자';
+
+    if (!user) return `판매자: ${sellerName}`;
 
     if (room.listing?.author_id === user.id) {
-      return '구매자와의 채팅';
+      return `판매자: ${sellerName} · 구매자와의 채팅`;
     }
 
-    return '판매자와의 채팅';
+    return `판매자: ${sellerName}`;
   };
 
   const getCategoryLabel = (category?: 'trade' | 'share' | 'want') => {

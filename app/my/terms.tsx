@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const UPDATED_AT = '2026년 6월 9일';
+const UPDATED_AT = '2026년 6월 18일';
 const CONTACT_EMAIL = 'wmenc.jaewoon@gmail.com';
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -41,7 +41,9 @@ export default function TermsScreen() {
 
       <Section title="4. 금지 행위">
         사기, 허위 매물, 불법 물품 거래, 욕설과 협박, 스팸, 광고성 도배, 타인의
-        개인정보 무단 공개, 서비스 운영을 방해하는 행위는 금지됩니다.
+        개인정보 무단 공개, 서비스 운영을 방해하는 행위는 금지됩니다. 판매금지 품목,
+        자재 거래 제한 품목, 청소년 보호, 계좌 송금 주의, 신고 및 제재에 관한 세부
+        기준은 운영정책을 따릅니다.
       </Section>
 
       <Section title="5. 게시글과 채팅 관리">

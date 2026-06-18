@@ -25,17 +25,21 @@ import { supabase } from '../../../../lib/supabase';
 
 export default function CreateSellScreen() {
   const params = useLocalSearchParams<{
-  lat?: string;
-  lng?: string;
-  regionChanged?: string;
-  regionName?: string;
-  regionLat?: string;
-  regionLng?: string;
-}>();
+    lat?: string;
+    lng?: string;
+    regionChanged?: string;
+    regionName?: string;
+    regionLat?: string;
+    regionLng?: string;
+  }>();
 
   const [title, setTitle] = useState('');
   const [priceText, setPriceText] = useState('');
   const [quantityText, setQuantityText] = useState('');
+  const QUANTITY_UNIT_OPTIONS = ['개', '박스', '피스', '세트', '봉지', '묶음', '장', 'kg', 'g', 'L', 'ml', '기타'];
+
+  const [quantityUnit, setQuantityUnit] = useState('개');
+  const [customQuantityUnit, setCustomQuantityUnit] = useState('');
   const [description, setDescription] = useState('');
   const [detailLocation, setDetailLocation] = useState('');
 
@@ -58,47 +62,47 @@ export default function CreateSellScreen() {
   const [successMessage, setSuccessMessage] = useState('');
 
   useFocusEffect(
-  useCallback(() => {
-    if (params.regionChanged || params.regionName) return;
+    useCallback(() => {
+      if (params.regionChanged || params.regionName) return;
 
-    loadActiveRegion();
-  }, [params.regionChanged, params.regionName])
-);
-
-useEffect(() => {
-  if (!params.regionChanged) return;
-
-  const refresh = async () => {
-    if (params.regionName) {
-      setActiveRegionName(String(params.regionName));
-      setActiveRegionLat(params.regionLat ? Number(params.regionLat) : null);
-      setActiveRegionLng(params.regionLng ? Number(params.regionLng) : null);
-      return;
-    }
-
-    await loadActiveRegion();
-  };
-
-  refresh();
-}, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
-
-  
+      loadActiveRegion();
+    }, [params.regionChanged, params.regionName])
+  );
 
   useEffect(() => {
-  const init = async () => {
-    if (!params.regionName) {
+    if (!params.regionChanged) return;
+
+    const refresh = async () => {
+      if (params.regionName) {
+        setActiveRegionName(String(params.regionName));
+        setActiveRegionLat(params.regionLat ? Number(params.regionLat) : null);
+        setActiveRegionLng(params.regionLng ? Number(params.regionLng) : null);
+        return;
+      }
+
       await loadActiveRegion();
-    }
+    };
 
-    const hasDraft = await loadDraft();
+    refresh();
+  }, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
 
-    if (!hasDraft) {
-      await initDefaultLocation();
-    }
-  };
 
-  init();
-}, []);
+
+  useEffect(() => {
+    const init = async () => {
+      if (!params.regionName) {
+        await loadActiveRegion();
+      }
+
+      const hasDraft = await loadDraft();
+
+      if (!hasDraft) {
+        await initDefaultLocation();
+      }
+    };
+
+    init();
+  }, []);
 
   useEffect(() => {
     if (params.lat && params.lng) {
@@ -109,24 +113,24 @@ useEffect(() => {
   }, [params.lat, params.lng]);
 
   const getDistanceKm = (
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number
-) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number
+  ) => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
 
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) *
       Math.sin(dLng / 2);
 
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
 
   const loadActiveRegion = async () => {
     try {
@@ -158,146 +162,158 @@ useEffect(() => {
   };
 
   const pickImage = async () => {
-  try {
-    setErrorMessage('');
-    setSuccessMessage('');
+    try {
+      setErrorMessage('');
+      setSuccessMessage('');
 
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!permission.granted) {
-      setErrorMessage('사진을 선택하려면 사진 접근 권한이 필요합니다.');
-      return;
+      if (!permission.granted) {
+        setErrorMessage('사진을 선택하려면 사진 접근 권한이 필요합니다.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        selectionLimit: 10,
+        quality: 0.8,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+
+      if (!result.canceled && result.assets?.length > 0) {
+        const uris = result.assets.map((asset) => asset.uri);
+
+        setImageUris((prev) => [...prev, ...uris].slice(0, 10));
+        setSuccessMessage('사진이 선택되었습니다.');
+      }
+    } catch (error: any) {
+      console.log('이미지 선택 에러:', error);
+      setErrorMessage(error?.message || '이미지를 선택하지 못했습니다.');
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-      quality: 0.8,
-      preferredAssetRepresentationMode:
-        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-    });
-
-    if (!result.canceled && result.assets?.length > 0) {
-      const uris = result.assets.map((asset) => asset.uri);
-
-      setImageUris((prev) => [...prev, ...uris].slice(0, 10));
-      setSuccessMessage('사진이 선택되었습니다.');
-    }
-  } catch (error: any) {
-    console.log('이미지 선택 에러:', error);
-    setErrorMessage(error?.message || '이미지를 선택하지 못했습니다.');
-  }
-};
-
-  const uploadImageToStorage = async (
-  listingId: number,
-  uri: string,
-  sortOrder: number
-) => {
-  const filePath = `listing-${listingId}/${Date.now()}-${sortOrder}.jpg`;
-
-  let uploadData: Blob | ArrayBuffer;
-
-  if (Platform.OS === 'web') {
-    const response = await fetch(uri);
-    uploadData = await response.blob();
-  } else {
-    const base64 = await FileSystem.readAsStringAsync(uri, {
-      encoding: 'base64',
-    });
-
-    uploadData = decode(base64);
-  }
-
-  const { error: uploadError } = await supabase.storage
-    .from('listing-images')
-    .upload(filePath, uploadData, {
-      contentType: 'image/jpeg',
-      upsert: false,
-    });
-
-  if (uploadError) {
-    throw uploadError;
-  }
-
-  const { error: imageRowError } = await supabase
-    .from('listing_images')
-    .insert({
-      listing_id: listingId,
-      image_path: filePath,
-      sort_order: sortOrder,
-    });
-
-  if (imageRowError) {
-    throw imageRowError;
-  }
-
-  return filePath;
-};
-
-  const saveDraft = async () => {
-  const draft = {
-    title,
-    priceText,
-    quantityText,
-    description,
-    detailLocation,
-    urgent,
-    availableNow,
-    availableToday,
-    latitude,
-    longitude,
-    imageUris,
   };
 
-  await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-};
+  const uploadImageToStorage = async (
+    listingId: number,
+    uri: string,
+    sortOrder: number
+  ) => {
+    const filePath = `listing-${listingId}/${Date.now()}-${sortOrder}.jpg`;
+
+    let uploadData: Blob | ArrayBuffer;
+
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      uploadData = await response.blob();
+    } else {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+
+      uploadData = decode(base64);
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from('listing-images')
+      .upload(filePath, uploadData, {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { error: imageRowError } = await supabase
+      .from('listing_images')
+      .insert({
+        listing_id: listingId,
+        image_path: filePath,
+        sort_order: sortOrder,
+      });
+
+    if (imageRowError) {
+      throw imageRowError;
+    }
+
+    return filePath;
+  };
+
+  const saveDraft = async () => {
+    const draft = {
+      title,
+      priceText,
+      quantityText,
+      quantityUnit,
+      customQuantityUnit,
+      description,
+      detailLocation,
+      urgent,
+      availableNow,
+      availableToday,
+      latitude,
+      longitude,
+      imageUris,
+    };
+
+    await AsyncStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  };
 
 
   const loadDraft = async () => {
-  try {
-    const saved = await AsyncStorage.getItem(DRAFT_KEY);
+    try {
+      const saved = await AsyncStorage.getItem(DRAFT_KEY);
 
-    if (!saved) return false;
+      if (!saved) return false;
 
-    const draft = JSON.parse(saved);
+      const draft = JSON.parse(saved);
 
-    setTitle(draft.title || '');
-    setPriceText(draft.priceText || '');
-    setQuantityText(draft.quantityText || '1');
-    setDescription(draft.description || '');
-    setDetailLocation(draft.detailLocation || '');
-    setUrgent(!!draft.urgent);
-    setAvailableNow(!!draft.availableNow);
-    setAvailableToday(!!draft.availableToday);
-    setImageUris(draft.imageUris || []);
+      setTitle(draft.title || '');
+      setPriceText(draft.priceText || '');
+      setQuantityText(draft.quantityText || '1');
+      setQuantityUnit(draft.quantityUnit || '개');
+      setCustomQuantityUnit(draft.customQuantityUnit || '');
+      setDescription(draft.description || '');
+      setDetailLocation(draft.detailLocation || '');
+      setUrgent(!!draft.urgent);
+      setAvailableNow(!!draft.availableNow);
+      setAvailableToday(!!draft.availableToday);
+      setImageUris(draft.imageUris || []);
 
-    // 지도에서 새로 선택한 좌표가 없을 때만 임시저장 좌표 복구
-    if (!params.lat || !params.lng) {
-      setLatitude(draft.latitude ?? null);
-      setLongitude(draft.longitude ?? null);
+      // 지도에서 새로 선택한 좌표가 없을 때만 임시저장 좌표 복구
+      if (!params.lat || !params.lng) {
+        setLatitude(draft.latitude ?? null);
+        setLongitude(draft.longitude ?? null);
+      }
+
+      return true;
+    } catch (e) {
+      console.log('임시저장 불러오기 실패:', e);
+      return false;
     }
-
-    return true;
-  } catch (e) {
-    console.log('임시저장 불러오기 실패:', e);
-    return false;
-  }
-};
+  };
 
   const MAX_DISTANCE_KM = 26;
 
-const distanceFromRegion =
-  activeRegionLat != null &&
-  activeRegionLng != null &&
-  latitude != null &&
-  longitude != null
-    ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
-    : null;
+  const distanceFromRegion =
+    activeRegionLat != null &&
+      activeRegionLng != null &&
+      latitude != null &&
+      longitude != null
+      ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
+      : null;
 
-const isTooFarFromRegion =
-  distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
+  const isTooFarFromRegion =
+    distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
+
+  const getFinalQuantityUnit = () => {
+    if (quantityUnit === '기타') {
+      return customQuantityUnit.trim();
+    }
+
+    return quantityUnit;
+  };
 
   const handleCreate = async () => {
     try {
@@ -334,15 +350,26 @@ const isTooFarFromRegion =
         setErrorMessage('판매 수량은 1개 이상 입력해 주세요.');
         return;
       }
+      const finalQuantityUnit = getFinalQuantityUnit();
+
+      if (!finalQuantityUnit) {
+        setErrorMessage('수량 단위를 선택하거나 직접 입력해 주세요.');
+        return;
+      }
+
+      if (finalQuantityUnit.length > 10) {
+        setErrorMessage('수량 단위는 10자 이내로 입력해 주세요.');
+        return;
+      }
 
       if (latitude == null || longitude == null) {
         setErrorMessage('거래 희망 장소를 지도에서 선택해 주세요.');
         return;
       }
       if (isTooFarFromRegion) {
-  setErrorMessage('거래 장소와 가까운 동네로 대표 동네를 변경해 주세요.');
-  return;
-}
+        setErrorMessage('거래 장소와 가까운 동네로 대표 동네를 변경해 주세요.');
+        return;
+      }
 
       const blockedKeyword = checkProhibitedContent(
         title,
@@ -378,6 +405,7 @@ const isTooFarFromRegion =
           quantity_total: quantity,
           quantity_remaining: quantity,
           quantity_sold: 0,
+          quantity_unit: finalQuantityUnit,
         })
         .select()
         .single();
@@ -393,19 +421,19 @@ const isTooFarFromRegion =
       }
 
       await sendKeywordAlertsForListing({
-  listingId: inserted.id,
-  title,
-  content: description,
-  region: activeRegionName,
-  authorId: data.user.id,
-});
-      
+        listingId: inserted.id,
+        title,
+        content: description,
+        region: activeRegionName,
+        authorId: data.user.id,
+      });
+
 
       if (imageUris.length > 0) {
-  for (let i = 0; i < imageUris.length; i++) {
-    await uploadImageToStorage(inserted.id, imageUris[i], i);
-  }
-}
+        for (let i = 0; i < imageUris.length; i++) {
+          await uploadImageToStorage(inserted.id, imageUris[i], i);
+        }
+      }
 
       setSuccessMessage('판매 글이 등록되었습니다.');
       await AsyncStorage.removeItem(DRAFT_KEY);
@@ -420,210 +448,267 @@ const isTooFarFromRegion =
 
   return (
     <KeyboardAvoidingView
-    style={{ flex: 1}}
-    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-    <ScrollView
-  style={styles.screen}
-  contentContainerStyle={styles.content}
-  keyboardShouldPersistTaps="handled"
->
-      <Text style={styles.title}>판매 등록</Text>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.title}>판매 등록</Text>
 
-      <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
-  <Text style={styles.imagePickerText}>
-    사진 올리기 {imageUris.length > 0 ? `(${imageUris.length}/10)` : ''}
-  </Text>
-</TouchableOpacity>
+        <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
+          <Text style={styles.imagePickerText}>
+            사진 올리기 {imageUris.length > 0 ? `(${imageUris.length}/10)` : ''}
+          </Text>
+        </TouchableOpacity>
 
-{imageUris.length > 0 && (
-  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-    {imageUris.map((uri, index) => (
-      <View key={`${uri}-${index}`} style={styles.thumbnailWrap}>
-        <Image source={{ uri }} style={styles.thumbnailImage} />
+        {imageUris.length > 0 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {imageUris.map((uri, index) => (
+              <View key={`${uri}-${index}`} style={styles.thumbnailWrap}>
+                <Image source={{ uri }} style={styles.thumbnailImage} />
+
+                <TouchableOpacity
+                  style={styles.removeImageBtn}
+                  onPress={() =>
+                    setImageUris((prev) => prev.filter((_, i) => i !== index))
+                  }
+                >
+                  <Text style={styles.removeImageText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        <View style={styles.infoBox}>
+          <Text style={styles.infoLabel}>게시글이 올라갈 동네</Text>
+          <Text style={styles.infoValue}>
+            {activeRegionName || '대표 동네를 불러오는 중...'}
+          </Text>
+        </View>
 
         <TouchableOpacity
-          style={styles.removeImageBtn}
-          onPress={() =>
-            setImageUris((prev) => prev.filter((_, i) => i !== index))
-          }
+          style={styles.mapBtn}
+          onPress={async () => {
+            await saveDraft();
+
+            let mapLat = latitude ?? 37.5665;
+            let mapLng = longitude ?? 126.9780;
+
+            try {
+              const permission = await Location.requestForegroundPermissionsAsync();
+
+              if (permission.status === 'granted') {
+                const current = await Location.getCurrentPositionAsync({
+                  accuracy: Location.Accuracy.Balanced,
+                });
+
+                mapLat = current.coords.latitude;
+                mapLng = current.coords.longitude;
+              }
+            } catch (e) {
+              console.log('현재 위치 불러오기 실패:', e);
+            }
+
+            router.push({
+              pathname: '/map-picker',
+              params: {
+                lat: String(mapLat),
+                lng: String(mapLng),
+                returnTo: '/(tabs)/home/create/sell',
+              },
+            } as any);
+          }}
         >
-          <Text style={styles.removeImageText}>×</Text>
+          <Text style={styles.mapBtnText}>지도에서 거래 희망 장소 선택</Text>
         </TouchableOpacity>
-      </View>
-    ))}
-  </ScrollView>
-)}
 
-      <View style={styles.infoBox}>
-        <Text style={styles.infoLabel}>게시글이 올라갈 동네</Text>
-        <Text style={styles.infoValue}>
-          {activeRegionName || '대표 동네를 불러오는 중...'}
+        <View style={styles.infoBox}>
+          <Text style={styles.infoLabel}>선택된 거래 희망 장소</Text>
+          <Text style={styles.infoValue}>
+            {latitude != null && longitude != null
+              ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
+              : '아직 선택되지 않았습니다.'}
+          </Text>
+        </View>
+
+        <TextInput
+          style={styles.input}
+          placeholder="자세한 위치 예: 정문 앞, 1층 로비, ○○마트 앞"
+          placeholderTextColor="#9ca3af"
+          value={detailLocation}
+          onChangeText={setDetailLocation}
+        />
+
+        {isTooFarFromRegion && (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningTitle}>대표 동네와 거래 장소가 너무 멀어요</Text>
+            <Text style={styles.warningText}>
+              현재 게시글이 올라갈 동네와 선택한 거래 희망 장소가 약{' '}
+              {distanceFromRegion?.toFixed(1)}km 떨어져 있습니다. 거래 장소와 가까운
+              동네로 대표 동네를 변경해 주세요.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.changeRegionBtn}
+              onPress={async () => {
+                await saveDraft();
+                router.push({
+                  pathname: '/(tabs)/home/regions',
+                  params: {
+                    returnTo: '/(tabs)/home/create/sell',
+                    mode: 'select',
+                  },
+                } as any);
+              }}
+            >
+              <Text style={styles.changeRegionBtnText}>대표 동네 바꾸기</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <TextInput
+          style={styles.input}
+          placeholder="제목"
+          placeholderTextColor="#9ca3af"
+          value={title}
+          onChangeText={setTitle}
+        />
+
+        <TextInput
+          style={styles.input}
+          placeholder="가격"
+          placeholderTextColor="#9ca3af"
+          keyboardType="numeric"
+          value={priceText}
+          onChangeText={(text) => {
+            const onlyNumber = text.replace(/[^0-9]/g, '');
+
+            if (!onlyNumber) {
+              setPriceText('');
+              return;
+            }
+
+            const formatted =
+              Number(onlyNumber).toLocaleString('ko-KR') + '원';
+
+            setPriceText(formatted);
+          }}
+        />
+
+        <View style={styles.quantityBox}>
+          <View style={styles.quantityInputRow}>
+            <TextInput
+              style={styles.quantityInput}
+              placeholder="판매 수량"
+              placeholderTextColor="#9ca3af"
+              keyboardType="number-pad"
+              value={quantityText}
+              onChangeText={(value) => {
+                const onlyNumber = value.replace(/[^0-9]/g, '');
+                setQuantityText(onlyNumber || '');
+              }}
+            />
+
+            <View style={styles.quantityUnitPreview}>
+              <Text style={styles.quantityUnitPreviewText}>
+                {quantityUnit === '기타' ? customQuantityUnit || '직접입력' : quantityUnit}
+              </Text>
+            </View>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quantityUnitOptions}
+          >
+            {QUANTITY_UNIT_OPTIONS.map((unit) => {
+              const selected = quantityUnit === unit;
+
+              return (
+                <TouchableOpacity
+                  key={unit}
+                  style={[
+                    styles.quantityUnitChip,
+                    selected && styles.quantityUnitChipActive,
+                  ]}
+                  onPress={() => {
+                    setQuantityUnit(unit);
+
+                    if (unit !== '기타') {
+                      setCustomQuantityUnit('');
+                    }
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.quantityUnitChipText,
+                      selected && styles.quantityUnitChipTextActive,
+                    ]}
+                  >
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {quantityUnit === '기타' ? (
+            <TextInput
+              style={styles.input}
+              placeholder="단위 직접 입력 예: 마대, 롤, 판"
+              placeholderTextColor="#9ca3af"
+              value={customQuantityUnit}
+              maxLength={10}
+              onChangeText={setCustomQuantityUnit}
+            />
+          ) : null}
+        </View>
+
+        <TextInput
+          style={[styles.input, styles.textarea]}
+          placeholder="설명"
+          placeholderTextColor="#9ca3af"
+          multiline
+          value={description}
+          onChangeText={setDescription}
+        />
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>긴급배송 가능</Text>
+          <Switch value={urgent} onValueChange={setUrgent} />
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>지금 가능</Text>
+          <Switch value={availableNow} onValueChange={setAvailableNow} />
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>오늘 가능</Text>
+          <Switch value={availableToday} onValueChange={setAvailableToday} />
+        </View>
+
+        <Text style={styles.noticeText}>
+          게시글 지역은 대표 동네로 자동 저장되고, 거래 희망 장소는 지도에서 선택한 위치로 저장됩니다.
         </Text>
-      </View>
 
-      <TouchableOpacity
-        style={styles.mapBtn}
-        onPress={async () => {
-  await saveDraft();
+        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+        {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
 
-  let mapLat = latitude ?? 37.5665;
-  let mapLng = longitude ?? 126.9780;
-
-  try {
-    const permission = await Location.requestForegroundPermissionsAsync();
-
-    if (permission.status === 'granted') {
-      const current = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      mapLat = current.coords.latitude;
-      mapLng = current.coords.longitude;
-    }
-  } catch (e) {
-    console.log('현재 위치 불러오기 실패:', e);
-  }
-
-  router.push({
-    pathname: '/map-picker',
-    params: {
-      lat: String(mapLat),
-      lng: String(mapLng),
-      returnTo: '/(tabs)/home/create/sell',
-    },
-  } as any);
-}}
-      >
-        <Text style={styles.mapBtnText}>지도에서 거래 희망 장소 선택</Text>
-      </TouchableOpacity>
-
-      <View style={styles.infoBox}>
-        <Text style={styles.infoLabel}>선택된 거래 희망 장소</Text>
-        <Text style={styles.infoValue}>
-          {latitude != null && longitude != null
-            ? `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-            : '아직 선택되지 않았습니다.'}
-        </Text>
-      </View>
-
-      <TextInput
-  style={styles.input}
-  placeholder="자세한 위치 예: 정문 앞, 1층 로비, ○○마트 앞"
-  placeholderTextColor="#9ca3af"
-  value={detailLocation}
-  onChangeText={setDetailLocation}
-/>
-
-      {isTooFarFromRegion && (
-  <View style={styles.warningBox}>
-    <Text style={styles.warningTitle}>대표 동네와 거래 장소가 너무 멀어요</Text>
-    <Text style={styles.warningText}>
-      현재 게시글이 올라갈 동네와 선택한 거래 희망 장소가 약{' '}
-      {distanceFromRegion?.toFixed(1)}km 떨어져 있습니다. 거래 장소와 가까운
-      동네로 대표 동네를 변경해 주세요.
-    </Text>
-
-    <TouchableOpacity
-      style={styles.changeRegionBtn}
-      onPress={async () => {
-        await saveDraft();
-        router.push({
-  pathname: '/(tabs)/home/regions',
-  params: {
-    returnTo: '/(tabs)/home/create/sell',
-    mode : 'select',
-  },
-} as any);
-      }}
-    >
-      <Text style={styles.changeRegionBtnText}>대표 동네 바꾸기</Text>
-    </TouchableOpacity>
-  </View>
-)}
-
-      <TextInput
-        style={styles.input}
-        placeholder="제목"
-        placeholderTextColor="#9ca3af"
-        value={title}
-        onChangeText={setTitle}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="가격"
-        placeholderTextColor="#9ca3af"
-        keyboardType="numeric"
-        value={priceText}
-        onChangeText={(text) => {
-          const onlyNumber = text.replace(/[^0-9]/g, '');
-
-          if (!onlyNumber) {
-            setPriceText('');
-            return;
-          }
-
-          const formatted =
-            Number(onlyNumber).toLocaleString('ko-KR') + '원';
-
-          setPriceText(formatted);
-        }}
-      />
-
-      <TextInput
-        style={styles.input}
-        placeholder="판매 수량"
-        placeholderTextColor="#9ca3af"
-        keyboardType="number-pad"
-        value={quantityText}
-        onChangeText={(value) => {
-          const onlyNumber = value.replace(/[^0-9]/g, '');
-          setQuantityText(onlyNumber || '');
-        }}
-      />
-
-      <TextInput
-        style={[styles.input, styles.textarea]}
-        placeholder="설명"
-        placeholderTextColor="#9ca3af"
-        multiline
-        value={description}
-        onChangeText={setDescription}
-      />
-
-      <View style={styles.row}>
-        <Text style={styles.rowLabel}>긴급배송 가능</Text>
-        <Switch value={urgent} onValueChange={setUrgent} />
-      </View>
-
-      <View style={styles.row}>
-        <Text style={styles.rowLabel}>지금 가능</Text>
-        <Switch value={availableNow} onValueChange={setAvailableNow} />
-      </View>
-
-      <View style={styles.row}>
-        <Text style={styles.rowLabel}>오늘 가능</Text>
-        <Switch value={availableToday} onValueChange={setAvailableToday} />
-      </View>
-
-      <Text style={styles.noticeText}>
-        게시글 지역은 대표 동네로 자동 저장되고, 거래 희망 장소는 지도에서 선택한 위치로 저장됩니다.
-      </Text>
-
-      {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-      {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
-
-      <TouchableOpacity
-        style={[styles.btn, submitting && styles.btnDisabled]}
-        onPress={handleCreate}
-        disabled={submitting}
-      >
-        <Text style={styles.btnText}>
-          {submitting ? '등록 중...' : '등록하기'}
-        </Text>
-      </TouchableOpacity>
-    </ScrollView>
+        <TouchableOpacity
+          style={[styles.btn, submitting && styles.btnDisabled]}
+          onPress={handleCreate}
+          disabled={submitting}
+        >
+          <Text style={styles.btnText}>
+            {submitting ? '등록 중...' : '등록하기'}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -706,34 +791,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   warningBox: {
-  borderWidth: 1,
-  borderColor: '#f59e0b',
-  borderRadius: 14,
-  padding: 14,
-  backgroundColor: '#fffbeb',
-  gap: 8,
-},
-warningTitle: {
-  fontSize: 15,
-  fontWeight: '800',
-  color: '#92400e',
-},
-warningText: {
-  fontSize: 13,
-  lineHeight: 20,
-  color: '#92400e',
-},
-changeRegionBtn: {
-  marginTop: 4,
-  backgroundColor: '#f59e0b',
-  borderRadius: 12,
-  paddingVertical: 12,
-  alignItems: 'center',
-},
-changeRegionBtnText: {
-  color: '#fff',
-  fontWeight: '800',
-},
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: '#fffbeb',
+    gap: 8,
+  },
+  warningTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#92400e',
+  },
+  warningText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#92400e',
+  },
+  changeRegionBtn: {
+    marginTop: 4,
+    backgroundColor: '#f59e0b',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  changeRegionBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
   rowLabel: {
     fontSize: 15,
     fontWeight: '600',
@@ -757,34 +842,100 @@ changeRegionBtnText: {
     fontWeight: '600',
   },
   thumbnailWrap: {
-  width: 90,
-  height: 90,
-  marginRight: 10,
-  borderRadius: 12,
-  overflow: 'hidden',
-  position: 'relative',
-  backgroundColor: '#f3f4f6',
-},
-thumbnailImage: {
-  width: '100%',
-  height: '100%',
-},
-removeImageBtn: {
-  position: 'absolute',
-  top: 4,
-  right: 4,
-  width: 22,
-  height: 22,
-  borderRadius: 11,
-  backgroundColor: 'rgba(0,0,0,0.6)',
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-removeImageText: {
-  color: '#fff',
-  fontSize: 16,
-  fontWeight: '800',
-},
+    width: 90,
+    height: 90,
+    marginRight: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#f3f4f6',
+  },
+  thumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  removeImageBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  quantityBox: {
+    gap: 10,
+  },
+
+  quantityInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  quantityInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: '#fff',
+  },
+
+  quantityUnitPreview: {
+    minWidth: 76,
+    height: 50,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+
+  quantityUnitPreviewText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+  },
+
+  quantityUnitOptions: {
+    gap: 8,
+    paddingRight: 8,
+  },
+
+  quantityUnitChip: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    backgroundColor: '#fff',
+  },
+
+  quantityUnitChipActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
+
+  quantityUnitChipText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#374151',
+  },
+
+  quantityUnitChipTextActive: {
+    color: '#fff',
+  },
+  removeImageText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
   btn: {
     backgroundColor: '#2563eb',
     borderRadius: 14,

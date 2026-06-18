@@ -17,22 +17,40 @@ import { supabase } from '../../../../lib/supabase';
 
 export default function CreateWantScreen() {
   const params = useLocalSearchParams<{
-  lat?: string;
-  lng?: string;
-  regionChanged?: string;
-  regionName?: string;
-  regionLat?: string;
-  regionLng?: string;
-}>();
+    lat?: string;
+    lng?: string;
+    regionChanged?: string;
+    regionName?: string;
+    regionLat?: string;
+    regionLng?: string;
+  }>();
 
+  const [detailLocation, setDetailLocation] = useState('');
   const [title, setTitle] = useState('');
   const [priceText, setPriceText] = useState('');
+  const [quantityText, setQuantityText] = useState('');
   const [description, setDescription] = useState('');
-  const [detailLocation, setDetailLocation] = useState('');
+  const QUANTITY_UNIT_OPTIONS = [
+    '개',
+    '박스',
+    '피스',
+    '세트',
+    '봉지',
+    '묶음',
+    '장',
+    'kg',
+    'g',
+    'L',
+    'ml',
+    '기타',
+  ];
+
+  const [quantityUnit, setQuantityUnit] = useState('개');
+  const [customQuantityUnit, setCustomQuantityUnit] = useState('');
 
   const [activeRegionName, setActiveRegionName] = useState('');
   const [activeRegionLat, setActiveRegionLat] = useState<number | null>(null);
-const [activeRegionLng, setActiveRegionLng] = useState<number | null>(null);
+  const [activeRegionLng, setActiveRegionLng] = useState<number | null>(null);
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
 
@@ -41,34 +59,34 @@ const [activeRegionLng, setActiveRegionLng] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
 
   useFocusEffect(
-  useCallback(() => {
-    if (params.regionChanged || params.regionName) return;
-    loadActiveRegion();
-  }, [params.regionChanged, params.regionName])
-);
+    useCallback(() => {
+      if (params.regionChanged || params.regionName) return;
+      loadActiveRegion();
+    }, [params.regionChanged, params.regionName])
+  );
 
-useEffect(() => {
-  const init = async () => {
-    if (!params.regionName) {
-      await loadActiveRegion();
+  useEffect(() => {
+    const init = async () => {
+      if (!params.regionName) {
+        await loadActiveRegion();
+      }
+      await initDefaultLocation();
+    };
+    init();
+  }, []);
+
+  useEffect(() => {
+    if (!params.regionChanged) return;
+
+    if (params.regionName) {
+      setActiveRegionName(String(params.regionName));
+      setActiveRegionLat(params.regionLat ? Number(params.regionLat) : null);
+      setActiveRegionLng(params.regionLng ? Number(params.regionLng) : null);
+      return;
     }
-    await initDefaultLocation();
-  };
-  init();
-}, []);
 
-useEffect(() => {
-  if (!params.regionChanged) return;
-
-  if (params.regionName) {
-    setActiveRegionName(String(params.regionName));
-    setActiveRegionLat(params.regionLat ? Number(params.regionLat) : null);
-    setActiveRegionLng(params.regionLng ? Number(params.regionLng) : null);
-    return;
-  }
-
-  loadActiveRegion();
-}, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
+    loadActiveRegion();
+  }, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
 
   useEffect(() => {
     if (params.lat && params.lng) {
@@ -82,8 +100,8 @@ useEffect(() => {
     try {
       const region = await getMyActiveRegion();
       setActiveRegionName(region.region_name);
-setActiveRegionLat(region.latitude);
-setActiveRegionLng(region.longitude);
+      setActiveRegionLat(region.latitude);
+      setActiveRegionLng(region.longitude);
     } catch (e: any) {
       setErrorMessage(e?.message || '대표 동네를 먼저 설정해 주세요.');
     }
@@ -105,31 +123,39 @@ setActiveRegionLng(region.longitude);
     }
   };
   const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
 
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
 
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
 
-const MAX_DISTANCE_KM = 30;
+  const MAX_DISTANCE_KM = 30;
 
-const distanceFromRegion =
-  activeRegionLat != null &&
-  activeRegionLng != null &&
-  latitude != null &&
-  longitude != null
-    ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
-    : null;
+  const distanceFromRegion =
+    activeRegionLat != null &&
+      activeRegionLng != null &&
+      latitude != null &&
+      longitude != null
+      ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
+      : null;
 
-const isTooFarFromRegion =
-  distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
+  const isTooFarFromRegion =
+    distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
+
+  const getFinalQuantityUnit = () => {
+    if (quantityUnit === '기타') {
+      return customQuantityUnit.trim();
+    }
+
+    return quantityUnit;
+  };
 
   const handleCreate = async () => {
     try {
@@ -155,15 +181,34 @@ const isTooFarFromRegion =
         return;
       }
 
+      const quantity = Number(quantityText);
+
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        setErrorMessage('구하는 수량은 1개 이상 입력해 주세요.');
+        return;
+      }
+
+      const finalQuantityUnit = getFinalQuantityUnit();
+
+      if (!finalQuantityUnit) {
+        setErrorMessage('수량 단위를 선택하거나 직접 입력해 주세요.');
+        return;
+      }
+
+      if (finalQuantityUnit.length > 10) {
+        setErrorMessage('수량 단위는 10자 이내로 입력해 주세요.');
+        return;
+      }
+
       if (latitude == null || longitude == null) {
         setErrorMessage('거래 희망 장소를 지도에서 선택해 주세요.');
         return;
       }
 
       if (isTooFarFromRegion) {
-  setErrorMessage('거래 장소와 가까운 동네로 대표 동네를 변경해 주세요.');
-  return;
-}
+        setErrorMessage('거래 장소와 가까운 동네로 대표 동네를 변경해 주세요.');
+        return;
+      }
 
       const blockedKeyword = checkProhibitedContent(
         title,
@@ -181,21 +226,25 @@ const isTooFarFromRegion =
       setSubmitting(true);
 
       const { data: inserted, error } = await supabase
-  .from('listings')
-  .insert({
-    author_id: data.user.id,
-    category: 'want',
-    title: title.trim(),
-    price_text: priceText.trim() || null,
-    region: activeRegionName,
-    latitude,
-    longitude,
-    detail_location: detailLocation.trim() || null,
-    description: description.trim() || null,
-    status: 'active',
-  })
-  .select()
-  .single();
+        .from('listings')
+        .insert({
+          author_id: data.user.id,
+          category: 'want',
+          title: title.trim(),
+          price_text: priceText.trim() || null,
+          region: activeRegionName,
+          latitude,
+          longitude,
+          detail_location: detailLocation.trim() || null,
+          description: description.trim() || null,
+          status: 'active',
+          quantity_total: quantity,
+          quantity_remaining: quantity,
+          quantity_sold: 0,
+          quantity_unit: finalQuantityUnit,
+        })
+        .select()
+        .single();
 
       if (error) {
         setErrorMessage(error.message);
@@ -203,12 +252,12 @@ const isTooFarFromRegion =
       }
 
       await sendKeywordAlertsForListing({
-  listingId: inserted.id,
-  title,
-  content: description,
-  region: activeRegionName,
-  authorId: data.user.id,
-});
+        listingId: inserted.id,
+        title,
+        content: description,
+        region: activeRegionName,
+        authorId: data.user.id,
+      });
 
       setSuccessMessage('구해요 글이 등록되었습니다.');
       router.replace('/(tabs)/home');
@@ -263,37 +312,37 @@ const isTooFarFromRegion =
       </View>
 
       <TextInput
-  style={styles.input}
-  placeholder="자세한 위치 예: 정문 앞, 1층 로비, ○○마트 앞"
-  placeholderTextColor="#9ca3af"
-  value={detailLocation}
-  onChangeText={setDetailLocation}
-/>
+        style={styles.input}
+        placeholder="자세한 위치 예: 정문 앞, 1층 로비, ○○마트 앞"
+        placeholderTextColor="#9ca3af"
+        value={detailLocation}
+        onChangeText={setDetailLocation}
+      />
 
       {isTooFarFromRegion && (
-  <View style={styles.warningBox}>
-    <Text style={styles.warningTitle}>대표 동네와 거래 장소가 너무 멀어요</Text>
+        <View style={styles.warningBox}>
+          <Text style={styles.warningTitle}>대표 동네와 거래 장소가 너무 멀어요</Text>
 
-    <Text style={styles.warningText}>
-      약 {distanceFromRegion?.toFixed(1)}km 떨어져 있습니다.
-    </Text>
+          <Text style={styles.warningText}>
+            약 {distanceFromRegion?.toFixed(1)}km 떨어져 있습니다.
+          </Text>
 
-    <TouchableOpacity
-      style={styles.changeRegionBtn}
-      onPress={() => {
-        router.push({
-          pathname: '/(tabs)/home/regions',
-          params: {
-            returnTo: '/(tabs)/home/create/want',
-            mode: 'select',
-          },
-        } as any);
-      }}
-    >
-      <Text style={styles.changeRegionBtnText}>대표 동네 바꾸기</Text>
-    </TouchableOpacity>
-  </View>
-)}
+          <TouchableOpacity
+            style={styles.changeRegionBtn}
+            onPress={() => {
+              router.push({
+                pathname: '/(tabs)/home/regions',
+                params: {
+                  returnTo: '/(tabs)/home/create/want',
+                  mode: 'select',
+                },
+              } as any);
+            }}
+          >
+            <Text style={styles.changeRegionBtnText}>대표 동네 바꾸기</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <TextInput
         style={styles.input}
@@ -308,6 +357,75 @@ const isTooFarFromRegion =
         value={priceText}
         onChangeText={setPriceText}
       />
+
+      <View style={styles.quantityBox}>
+        <View style={styles.quantityInputRow}>
+          <TextInput
+            style={styles.quantityInput}
+            placeholder="구하는 수량"
+            placeholderTextColor="#9ca3af"
+            keyboardType="number-pad"
+            value={quantityText}
+            onChangeText={(value) => {
+              const onlyNumber = value.replace(/[^0-9]/g, '');
+              setQuantityText(onlyNumber || '');
+            }}
+          />
+
+          <View style={styles.quantityUnitPreview}>
+            <Text style={styles.quantityUnitPreviewText}>
+              {quantityUnit === '기타' ? customQuantityUnit || '직접입력' : quantityUnit}
+            </Text>
+          </View>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quantityUnitOptions}
+        >
+          {QUANTITY_UNIT_OPTIONS.map((unit) => {
+            const selected = quantityUnit === unit;
+
+            return (
+              <TouchableOpacity
+                key={unit}
+                style={[
+                  styles.quantityUnitChip,
+                  selected && styles.quantityUnitChipActive,
+                ]}
+                onPress={() => {
+                  setQuantityUnit(unit);
+
+                  if (unit !== '기타') {
+                    setCustomQuantityUnit('');
+                  }
+                }}
+              >
+                <Text
+                  style={[
+                    styles.quantityUnitChipText,
+                    selected && styles.quantityUnitChipTextActive,
+                  ]}
+                >
+                  {unit}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {quantityUnit === '기타' ? (
+          <TextInput
+            style={styles.input}
+            placeholder="단위 직접 입력 예: 마대, 롤, 판"
+            placeholderTextColor="#9ca3af"
+            value={customQuantityUnit}
+            maxLength={10}
+            onChangeText={setCustomQuantityUnit}
+          />
+        ) : null}
+      </View>
 
       <TextInput
         style={[styles.input, styles.textarea]}
@@ -360,35 +478,35 @@ const styles = StyleSheet.create({
   },
 
   warningBox: {
-  borderWidth: 1,
-  borderColor: '#f59e0b',
-  borderRadius: 14,
-  padding: 14,
-  backgroundColor: '#fffbeb',
-},
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: '#fffbeb',
+  },
 
-warningTitle: {
-  fontWeight: '800',
-  color: '#92400e',
-},
+  warningTitle: {
+    fontWeight: '800',
+    color: '#92400e',
+  },
 
-warningText: {
-  fontSize: 13,
-  color: '#92400e',
-},
+  warningText: {
+    fontSize: 13,
+    color: '#92400e',
+  },
 
-changeRegionBtn: {
-  marginTop: 8,
-  backgroundColor: '#f59e0b',
-  padding: 10,
-  borderRadius: 10,
-  alignItems: 'center',
-},
+  changeRegionBtn: {
+    marginTop: 8,
+    backgroundColor: '#f59e0b',
+    padding: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
 
-changeRegionBtnText: {
-  color: '#fff',
-  fontWeight: '800',
-},
+  changeRegionBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
 
   infoLabel: {
     fontSize: 13,
@@ -437,6 +555,72 @@ changeRegionBtnText: {
     fontSize: 13,
     color: '#6b7280',
     lineHeight: 20,
+  },
+
+  quantityBox: {
+    gap: 10,
+  },
+
+  quantityInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  quantityInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 14,
+    backgroundColor: '#fff',
+  },
+
+  quantityUnitPreview: {
+    minWidth: 76,
+    height: 50,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+
+  quantityUnitPreviewText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+  },
+
+  quantityUnitOptions: {
+    gap: 8,
+    paddingRight: 8,
+  },
+
+  quantityUnitChip: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 999,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    backgroundColor: '#fff',
+  },
+
+  quantityUnitChipActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
+
+  quantityUnitChipText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#374151',
+  },
+
+  quantityUnitChipTextActive: {
+    color: '#fff',
   },
 
   errorText: {

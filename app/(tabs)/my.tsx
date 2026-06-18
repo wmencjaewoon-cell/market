@@ -144,6 +144,7 @@ export default function MyScreen() {
       <Section title="설정">
         <MenuItem title="개인정보처리방침" onPress={() => router.push('/my/privacy' as any)} />
         <MenuItem title="이용약관" onPress={() => router.push('/my/terms' as any)} />
+        <MenuItem title="운영정책" onPress={() => router.push('/my/operation-policy' as any)} />
         <MenuItem title="차단한 사용자" onPress={() => router.push('/my/blocked-users' as any)} />
         <MenuItem title="회원탈퇴" onPress={() => router.push('/my/delete-account' as any)} />
       </Section>

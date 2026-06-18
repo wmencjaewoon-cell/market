@@ -13,12 +13,34 @@
       "bundleIdentifier": "com.anonymous.interiormarket",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "영상통화를 위해 카메라 사용 권한이 필요합니다.",
+        "NSMicrophoneUsageDescription": "보이스톡과 영상통화를 위해 마이크 사용 권한이 필요합니다."
+      },
+      "bitcode": false,
+      "appleTeamId": "T2PH62KS5U"
     },
     "android": {
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "pan",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "여기에_기존_GOOGLE_MAPS_API_KEY"
+        }
+      },
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -50,12 +72,7 @@
       ],
       "expo-web-browser",
       "expo-secure-store",
-      [
-        "react-native-maps",
-        {
-          "androidGoogleMapsApiKey": "AIzaSyDhqLHtKg-qhFWUKDjNeIj6HQFdjrVIoDk"
-        }
-      ]
+      "@config-plugins/react-native-webrtc"
     ],
     "experiments": {
       "typedRoutes": true,
