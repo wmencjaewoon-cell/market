@@ -39,6 +39,22 @@ export type Listing = {
   chats_count?: number;
 };
 
+export type MaterialItem = {
+  id: number;
+  category: string;
+  title: string;
+  priceText: string;
+  region: string;
+  distanceKm: number;
+  timeAgo: string;
+  sellerName: string;
+  sellerType: 'personal' | 'store';
+  urgent: boolean;
+  availableNow: boolean;
+  availableToday: boolean;
+  description: string;
+  phone?: string;
+};
 
 export type RegionSearchItem = {
   id: string;

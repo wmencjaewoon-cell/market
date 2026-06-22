@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function TradeMapScreenWeb() {
   const params = useLocalSearchParams<{
@@ -13,6 +14,29 @@ export default function TradeMapScreenWeb() {
   const pinAddress = params.region || '주소 정보가 없습니다.';
   const mapTitle = params.title || '거래 희망 장소';
   const detailPlaceText = params.place || `${mapTitle} 상세 정보가 입력되지 않았습니다.`;
+  const copyAddressText = pinAddress === '주소 정보가 없습니다.' ? '' : pinAddress.trim();
+  const canCopyAddress = mapTitle === '가게 위치' && copyAddressText.length > 0;
+
+  const handleCopyAddress = async () => {
+    if (!canCopyAddress) return;
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(copyAddressText);
+      } else {
+        await Clipboard.setStringAsync(copyAddressText);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.alert('가게 주소를 복사했습니다.');
+      }
+    } catch (e) {
+      console.log('주소 복사 실패:', e);
+      if (typeof window !== 'undefined') {
+        window.alert('주소를 복사하지 못했습니다.');
+      }
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -29,6 +53,12 @@ export default function TradeMapScreenWeb() {
           웹에서는 지도를 지원하지 않습니다. 모바일 앱에서 확인해 주세요.
         </Text>
         <Text style={styles.placeAddress}>{pinAddress}</Text>
+        {canCopyAddress ? (
+          <TouchableOpacity style={styles.copyAddressBtn} onPress={handleCopyAddress}>
+            <Ionicons name="copy-outline" size={16} color="#2563eb" />
+            <Text style={styles.copyAddressText}>주소 복사</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.detailPlace}>{detailPlaceText}</Text>
       </View>
     </View>
@@ -86,5 +116,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 21,
     textAlign: 'center',
+  },
+  copyAddressBtn: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  copyAddressText: {
+    color: '#2563eb',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

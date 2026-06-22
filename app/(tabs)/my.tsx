@@ -71,7 +71,7 @@ export default function MyScreen() {
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
   const publicPhone =
-    profile?.user_type === 'store' && profile?.is_phone_public ? profile?.phone : null;
+    isVerifiedStore && profile?.is_phone_public ? profile?.phone : null;
 
   if (!user) {
   return (
@@ -105,7 +105,7 @@ export default function MyScreen() {
 
         <Text style={styles.name}>{profile?.display_name || '이름 없음'}</Text>
         <Text style={styles.sub}>
-          {profile?.user_type === 'store' ? '가게' : '개인'}
+          {isVerifiedStore ? '가게' : '개인'}
         </Text>
 
         {isVerifiedStore ? (

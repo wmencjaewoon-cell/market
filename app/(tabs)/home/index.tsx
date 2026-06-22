@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -45,11 +46,12 @@ export default function HomeScreen() {
   const [selectedTab, setSelectedTab] = useState<FilterTab>('전체');
   const [items, setItems] = useState<Listing[]>([]);
   const [regions, setRegions] = useState<any[]>([]);
+  const [searchKeyword, setSearchKeyword] = useState('');
   const [activeRegionId, setActiveRegionId] = useState<number | null>(null);
   const [radiusKm, setRadiusKm] = useState(5);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-const [regionMessage, setRegionMessage] = useState('');
+  const [regionMessage, setRegionMessage] = useState('');
 
   useEffect(() => {
     fetchListings();
@@ -113,6 +115,7 @@ const [regionMessage, setRegionMessage] = useState('');
           id,
           display_name,
           user_type,
+          business_verified,
           phone,
           is_phone_public
         ),
@@ -142,13 +145,13 @@ const [regionMessage, setRegionMessage] = useState('');
   };
 
   const fetchNotificationCount = async () => {
-  try {
-    const count = await getUnreadNotificationCount();
-    setUnreadNotificationCount(count);
-  } catch (e) {
-    console.log(e);
-  }
-};
+    try {
+      const count = await getUnreadNotificationCount();
+      setUnreadNotificationCount(count);
+    } catch (e) {
+      console.log(e);
+    }
+  };
 
   const handleRefresh = async () => {
     try {
@@ -168,29 +171,29 @@ const [regionMessage, setRegionMessage] = useState('');
   });
 
   const handleSelectRegion = async (region: any) => {
-  await saveMyRegionSettings(region.id, radiusKm);
-  setActiveRegionId(region.id);
-  setRegionModalOpen(false);
-  await fetchRegionState();
-};
-
-const handleSaveRadius = async (nextRadius: number) => {
-  try {
-    setRadiusKm(nextRadius);
-    await saveMyRegionSettings(activeRegionId, nextRadius);
-  } catch (e: any) {
-    setRegionMessage(e?.message || '반경 저장에 실패했습니다.');
-  }
-};
-
-const handleDeleteRegion = async (regionId: number) => {
-  try {
-    await deleteMyRegion(regionId);
+    await saveMyRegionSettings(region.id, radiusKm);
+    setActiveRegionId(region.id);
+    setRegionModalOpen(false);
     await fetchRegionState();
-  } catch (e: any) {
-    setRegionMessage(e?.message || '동네 삭제에 실패했습니다.');
-  }
-};
+  };
+
+  const handleSaveRadius = async (nextRadius: number) => {
+    try {
+      setRadiusKm(nextRadius);
+      await saveMyRegionSettings(activeRegionId, nextRadius);
+    } catch (e: any) {
+      setRegionMessage(e?.message || '반경 저장에 실패했습니다.');
+    }
+  };
+
+  const handleDeleteRegion = async (regionId: number) => {
+    try {
+      await deleteMyRegion(regionId);
+      await fetchRegionState();
+    } catch (e: any) {
+      setRegionMessage(e?.message || '동네 삭제에 실패했습니다.');
+    }
+  };
 
   const activeRegion = regions.find((r) => r.id === activeRegionId);
 
@@ -213,7 +216,10 @@ const handleDeleteRegion = async (regionId: number) => {
     }
 
     if (selectedTab === '가게') {
-      result = result.filter((item: any) => item.profiles?.user_type === 'store');
+      result = result.filter(
+        (item: any) =>
+          item.profiles?.user_type === 'store' && !!item.profiles?.business_verified
+      );
     }
 
     if (selectedTab === '거래') {
@@ -228,11 +234,30 @@ const handleDeleteRegion = async (regionId: number) => {
       result = result.filter((item) => item.category === 'want');
     }
 
+    const keyword = searchKeyword.trim().toLowerCase();
+
+    if (keyword) {
+      result = result.filter((item: any) => {
+        const searchableText = [
+          item.title,
+          item.description,
+          item.region,
+          item.category,
+          item.profiles?.display_name,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return searchableText.includes(keyword);
+      });
+    }
+
     return result;
-  }, [items, selectedTab, activeRegion, radiusKm]);
+  }, [items, selectedTab, activeRegion, radiusKm, searchKeyword]);
 
   return (
-  <SafeAreaView style={styles.screen} edges={['top']}>
+    <SafeAreaView style={styles.screen} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -259,29 +284,47 @@ const handleDeleteRegion = async (regionId: number) => {
           </TouchableOpacity>
 
           <View style={styles.topRight}>
-  <TouchableOpacity
-    style={styles.notificationBtn}
-    onPress={() => router.push('../my/notifications' as any)}
-  >
-    <Ionicons
-      name="notifications-outline"
-      size={24}
-      color="#111827"
-    />
+            <TouchableOpacity
+              style={styles.notificationBtn}
+              onPress={() => router.push('../my/notifications' as any)}
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={24}
+                color="#111827"
+              />
 
-    {unreadNotificationCount > 0 ? (
-      <View style={styles.notificationBadge}>
-        <Text style={styles.notificationBadgeText}>
-          {unreadNotificationCount > 99
-            ? '99+'
-            : unreadNotificationCount}
-        </Text>
-      </View>
-    ) : null}
-  </TouchableOpacity>
+              {unreadNotificationCount > 0 ? (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {unreadNotificationCount > 99
+                      ? '99+'
+                      : unreadNotificationCount}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
 
-  <Text style={styles.radiusBadge}>{radiusKm}km</Text>
-</View>
+            <Text style={styles.radiusBadge}>{radiusKm}km</Text>
+          </View>
+        </View>
+        <View style={styles.homeSearchBox}>
+          <Ionicons name="search-outline" size={20} color="#9ca3af" />
+
+          <TextInput
+            style={styles.homeSearchInput}
+            value={searchKeyword}
+            onChangeText={setSearchKeyword}
+            placeholder="상품명, 가게명을 검색해보세요"
+            placeholderTextColor="#9ca3af"
+            returnKeyType="search"
+          />
+
+          {searchKeyword.length > 0 ? (
+            <TouchableOpacity onPress={() => setSearchKeyword('')}>
+              <Ionicons name="close-circle" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
@@ -302,91 +345,101 @@ const handleDeleteRegion = async (regionId: number) => {
         </ScrollView>
 
         <View style={styles.list}>
-          {filtered.map((item) => (
-            <MaterialCard key={item.id} item={item} onRefresh={fetchListings} />
-          ))}
+          {filtered.length > 0 ? (
+            filtered.map((item) => (
+              <MaterialCard key={item.id} item={item} onRefresh={fetchListings} />
+            ))
+          ) : (
+            <View style={styles.emptyBox}>
+              <Ionicons name="search-outline" size={36} color="#d1d5db" />
+              <Text style={styles.emptyTitle}>검색 결과가 없어요</Text>
+              <Text style={styles.emptyDesc}>
+                다른 검색어를 입력하거나 동네 범위를 넓혀보세요.
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
 
       <Modal visible={regionModalOpen} transparent animationType="fade">
-  <View style={styles.modalOverlay}>
-    <View style={styles.regionModalBox}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>내 동네 설정</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.regionModalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>내 동네 설정</Text>
 
-        <TouchableOpacity onPress={() => setRegionModalOpen(false)}>
-          <Ionicons name="close" size={24} color="#111827" />
-        </TouchableOpacity>
-      </View>
+              <TouchableOpacity onPress={() => setRegionModalOpen(false)}>
+                <Ionicons name="close" size={24} color="#111827" />
+              </TouchableOpacity>
+            </View>
 
-      <Text style={styles.modalDesc}>보고 싶은 동네를 선택해 주세요.</Text>
-      <View style={styles.radiusBox}>
-  <View style={styles.radiusHeader}>
-    <Text style={styles.radiusTitle}>보여줄 범위</Text>
-    <Text style={styles.radiusValue}>{radiusKm}km</Text>
-  </View>
+            <Text style={styles.modalDesc}>보고 싶은 동네를 선택해 주세요.</Text>
+            <View style={styles.radiusBox}>
+              <View style={styles.radiusHeader}>
+                <Text style={styles.radiusTitle}>보여줄 범위</Text>
+                <Text style={styles.radiusValue}>{radiusKm}km</Text>
+              </View>
 
-  <RadiusSlider
-    min={1}
-    max={30}
-    step={1}
-    value={radiusKm}
-    onChangeEnd={handleSaveRadius}
-  />
+              <RadiusSlider
+                min={1}
+                max={30}
+                step={1}
+                value={radiusKm}
+                onChangeEnd={handleSaveRadius}
+              />
 
-  <Text style={styles.radiusHelp}>
-    선택한 동네 기준으로 {radiusKm}km 안의 게시글을 보여줍니다.
-  </Text>
-</View>
+              <Text style={styles.radiusHelp}>
+                선택한 동네 기준으로 {radiusKm}km 안의 게시글을 보여줍니다.
+              </Text>
+            </View>
 
-      {regions.map((region) => {
-        const active = region.id === activeRegionId;
+            {regions.map((region) => {
+              const active = region.id === activeRegionId;
 
-        return (
-          <View key={region.id} style={styles.regionModalItem}>
+              return (
+                <View key={region.id} style={styles.regionModalItem}>
+                  <TouchableOpacity
+                    style={{ flex: 1 }}
+                    onPress={() => handleSelectRegion(region)}
+                  >
+                    <Text style={[styles.modalRegionName, active && styles.modalRegionActive]}>
+                      {region.region_name}
+                    </Text>
+
+                    <Text style={styles.modalRegionSub}>
+                      {active
+                        ? '현재 선택된 동네'
+                        : region.verified
+                          ? '인증 완료'
+                          : '검색으로 추가됨'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  {active ? (
+                    <Ionicons name="checkmark-circle" size={22} color="#2563eb" />
+                  ) : (
+                    <TouchableOpacity onPress={() => handleDeleteRegion(region.id)}>
+                      <Ionicons name="trash-outline" size={20} color="#9ca3af" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              );
+            })}
+
             <TouchableOpacity
-              style={{ flex: 1 }}
-              onPress={() => handleSelectRegion(region)}
+              style={styles.addRegionBtn}
+              onPress={() => {
+                setRegionModalOpen(false);
+                router.push('/(tabs)/home/region-search' as any);
+              }}
             >
-              <Text style={[styles.modalRegionName, active && styles.modalRegionActive]}>
-                {region.region_name}
-              </Text>
-
-              <Text style={styles.modalRegionSub}>
-                {active
-                  ? '현재 선택된 동네'
-                  : region.verified
-                  ? '인증 완료'
-                  : '검색으로 추가됨'}
-              </Text>
+              <Ionicons name="add" size={20} color="#2563eb" />
+              <Text style={styles.addRegionText}>동네 추가</Text>
             </TouchableOpacity>
 
-            {active ? (
-              <Ionicons name="checkmark-circle" size={22} color="#2563eb" />
-            ) : (
-              <TouchableOpacity onPress={() => handleDeleteRegion(region.id)}>
-                <Ionicons name="trash-outline" size={20} color="#9ca3af" />
-              </TouchableOpacity>
-            )}
+            {regionMessage ? <Text style={styles.regionMessage}>{regionMessage}</Text> : null}
           </View>
-        );
-      })}
-
-      <TouchableOpacity
-        style={styles.addRegionBtn}
-        onPress={() => {
-          setRegionModalOpen(false);
-          router.push('/(tabs)/home/region-search' as any);
-        }}
-      >
-        <Ionicons name="add" size={20} color="#2563eb" />
-        <Text style={styles.addRegionText}>동네 추가</Text>
-      </TouchableOpacity>
-
-      {regionMessage ? <Text style={styles.regionMessage}>{regionMessage}</Text> : null}
-    </View>
-  </View>
-</Modal>
+        </View>
+      </Modal>
 
       <FloatingCreateButton />
     </SafeAreaView>
@@ -436,218 +489,256 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
     borderColor: '#2563eb',
   },
+
+  homeSearchBox: {
+    marginTop: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+
+  homeSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#111827',
+    paddingVertical: 0,
+  },
   tabText: { fontWeight: '700', color: '#374151' },
   tabTextActive: { color: '#fff' },
   list: { gap: 14 },
   modalOverlay: {
-  flex: 1,
-  backgroundColor: 'rgba(0,0,0,0.35)',
-  justifyContent: 'flex-end',
-  padding: 16,
-},
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+    padding: 16,
+  },
 
-regionModalBox: {
-  backgroundColor: '#fff',
-  borderRadius: 22,
-  padding: 16,
-  maxHeight: '85%',
-  gap: 12,
-},
+  regionModalBox: {
+    backgroundColor: '#fff',
+    borderRadius: 22,
+    padding: 16,
+    maxHeight: '85%',
+    gap: 12,
+  },
 
-radiusBox: {
-  borderWidth: 1,
-  borderColor: '#e5e7eb',
-  borderRadius: 14,
-  padding: 14,
-  gap: 8,
-  backgroundColor: '#f9fafb',
-},
+  radiusBox: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+    backgroundColor: '#f9fafb',
+  },
+  emptyBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    gap: 8,
+  },
 
-radiusHeader: {
-  flexDirection: 'row',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-},
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#374151',
+  },
 
-radiusTitle: {
-  fontSize: 15,
-  fontWeight: '800',
-  color: '#111827',
-},
+  emptyDesc: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+  },
 
-radiusValue: {
-  fontSize: 15,
-  fontWeight: '800',
-  color: '#2563eb',
-},
+  radiusHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
 
-topRight: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 12,
-},
+  radiusTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#111827',
+  },
 
-notificationBtn: {
-  width: 38,
-  height: 38,
-  borderRadius: 19,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  radiusValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#2563eb',
+  },
 
-notificationBadge: {
-  position: 'absolute',
-  top: -2,
-  right: -2,
-  minWidth: 18,
-  height: 18,
-  borderRadius: 9,
-  backgroundColor: '#ef4444',
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingHorizontal: 4,
-},
+  topRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
 
-notificationBadgeText: {
-  color: '#fff',
-  fontSize: 10,
-  fontWeight: '800',
-},
+  notificationBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-radiusHelp: {
-  fontSize: 13,
-  color: '#6b7280',
-  lineHeight: 19,
-},
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
 
-modalHeader: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-},
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
 
-modalTitle: {
-  fontSize: 20,
-  fontWeight: '800',
-  color: '#111827',
-},
+  radiusHelp: {
+    fontSize: 13,
+    color: '#6b7280',
+    lineHeight: 19,
+  },
 
-modalDesc: {
-  color: '#6b7280',
-  lineHeight: 20,
-},
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
 
-regionModalItem: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  borderWidth: 1,
-  borderColor: '#e5e7eb',
-  borderRadius: 14,
-  padding: 14,
-  gap: 10,
-},
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#111827',
+  },
 
-modalRegionName: {
-  fontSize: 16,
-  fontWeight: '800',
-  color: '#111827',
-},
+  modalDesc: {
+    color: '#6b7280',
+    lineHeight: 20,
+  },
 
-modalRegionActive: {
-  color: '#2563eb',
-},
+  regionModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
 
-modalRegionSub: {
-  marginTop: 4,
-  color: '#6b7280',
-  fontSize: 13,
-},
+  modalRegionName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#111827',
+  },
 
-addRegionBtn: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  borderWidth: 1,
-  borderColor: '#bfdbfe',
-  backgroundColor: '#eff6ff',
-  borderRadius: 14,
-  padding: 14,
-},
+  modalRegionActive: {
+    color: '#2563eb',
+  },
 
-addRegionText: {
-  color: '#2563eb',
-  fontWeight: '800',
-},
+  modalRegionSub: {
+    marginTop: 4,
+    color: '#6b7280',
+    fontSize: 13,
+  },
 
-backMiniBtn: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  gap: 4,
-},
+  addRegionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    backgroundColor: '#eff6ff',
+    borderRadius: 14,
+    padding: 14,
+  },
 
-backMiniText: {
-  fontWeight: '800',
-  color: '#111827',
-},
+  addRegionText: {
+    color: '#2563eb',
+    fontWeight: '800',
+  },
 
-searchRow: {
-  flexDirection: 'row',
-  gap: 8,
-},
+  backMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
 
-searchInput: {
-  flex: 1,
-  borderWidth: 1,
-  borderColor: '#e5e7eb',
-  borderRadius: 12,
-  paddingHorizontal: 12,
-  paddingVertical: 12,
-},
+  backMiniText: {
+    fontWeight: '800',
+    color: '#111827',
+  },
 
-searchBtn: {
-  backgroundColor: '#2563eb',
-  borderRadius: 12,
-  paddingHorizontal: 16,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  searchRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
 
-searchBtnText: {
-  color: '#fff',
-  fontWeight: '800',
-},
+  searchInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
 
-locationSearchBtn: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: 6,
-  backgroundColor: '#111827',
-  borderRadius: 14,
-  padding: 14,
-},
+  searchBtn: {
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-locationSearchText: {
-  color: '#fff',
-  fontWeight: '800',
-},
+  searchBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
 
-candidateItem: {
-  borderWidth: 1,
-  borderColor: '#e5e7eb',
-  borderRadius: 12,
-  padding: 14,
-  backgroundColor: '#f9fafb',
-},
+  locationSearchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    padding: 14,
+  },
 
-candidateText: {
-  fontWeight: '800',
-  color: '#111827',
-},
+  locationSearchText: {
+    color: '#fff',
+    fontWeight: '800',
+  },
 
-regionMessage: {
-  color: '#dc2626',
-  fontWeight: '700',
-},
+  candidateItem: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    padding: 14,
+    backgroundColor: '#f9fafb',
+  },
+
+  candidateText: {
+    fontWeight: '800',
+    color: '#111827',
+  },
+
+  regionMessage: {
+    color: '#dc2626',
+    fontWeight: '700',
+  },
 });

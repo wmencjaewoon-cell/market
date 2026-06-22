@@ -155,7 +155,6 @@ export default function UserProfileScreen() {
     profile?.store_longitude != null;
   const canCallStore =
     isVerifiedStore &&
-    !!profile?.is_phone_public &&
     !!profile?.phone;
   const isMyProfile = user?.id === userId;
 
@@ -185,11 +184,16 @@ export default function UserProfileScreen() {
   if (!canCallStore) return;
 
   const phone = String(profile.phone).replace(/[^0-9]/g, '');
+  if (!phone) {
+    showProfileAlert('전화하기', '등록된 전화번호를 확인하지 못했습니다.');
+    return;
+  }
 
   try {
     await Linking.openURL(`tel:${phone}`);
   } catch (e) {
     console.log('전화 연결 실패:', e);
+    showProfileAlert('전화하기', '전화 앱을 열지 못했습니다.');
   }
 };
 
@@ -291,7 +295,7 @@ export default function UserProfileScreen() {
         </Text>
 
         <Text style={styles.sub}>
-          {profile?.user_type === 'store' ? '가게 판매자' : '개인 판매자'}
+          {isVerifiedStore ? '가게 판매자' : '개인 판매자'}
         </Text>
 
         {isVerifiedStore ? (

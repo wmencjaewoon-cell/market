@@ -115,6 +115,8 @@ export default function MaterialCard({
   onRefresh,
   showMenu = true,
 }: Props) {
+  const isVerifiedStore =
+    item.profiles?.user_type === 'store' && !!item.profiles?.business_verified;
   const [menuOpen, setMenuOpen] = useState(false);
   const [liked, setLiked] = useState(false);
 
@@ -323,12 +325,12 @@ export default function MaterialCard({
                 style={[
                   styles.badge,
                   shouldCompactBadges && styles.compactBadge,
-                  item.profiles?.user_type === 'store'
+                  isVerifiedStore
                     ? styles.storeBadge
                     : styles.personalBadge,
                 ]}
               >
-                {item.profiles?.user_type === 'store' ? '가게' : '개인'}
+                {isVerifiedStore ? '가게' : '개인'}
               </Text>
 
               {item.urgent ? (

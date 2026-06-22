@@ -30,7 +30,6 @@ import {
   GestureDetector,
   GestureHandlerRootView,
 } from 'react-native-gesture-handler';
-import InCallManager from 'react-native-incall-manager';
 import Reanimated, {
   runOnJS,
   useAnimatedStyle,
@@ -40,17 +39,20 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
+  InCallManager,
+  isNativeCallSupported,
   mediaDevices,
-  MediaStream,
+  type MediaStream,
   RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
   RTCView,
-} from 'react-native-webrtc';
+} from '../../lib/nativeCall';
 import { useAuth } from '../../contexts/AuthContext';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
 import { canStartChat, canUseApp } from '../../lib/guard';
 import { checkProhibitedContent } from '../../lib/prohibited';
+import { REPORT_REASONS } from '../../lib/reportReasons';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -111,6 +113,7 @@ type ChatUserProfile = {
   phone: string | null;
   is_phone_public: boolean | null;
   user_type?: 'store' | 'personal' | null;
+  business_verified?: boolean | null;
   account?: string | null;
 };
 
@@ -308,17 +311,6 @@ function getCallStatusMessage(callType: ChatCallType, status: ChatCallStatus) {
   if (status === 'ended') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 종료`;
   return `${CALL_STATUS_MESSAGE_PREFIX}${label} 부재중`;
 }
-
-const reportReasons = [
-  '사기 의심',
-  '폭력적/위협적인 언어 사용',
-  '욕설 또는 비방',
-  '거래 약속 불이행',
-  '허위 매물/허위 정보',
-  '부적절한 사진 또는 메시지',
-  '스팸/광고성 메시지',
-  '기타',
-];
 
 const PAYMENT_REQUEST_PREFIX = '💸 송금 요청\n';
 const APPOINTMENT_REQUEST_PREFIX = '📅 약속 제안\n';
@@ -1386,7 +1378,7 @@ useEffect(() => {
   const fetchChatTargetProfile = async (targetId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('display_name, phone, is_phone_public, user_type, account')
+      .select('display_name, phone, is_phone_public, user_type, business_verified, account')
       .eq('id', targetId)
       .maybeSingle();
 
@@ -1475,6 +1467,8 @@ useEffect(() => {
             display_name,
             phone,
             is_phone_public,
+            user_type,
+            business_verified,
             account
           )
         )
@@ -1502,6 +1496,8 @@ useEffect(() => {
           display_name: listingData.profiles.display_name,
           phone: listingData.profiles.phone,
           is_phone_public: listingData.profiles.is_phone_public,
+          user_type: listingData.profiles.user_type,
+          business_verified: listingData.profiles.business_verified,
           account: listingData.profiles.account,
         }
         : null,
@@ -1981,6 +1977,7 @@ useEffect(() => {
   const chatTargetSub = `${chatTargetReviewText} · 신고 ${chatTargetReportCount}개`;
   const canStorePhoneCall =
     chatTargetProfile?.user_type === 'store' &&
+    !!chatTargetProfile?.business_verified &&
     !!chatTargetProfile?.is_phone_public &&
     !!chatTargetProfile?.phone;
 
@@ -1993,7 +1990,7 @@ useEffect(() => {
     try {
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('display_name, phone, is_phone_public, user_type')
+        .select('display_name, phone, is_phone_public, user_type, business_verified')
         .eq('id', targetUserId)
         .maybeSingle();
 
@@ -2004,7 +2001,9 @@ useEffect(() => {
       }
 
       const publicPhone =
-        profile?.user_type === 'store' && profile?.is_phone_public ? profile.phone : null;
+        profile?.user_type === 'store' && profile?.business_verified && profile?.is_phone_public
+          ? profile.phone
+          : null;
       const phoneNumber = String(publicPhone || '').replace(/[^0-9+]/g, '');
 
       if (!phoneNumber) {
@@ -2031,6 +2030,14 @@ useEffect(() => {
   };
 
   const ensureCallDevicePermissions = async (callType: ChatCallType) => {
+    if (!isNativeCallSupported) {
+      Alert.alert(
+        getCallTypeLabel(callType),
+        '웹에서는 앱 내 보이스톡/영상통화를 지원하지 않습니다. 모바일 앱에서 이용해 주세요.'
+      );
+      return false;
+    }
+
     if (Platform.OS !== 'android') {
       return true;
     }
@@ -2075,6 +2082,15 @@ useEffect(() => {
 
   const startInAppCall = async (callType: ChatCallType) => {
     if (!roomId || !user || !targetUserId || callActionLoading) return;
+
+    if (!isNativeCallSupported) {
+      setCallMenuOpen(false);
+      Alert.alert(
+        getCallTypeLabel(callType),
+        '웹에서는 앱 내 보이스톡/영상통화를 지원하지 않습니다. 모바일 앱에서 이용해 주세요.'
+      );
+      return;
+    }
 
     if (currentCall?.status === 'ringing' || currentCall?.status === 'accepted') {
       Alert.alert('통화', '이미 진행 중인 통화가 있습니다.');
@@ -2175,6 +2191,14 @@ setCallFacingMode('user');
       setCallActionLoading(true);
 
       if (status === 'accepted') {
+        if (!isNativeCallSupported) {
+          Alert.alert(
+            getCallTypeLabel(call.call_type),
+            '웹에서는 앱 내 보이스톡/영상통화를 지원하지 않습니다. 모바일 앱에서 이용해 주세요.'
+          );
+          return;
+        }
+
         setCallSpeakerOn(call.call_type === 'video');
   setCallMicMuted(false);
   setCallCameraOff(false);
@@ -4001,7 +4025,7 @@ const toggleCallSpeaker = () => {
                 </Text>
 
                 <View style={styles.reportReasonWrap}>
-                  {reportReasons.map((reason) => {
+                  {REPORT_REASONS.map((reason) => {
                     const selected = reportReason === reason;
 
                     return (

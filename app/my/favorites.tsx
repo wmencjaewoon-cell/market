@@ -24,6 +24,7 @@ export default function FavoritesScreen() {
             id,
             display_name,
             user_type,
+            business_verified,
             phone,
             is_phone_public
           ),

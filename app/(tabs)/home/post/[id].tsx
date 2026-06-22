@@ -39,6 +39,7 @@ import { getOrCreateRoom } from '../../../../lib/chat';
 import { canChatToListing } from '../../../../lib/chat_guard';
 import { canUseApp } from '../../../../lib/guard';
 import { checkProhibitedContent } from '../../../../lib/prohibited';
+import { REPORT_REASONS } from '../../../../lib/reportReasons';
 import { supabase } from '../../../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -240,6 +241,9 @@ export default function PostDetailScreen() {
   const [chatUsers, setChatUsers] = useState<any[]>([]);
   const [saleQuantityText, setSaleQuantityText] = useState('1');
   const [chatStarting, setChatStarting] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportContent, setReportContent] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -265,6 +269,7 @@ export default function PostDetailScreen() {
         profiles!listings_author_id_fkey (
           display_name,
           user_type,
+          business_verified,
           phone,
           is_phone_public,
           avatar_path
@@ -419,7 +424,8 @@ export default function PostDetailScreen() {
         *,
         profiles!listings_author_id_fkey (
           display_name,
-          user_type
+          user_type,
+          business_verified
         ),
         listing_images (
           id,
@@ -462,10 +468,11 @@ export default function PostDetailScreen() {
     .filter(Boolean);
 }, [item?.listing_images]);
 
-  const sellerType = item?.profiles?.user_type ?? 'personal';
+  const isVerifiedStore =
+    item?.profiles?.user_type === 'store' && !!item?.profiles?.business_verified;
+  const sellerType = isVerifiedStore ? 'store' : 'personal';
   const sellerName = item?.profiles?.display_name ?? '알 수 없음';
-  const publicPhone =
-    sellerType === 'store' && item?.profiles?.is_phone_public ? item?.profiles?.phone : null;
+  const publicPhone = sellerType === 'store' ? item?.profiles?.phone : null;
   const appChatDeepLink = item ? `interiormarket://open-chat/${item.id}` : '';
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
   const isShareListing = item?.category === 'share';
@@ -547,9 +554,11 @@ const goNextImage = () => {
     }
 
     if (!publicPhone) return;
+    const phone = String(publicPhone).replace(/[^0-9]/g, '');
+    if (!phone) return;
 
     try {
-      await Linking.openURL(`tel:${publicPhone}`);
+      await Linking.openURL(`tel:${phone}`);
     } catch (e) {
       console.log('전화 연결 실패:', e);
     }
@@ -613,12 +622,25 @@ const handleEdit = () => {
       return;
     }
 
+    setReportReason('');
+    setReportContent('');
+    setReportModalOpen(true);
+  };
+
+  const submitReport = async () => {
+    if (!item || !user) return;
+
+    if (!reportReason) {
+      showPostAlert('신고 항목 선택', '신고 항목을 선택해 주세요.');
+      return;
+    }
+
     const { error } = await supabase.from('reports').insert({
       reporter_id: user.id,
       target_user_id: item.author_id,
       listing_id: item.id,
-      reason: '게시글 신고',
-      content: item.title || null,
+      reason: reportReason,
+      content: reportContent.trim() || item.title || null,
     });
 
     if (error) {
@@ -632,6 +654,9 @@ const handleEdit = () => {
       return;
     }
 
+    setReportModalOpen(false);
+    setReportReason('');
+    setReportContent('');
     showPostAlert('신고 접수 완료', '신고가 접수되었습니다.');
   };
 
@@ -1361,6 +1386,66 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         </TouchableWithoutFeedback>
       </Modal>
 
+      <Modal visible={reportModalOpen} transparent animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setReportModalOpen(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.reportModalBox}>
+                <Text style={styles.reportModalTitle}>신고하기</Text>
+                <Text style={styles.reportModalDesc}>
+                  신고 항목을 선택하고 필요한 내용을 적어주세요.
+                </Text>
+
+                <View style={styles.reportReasonWrap}>
+                  {REPORT_REASONS.map((reason) => {
+                    const selected = reportReason === reason;
+
+                    return (
+                      <TouchableOpacity
+                        key={reason}
+                        style={[
+                          styles.reportReasonBtn,
+                          selected && styles.reportReasonBtnActive,
+                        ]}
+                        onPress={() => setReportReason(reason)}
+                      >
+                        <Text
+                          style={[
+                            styles.reportReasonText,
+                            selected && styles.reportReasonTextActive,
+                          ]}
+                        >
+                          {reason}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <TextInput
+                  style={styles.reportInput}
+                  placeholder="신고 내용을 자세히 적어주세요."
+                  value={reportContent}
+                  onChangeText={setReportContent}
+                  multiline
+                  textAlignVertical="top"
+                />
+
+                <TouchableOpacity style={styles.reportSubmitBtn} onPress={submitReport}>
+                  <Text style={styles.reportSubmitText}>신고 접수하기</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.reportCancelBtn}
+                  onPress={() => setReportModalOpen(false)}
+                >
+                  <Text style={styles.reportCancelText}>취소</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
       <Modal visible={statusMenuOpen} transparent animationType="fade">
   <TouchableWithoutFeedback onPress={() => setStatusMenuOpen(false)}>
     <View style={styles.modalOverlay}>
@@ -2028,6 +2113,94 @@ fullImageCount: {
 
   reportText: {
     color: '#dc2626',
+  },
+
+  reportModalBox: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 18,
+    maxHeight: '86%',
+  },
+
+  reportModalTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#111827',
+  },
+
+  reportModalDesc: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#6b7280',
+  },
+
+  reportReasonWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+  },
+
+  reportReasonBtn: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+  },
+
+  reportReasonBtnActive: {
+    borderColor: '#dc2626',
+    backgroundColor: '#fee2e2',
+  },
+
+  reportReasonText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#374151',
+  },
+
+  reportReasonTextActive: {
+    color: '#dc2626',
+  },
+
+  reportInput: {
+    marginTop: 14,
+    minHeight: 92,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 12,
+    fontSize: 14,
+    color: '#111827',
+  },
+
+  reportSubmitBtn: {
+    marginTop: 14,
+    borderRadius: 14,
+    backgroundColor: '#dc2626',
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+
+  reportSubmitText: {
+    color: '#fff',
+    fontWeight: '900',
+  },
+
+  reportCancelBtn: {
+    marginTop: 8,
+    borderRadius: 14,
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+
+  reportCancelText: {
+    color: '#374151',
+    fontWeight: '900',
   },
 
   restoreText: {

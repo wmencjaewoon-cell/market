@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,6 +22,8 @@ export default function TradeMapScreen() {
   const mapTitle = params.title || '거래 희망 장소';
   const detailPlaceText = params.place || `${mapTitle} 상세 정보가 입력되지 않았습니다.`;
   const [pinAddress, setPinAddress] = useState(params.region || '');
+  const copyAddressText = pinAddress.trim();
+  const canCopyAddress = mapTitle === '가게 위치' && copyAddressText.length > 0;
 
   useEffect(() => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -43,6 +46,18 @@ export default function TradeMapScreen() {
 
     loadAddress();
   }, [latitude, longitude]);
+
+  const handleCopyAddress = async () => {
+    if (!canCopyAddress) return;
+
+    try {
+      await Clipboard.setStringAsync(copyAddressText);
+      Alert.alert('주소 복사', '가게 주소를 복사했습니다.');
+    } catch (e) {
+      console.log('주소 복사 실패:', e);
+      Alert.alert('주소 복사', '주소를 복사하지 못했습니다.');
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -73,6 +88,12 @@ export default function TradeMapScreen() {
       <View style={[styles.bottomBox, { bottom: Math.max(insets.bottom + 16, 24) }]}>
         <Text style={styles.placeTitle}>{mapTitle}</Text>
         <Text style={styles.placeAddress}>{pinAddress || '주소를 불러오는 중입니다.'}</Text>
+        {canCopyAddress ? (
+          <TouchableOpacity style={styles.copyAddressBtn} onPress={handleCopyAddress}>
+            <Ionicons name="copy-outline" size={16} color="#2563eb" />
+            <Text style={styles.copyAddressText}>주소 복사</Text>
+          </TouchableOpacity>
+        ) : null}
         <Text style={styles.detailPlace}>{detailPlaceText}</Text>
       </View>
     </View>
@@ -140,6 +161,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 21,
+  },
+  copyAddressBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  copyAddressText: {
+    color: '#2563eb',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });
 

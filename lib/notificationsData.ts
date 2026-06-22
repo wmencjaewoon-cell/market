@@ -16,10 +16,42 @@ export async function fetchMyNotifications() {
 }
 
 export async function markNotificationAsRead(id: number) {
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
+  if (!user) return;
+
   const { error } = await supabase
     .from('notifications')
     .update({ read_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('user_id', user.id);
+
+  if (error) throw error;
+}
+
+export async function markAllNotificationsAsRead() {
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
+  if (!user) return;
+
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('user_id', user.id)
+    .is('read_at', null);
+
+  if (error) throw error;
+}
+
+export async function deleteAllNotifications() {
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
+  if (!user) return;
+
+  const { error } = await supabase
+    .from('notifications')
+    .delete()
+    .eq('user_id', user.id);
 
   if (error) throw error;
 }

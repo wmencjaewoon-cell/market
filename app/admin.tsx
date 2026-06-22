@@ -2,6 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 
-type AdminTab = 'overview' | 'notices' | 'reports' | 'users' | 'listings';
+type AdminTab = 'overview' | 'notices' | 'reports' | 'users' | 'listings' | 'stores';
 
 type AdminViewMode = 'grid' | 'list';
 type DateFilter = 'all' | 'today' | '7days' | '30days';
@@ -48,6 +49,9 @@ type AdminUser = {
   email: string | null;
   display_name: string | null;
   user_type: string | null;
+  business_number: string | null;
+  business_verified: boolean | null;
+  store_verification_status: string | null;
   status: string | null;
   role: string | null;
   reports_count: number | null;
@@ -65,6 +69,41 @@ type AdminListing = {
   admin_deleted_at: string | null;
   admin_delete_scheduled_at: string | null;
   admin_delete_previous_status: string | null;
+  profiles?:
+    | {
+        display_name: string | null;
+        email: string | null;
+      }
+    | {
+        display_name: string | null;
+        email: string | null;
+      }[]
+    | null;
+};
+
+type StoreVerificationStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'needs_more_info'
+  | 'canceled';
+
+type StoreVerificationRequest = {
+  id: number;
+  user_id: string;
+  business_number: string;
+  store_name: string;
+  representative_name: string | null;
+  phone: string;
+  store_address: string | null;
+  store_latitude: number | null;
+  store_longitude: number | null;
+  document_path: string;
+  document_mime_type: string | null;
+  status: StoreVerificationStatus;
+  admin_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
   profiles?:
     | {
         display_name: string | null;
@@ -104,6 +143,19 @@ function getListingAuthorText(item: AdminListing) {
   return profile?.display_name || profile?.email || item.author_id;
 }
 
+function getStoreRequestUserText(item: StoreVerificationRequest) {
+  const profile = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
+  return profile?.display_name || profile?.email || item.user_id;
+}
+
+function getStoreRequestStatusLabel(status: StoreVerificationStatus) {
+  if (status === 'pending') return '대기';
+  if (status === 'approved') return '승인';
+  if (status === 'rejected') return '반려';
+  if (status === 'needs_more_info') return '보완요청';
+  return '취소';
+}
+
 function isUserRestricted(item: AdminUser) {
   return (
     item.status === 'suspended' ||
@@ -115,6 +167,10 @@ function isUserRestricted(item: AdminUser) {
 
 function isDeletionPendingUser(item: AdminUser) {
   return item.status === 'deletion_pending';
+}
+
+function isVerifiedStoreUser(item: AdminUser) {
+  return item.user_type === 'store' && !!item.business_verified;
 }
 
 function getUserStatusLabel(item: AdminUser) {
@@ -187,6 +243,7 @@ export default function AdminScreen() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [listings, setListings] = useState<AdminListing[]>([]);
+  const [storeRequests, setStoreRequests] = useState<StoreVerificationRequest[]>([]);
 
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
@@ -204,9 +261,12 @@ const [reportStatusFilter, setReportStatusFilter] = useState('all');
 const [reportIdKeyword, setReportIdKeyword] = useState('');
 
 const [userKeyword, setUserKeyword] = useState('');
+const [userTypeFilter, setUserTypeFilter] = useState('all');
 const [listingDateFilter, setListingDateFilter] = useState<DateFilter>('all');
 const [listingStatusFilter, setListingStatusFilter] = useState('all');
 const [listingKeyword, setListingKeyword] = useState('');
+const [storeRequestStatusFilter, setStoreRequestStatusFilter] = useState('pending');
+const [storeReviewNotes, setStoreReviewNotes] = useState<Record<number, string>>({});
 
 const toggleViewMode = (tab: keyof AdminViewModes) => {
   setViewModes((prev) => ({
@@ -220,7 +280,7 @@ const goToListingDetail = (listingId: number) => {
 };
 
   const loadAdminData = useCallback(async () => {
-    const [noticeResult, reportResult, userResult, listingResult] = await Promise.all([
+    const [noticeResult, reportResult, userResult, listingResult, storeRequestResult] = await Promise.all([
       supabase
         .from('notices')
         .select('id, title, content, is_published, created_at')
@@ -234,7 +294,7 @@ const goToListingDetail = (listingId: number) => {
       supabase
         .from('profiles')
         .select(
-          'id, email, display_name, user_type, status, role, reports_count, can_start_chat, can_create_listing'
+          'id, email, display_name, user_type, business_number, business_verified, status, role, reports_count, can_start_chat, can_create_listing'
         )
         .order('reports_count', { ascending: false })
         .limit(80),
@@ -259,17 +319,51 @@ const goToListingDetail = (listingId: number) => {
         )
         .order('created_at', { ascending: false })
         .limit(80),
+      supabase
+        .from('store_verification_requests')
+        .select(
+          `
+          id,
+          user_id,
+          business_number,
+          store_name,
+          representative_name,
+          phone,
+          store_address,
+          store_latitude,
+          store_longitude,
+          document_path,
+          status,
+          admin_note,
+          reviewed_at,
+          created_at,
+          profiles!store_verification_requests_user_id_fkey (
+            display_name,
+            email
+          )
+        `
+        )
+        .order('created_at', { ascending: false })
+        .limit(100),
     ]);
 
     if (noticeResult.error) throw noticeResult.error;
     if (reportResult.error) throw reportResult.error;
     if (userResult.error) throw userResult.error;
     if (listingResult.error) throw listingResult.error;
+    if (storeRequestResult.error && storeRequestResult.error.code !== 'PGRST205') {
+      throw storeRequestResult.error;
+    }
 
     setNotices((noticeResult.data || []) as NoticeItem[]);
     setReports((reportResult.data || []) as ReportItem[]);
     setUsers((userResult.data || []) as AdminUser[]);
     setListings((listingResult.data || []) as AdminListing[]);
+    setStoreRequests(
+      storeRequestResult.error
+        ? []
+        : ((storeRequestResult.data || []) as StoreVerificationRequest[])
+    );
   }, []);
 
   const loadAdmin = useCallback(async () => {
@@ -436,6 +530,32 @@ const goToListingDetail = (listingId: number) => {
     await loadAdminData();
   };
 
+  const revokeStoreVerification = async (item: AdminUser) => {
+    if (!isVerifiedStoreUser(item)) {
+      showAdminAlert('가게 인증 취소', '가게 인증 완료 계정이 아닙니다.');
+      return;
+    }
+
+    const ok = await confirmAdminAction(
+      '가게 인증 취소',
+      `${item.display_name || item.email || item.id} 계정의 가게 인증을 취소할까요?\n인증 뱃지, 가게 전화 공개, 사업자번호가 해제됩니다.`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_revoke_store_verification', {
+      p_user_id: item.id,
+      p_admin_note: '관리자 사용자 탭에서 가게 인증을 취소했습니다.',
+    });
+
+    if (error) {
+      showAdminAlert('가게 인증 취소 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
   const toggleListingHidden = async (item: AdminListing) => {
     if (isListingDeletePending(item)) {
       showAdminAlert('게시글 숨김', '삭제 대기 중인 게시글은 숨김 상태를 변경할 수 없습니다.');
@@ -518,6 +638,68 @@ const goToListingDetail = (listingId: number) => {
     await loadAdminData();
   };
 
+  const openStoreVerificationDocument = async (item: StoreVerificationRequest) => {
+    if (!item.document_path) {
+      showAdminAlert('제출 서류', '제출된 사업자등록증 파일이 없습니다.');
+      return;
+    }
+
+    const { data, error } = await supabase.storage
+      .from('store-verification-docs')
+      .createSignedUrl(item.document_path, 60 * 5);
+
+    if (error || !data?.signedUrl) {
+      showAdminAlert('제출 서류 열기 실패', error?.message || '파일 URL을 만들지 못했습니다.');
+      return;
+    }
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    const canOpen = await Linking.canOpenURL(data.signedUrl);
+    if (!canOpen) {
+      showAdminAlert('제출 서류', '이 기기에서 파일을 열 수 없습니다.');
+      return;
+    }
+
+    await Linking.openURL(data.signedUrl);
+  };
+
+  const reviewStoreVerificationRequest = async (
+    item: StoreVerificationRequest,
+    status: 'approved' | 'rejected' | 'needs_more_info'
+  ) => {
+    const note = storeReviewNotes[item.id]?.trim() || null;
+    const actionLabel =
+      status === 'approved' ? '승인' : status === 'rejected' ? '반려' : '보완요청';
+    const ok = await confirmAdminAction(
+      `가게 인증 ${actionLabel}`,
+      `"${item.store_name}" 신청을 ${actionLabel} 처리할까요?`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_review_store_verification_request', {
+      p_request_id: item.id,
+      p_status: status,
+      p_admin_note: note,
+    });
+
+    if (error) {
+      showAdminAlert('가게 인증 처리 실패', error.message);
+      return;
+    }
+
+    setStoreReviewNotes((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    await loadAdminData();
+  };
+
   const reportReasons = useMemo(() => {
   return Array.from(new Set(reports.map((item) => item.reason).filter(Boolean)));
 }, [reports]);
@@ -551,6 +733,14 @@ const filteredUsers = useMemo(() => {
   const keyword = userKeyword.trim().toLowerCase();
 
   return users.filter((item) => {
+    const matchesType =
+      userTypeFilter === 'all' ||
+      (userTypeFilter === 'personal' && !isVerifiedStoreUser(item)) ||
+      (userTypeFilter === 'store' && item.user_type === 'store') ||
+      (userTypeFilter === 'verified_store' && isVerifiedStoreUser(item));
+
+    if (!matchesType) return false;
+
     if (!keyword) return true;
 
     return (
@@ -558,10 +748,11 @@ const filteredUsers = useMemo(() => {
       (item.email || '').toLowerCase().includes(keyword) ||
       (item.display_name || '').toLowerCase().includes(keyword) ||
       (item.user_type || '').toLowerCase().includes(keyword) ||
+      (item.business_number || '').toLowerCase().includes(keyword) ||
       (item.status || '').toLowerCase().includes(keyword)
     );
   });
-}, [users, userKeyword]);
+}, [users, userKeyword, userTypeFilter]);
 
 const filteredListings = useMemo(() => {
   const keyword = listingKeyword.trim().toLowerCase();
@@ -585,9 +776,16 @@ const filteredListings = useMemo(() => {
   });
 }, [listings, listingDateFilter, listingStatusFilter, listingKeyword]);
 
+const filteredStoreRequests = useMemo(() => {
+  return storeRequests.filter((item) => {
+    return storeRequestStatusFilter === 'all' || item.status === storeRequestStatusFilter;
+  });
+}, [storeRequests, storeRequestStatusFilter]);
+
   const stats = [
     { label: '공지', value: notices.length },
     { label: '신고', value: reports.filter((item) => item.status !== 'reviewed').length },
+    { label: '가게인증', value: storeRequests.filter((item) => item.status === 'pending').length },
     { label: '사용자', value: users.length },
     { label: '게시글', value: listings.length },
   ];
@@ -631,6 +829,7 @@ const filteredListings = useMemo(() => {
             ['overview', '요약'],
             ['notices', '공지'],
             ['reports', '신고'],
+            ['stores', '가게인증'],
             ['users', '사용자'],
             ['listings', '게시글'],
           ].map(([key, label]) => (
@@ -807,6 +1006,105 @@ const filteredListings = useMemo(() => {
   </View>
 ) : null}
 
+        {activeTab === 'stores' ? (
+  <View>
+    <View style={styles.toolCard}>
+      <Text style={styles.toolTitle}>가게 인증 신청 {filteredStoreRequests.length}건</Text>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {['all', 'pending', 'needs_more_info', 'approved', 'rejected', 'canceled'].map((status) => (
+          <TouchableOpacity
+            key={status}
+            style={[styles.filterChip, storeRequestStatusFilter === status && styles.filterChipActive]}
+            onPress={() => setStoreRequestStatusFilter(status)}
+          >
+            <Text style={[styles.filterChipText, storeRequestStatusFilter === status && styles.filterChipTextActive]}>
+              {status === 'all'
+                ? '전체'
+                : getStoreRequestStatusLabel(status as StoreVerificationStatus)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+
+    {filteredStoreRequests.map((item) => (
+      <View key={item.id} style={styles.card}>
+        <Text style={styles.cardTitle}>{item.store_name}</Text>
+        <Text style={styles.desc}>
+          #{item.id} · {getStoreRequestStatusLabel(item.status)} · {new Date(item.created_at).toLocaleString()}
+        </Text>
+        <Text style={styles.metaText}>신청자: {getStoreRequestUserText(item)}</Text>
+        <Text style={styles.metaText}>신청자 ID: {item.user_id}</Text>
+        <Text style={styles.metaText}>사업자등록번호: {item.business_number}</Text>
+        <Text style={styles.metaText}>대표자명: {item.representative_name || '-'}</Text>
+        <Text style={styles.metaText}>대표 전화번호: {item.phone}</Text>
+        <Text style={styles.metaText}>주소: {item.store_address || '-'}</Text>
+        <Text style={styles.metaText}>
+          제출 서류:{' '}
+          {item.document_mime_type === 'application/pdf' ||
+          item.document_path.toLowerCase().endsWith('.pdf')
+            ? 'PDF'
+            : '이미지'}
+        </Text>
+        {item.store_latitude != null && item.store_longitude != null ? (
+          <Text style={styles.metaText}>
+            위치: {item.store_latitude.toFixed(6)}, {item.store_longitude.toFixed(6)}
+          </Text>
+        ) : null}
+        {item.admin_note ? (
+          <Text style={styles.noteText}>검수 메모: {item.admin_note}</Text>
+        ) : null}
+
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={() => openStoreVerificationDocument(item)}
+        >
+          <Text style={styles.secondaryText}>사업자등록증 보기</Text>
+        </TouchableOpacity>
+
+        {item.status === 'pending' || item.status === 'needs_more_info' ? (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder="반려 또는 보완요청 사유"
+              value={storeReviewNotes[item.id] || ''}
+              onChangeText={(text) =>
+                setStoreReviewNotes((prev) => ({
+                  ...prev,
+                  [item.id]: text,
+                }))
+              }
+              multiline
+            />
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={styles.approveBtn}
+                onPress={() => reviewStoreVerificationRequest(item, 'approved')}
+              >
+                <Text style={styles.approveText}>승인</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => reviewStoreVerificationRequest(item, 'needs_more_info')}
+              >
+                <Text style={styles.secondaryText}>보완요청</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dangerBtn}
+                onPress={() => reviewStoreVerificationRequest(item, 'rejected')}
+              >
+                <Text style={styles.dangerText}>반려</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : null}
+      </View>
+    ))}
+  </View>
+) : null}
+
         {activeTab === 'users' ? (
   <View>
     <View style={styles.toolCard}>
@@ -822,10 +1120,29 @@ const filteredListings = useMemo(() => {
 
       <TextInput
         style={styles.searchInput}
-        placeholder="아이디, 이메일, 닉네임, 상태 검색"
+        placeholder="아이디, 이메일, 닉네임, 사업자번호, 상태 검색"
         value={userKeyword}
         onChangeText={setUserKeyword}
       />
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+        {[
+          ['all', '전체'],
+          ['personal', '개인'],
+          ['store', '가게'],
+          ['verified_store', '인증가게'],
+        ].map(([key, label]) => (
+          <TouchableOpacity
+            key={key}
+            style={[styles.filterChip, userTypeFilter === key && styles.filterChipActive]}
+            onPress={() => setUserTypeFilter(key)}
+          >
+            <Text style={[styles.filterChipText, userTypeFilter === key && styles.filterChipTextActive]}>
+              {label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
     </View>
 
     <View style={viewModes.users === 'grid' ? styles.gridWrap : styles.listWrap}>
@@ -839,13 +1156,19 @@ const filteredListings = useMemo(() => {
         >
           <Text style={styles.cardTitle}>{item.display_name || item.email || '사용자'}</Text>
           <Text style={styles.desc}>
-            {item.user_type === 'store' ? '가게' : '개인'} · {item.role || 'user'} · 신고{' '}
+            {isVerifiedStoreUser(item) ? '인증가게' : item.user_type === 'store' ? '가게' : '개인'} · {item.role || 'user'} · 신고{' '}
             {item.reports_count ?? 0}
           </Text>
           <Text style={styles.metaText}>ID: {item.id}</Text>
           <Text style={styles.metaText}>상태: {item.status || 'active'}</Text>
           <Text style={styles.metaText}>표시 상태: {getUserStatusLabel(item)}</Text>
           <Text style={styles.metaText}>이메일: {item.email || '-'}</Text>
+          <Text style={styles.metaText}>
+            가게 인증: {item.business_verified ? '인증완료' : item.store_verification_status || 'none'}
+          </Text>
+          {item.business_number ? (
+            <Text style={styles.metaText}>사업자번호: {item.business_number}</Text>
+          ) : null}
 
           <TouchableOpacity
             style={[
@@ -871,6 +1194,15 @@ const filteredListings = useMemo(() => {
                 : '이용 제한'}
             </Text>
           </TouchableOpacity>
+
+          {isVerifiedStoreUser(item) ? (
+            <TouchableOpacity
+              style={styles.dangerBtn}
+              onPress={() => revokeStoreVerification(item)}
+            >
+              <Text style={styles.dangerText}>가게인증 취소</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ))}
     </View>
@@ -1058,11 +1390,13 @@ const styles = StyleSheet.create({
   },
   tabRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 6,
     marginBottom: 16,
   },
   tabBtn: {
-    flex: 1,
+    minWidth: '30%',
+    flexGrow: 1,
     borderRadius: 12,
     backgroundColor: '#fff',
     paddingVertical: 10,
@@ -1130,6 +1464,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
+  noteText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#b45309',
+  },
   input: {
     marginTop: 12,
     borderWidth: 1,
@@ -1175,6 +1516,18 @@ const styles = StyleSheet.create({
   },
   secondaryText: {
     color: '#374151',
+    fontWeight: '900',
+  },
+  approveBtn: {
+    marginTop: 12,
+    borderRadius: 12,
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  approveText: {
+    color: '#15803d',
     fontWeight: '900',
   },
   toolCard: {

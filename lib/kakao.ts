@@ -1,5 +1,5 @@
-import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 
 const KAKAO_AUTH_BASE = 'https://kauth.kakao.com/oauth/authorize';
 
@@ -28,10 +28,7 @@ export async function startKakaoAuth() {
   const authUrl = buildKakaoAuthUrl();
   const redirectUri = getKakaoRedirectUri();
 
-  const result = await AuthSession.startAsync({
-    authUrl,
-    returnUrl: redirectUri,
-  });
+  const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
 
   return result;
 }

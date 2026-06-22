@@ -82,6 +82,21 @@ serve(async (req) => {
       });
     }
 
+    const businessStatusCode = String(item?.b_stt_cd ?? "");
+    const businessStatus = String(item?.b_stt ?? item?.tax_type ?? "");
+    const isActiveBusiness =
+      businessStatusCode === "01" || businessStatus.includes("계속");
+
+    if (!isActiveBusiness) {
+      return jsonResponse({
+        valid: false,
+        error: "휴업 또는 폐업 사업자는 가게 인증을 신청할 수 없습니다.",
+        businessNumber: cleanNumber,
+        status: item?.b_stt ?? item?.tax_type ?? null,
+        raw: item,
+      });
+    }
+
     return jsonResponse({
       valid: true,
       businessNumber: cleanNumber,
