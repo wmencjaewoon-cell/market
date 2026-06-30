@@ -104,6 +104,7 @@ function RootNavigator() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false, title: '' }} />
         <Stack.Screen name="login" options={{ title: '로그인' }} />
+        <Stack.Screen name="privacy" options={{ title: '개인정보처리방침' }} />
         <Stack.Screen name="auth/callback" options={{ headerShown: false }} />
         <Stack.Screen
           name="account-deletion-pending"

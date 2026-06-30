@@ -17,61 +17,65 @@ export default function MyScreen() {
   const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<any>(null);
 
-  useEffect(() => {
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
-    fetchProfile();
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.log('프로필 조회 실패:', error);
+      return;
+    }
+
+    if (data) {
+      setProfile(data);
+      return;
+    }
+
+    const { data: created, error: createError } = await supabase
+      .from('profiles')
+      .insert({
+        id: user.id,
+        email: user.email,
+        display_name: user.email?.split('@')[0] || '사용자',
+        user_type: 'personal',
+        status: 'active',
+        trust_status: 'normal',
+        trust_points: 0,
+        trust_level: 1,
+        seller_level_style: 'clean',
+        reports_count: 0,
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.log('프로필 자동 생성 실패:', createError);
+      return;
+    }
+
+    setProfile(created);
   }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    fetchProfile();
+  }, [fetchProfile, user]);
 
   useFocusEffect(
     useCallback(() => {
       if (!user) return;
       fetchProfile();
-    }, [user])
+    }, [fetchProfile, user])
   );
-
-  const fetchProfile = async () => {
-  if (!user) return;
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (error) {
-    console.log('프로필 조회 실패:', error);
-    return;
-  }
-
-  if (data) {
-    setProfile(data);
-    return;
-  }
-
-  const { data: created, error: createError } = await supabase
-    .from('profiles')
-    .insert({
-      id: user.id,
-      email: user.email,
-      display_name: user.email?.split('@')[0] || '사용자',
-      user_type: 'personal',
-      status: 'active',
-      trust_status: 'normal',
-      trust_points: 0,
-      trust_level: 1,
-      seller_level_style: 'clean',
-      reports_count: 0,
-    })
-    .select()
-    .single();
-
-  if (createError) {
-    console.log('프로필 자동 생성 실패:', createError);
-    return;
-  }
-
-  setProfile(created);
-};
 
   useTabRefresh('my', () => {
     void fetchProfile();
@@ -80,7 +84,7 @@ export default function MyScreen() {
   const handleSignOut = async () => {
     await signOut();
     setProfile(null);
-    router.replace('/login' as any);
+    router.replace('/(tabs)/my' as any);
   };
 
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
@@ -91,112 +95,123 @@ export default function MyScreen() {
   const publicPhone =
     isVerifiedStore && profile?.is_phone_public ? profile?.phone : null;
 
-  if (!user) {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>내정보</Text>
-        <TouchableOpacity style={styles.btn} onPress={() => router.push('/login' as any)}>
-          <Text style={styles.btnText}>로그인하기</Text>
-        </TouchableOpacity>
-      </View>
+
+        {user ? (
+          <View style={styles.profileBox}>
+            <View style={styles.avatar}>
+              {profileImageUrl ? (
+                <Image
+                  source={{ uri: profileImageUrl }}
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <Text style={styles.avatarInitial}>
+                  {(profile?.display_name || '나').slice(0, 1)}
+                </Text>
+              )}
+            </View>
+
+            <Text style={styles.name}>{profile?.display_name || '이름 없음'}</Text>
+            <Text style={styles.sub}>
+              {isVerifiedStore ? '가게' : '개인'}
+            </Text>
+
+            <View style={styles.profileBadgeRow}>
+              {isVerifiedStore ? (
+                <Text style={styles.verifiedText}>가게인증완료</Text>
+              ) : null}
+
+              <Text
+                style={[
+                  styles.levelBadge,
+                  {
+                    borderColor: sellerLevelStyle.borderColor,
+                    backgroundColor: sellerLevelStyle.backgroundColor,
+                    color: sellerLevelStyle.textColor,
+                  },
+                ]}
+              >
+                LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
+              </Text>
+            </View>
+
+            <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
+
+            {publicPhone ? <Text style={styles.sub}>{publicPhone}</Text> : null}
+
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => router.push('/profile/edit' as any)}
+            >
+              <Text style={styles.editText}>프로필 수정</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.sub}>
+              상태: {profile?.status === 'active' ? '정상' : '이용 제한'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.loginBox}>
+            <Text style={styles.loginTitle}>로그인이 필요해요</Text>
+            <Text style={styles.loginDesc}>
+              로그인하지 않아도 공지사항과 정책 문서는 확인할 수 있습니다.
+            </Text>
+            <TouchableOpacity style={styles.btn} onPress={() => router.push('/login' as any)}>
+              <Text style={styles.btnText}>로그인하기</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {user ? (
+          <>
+            <Section title="나의 거래">
+              <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
+              <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />
+              <MenuItem title="레벨 꾸미기" onPress={() => router.push('/my/level' as any)} />
+            </Section>
+
+            <Section title="나의 관심">
+              <MenuItem title="관심목록" onPress={() => router.push('/my/favorites' as any)} />
+              <MenuItem title="키워드 알림 설정" onPress={() => router.push('/my/keywords' as any)} />
+            </Section>
+          </>
+        ) : null}
+
+        <Section title="고객지원">
+          <MenuItem title="공지사항" onPress={() => router.push('/support/notices' as any)} />
+          <MenuItem title="고객센터" onPress={() => router.push('/support/help' as any)} />
+        </Section>
+
+        <Section title="설정">
+          <MenuItem title="개인정보처리방침" onPress={() => router.push('/my/privacy' as any)} />
+          <MenuItem title="이용약관" onPress={() => router.push('/my/terms' as any)} />
+          <MenuItem title="운영정책" onPress={() => router.push('/my/operation-policy' as any)} />
+          {user ? (
+            <>
+              <MenuItem title="차단한 사용자" onPress={() => router.push('/my/blocked-users' as any)} />
+              <MenuItem title="회원탈퇴" onPress={() => router.push('/my/delete-account' as any)} />
+            </>
+          ) : null}
+        </Section>
+
+        {profile?.role === 'admin' ? (
+          <Section title="관리자">
+            <MenuItem title="관리자 화면" onPress={() => router.push('/admin' as any)} />
+          </Section>
+        ) : null}
+
+        {user ? (
+          <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut}>
+            <Text style={styles.logoutText}>로그아웃</Text>
+          </TouchableOpacity>
+        ) : null}
+      </ScrollView>
     </SafeAreaView>
   );
-}
-
-  return (
-  <SafeAreaView style={styles.safe} edges={['top']}>
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.profileBox}>
-        <View style={styles.avatar}>
-          {profileImageUrl ? (
-            <Image
-              source={{ uri: profileImageUrl }}
-              style={styles.avatarImage}
-            />
-          ) : (
-            <Text style={styles.avatarInitial}>
-              {(profile?.display_name || '나').slice(0, 1)}
-            </Text>
-          )}
-        </View>
-
-        <Text style={styles.name}>{profile?.display_name || '이름 없음'}</Text>
-        <Text style={styles.sub}>
-          {isVerifiedStore ? '가게' : '개인'}
-        </Text>
-
-        <View style={styles.profileBadgeRow}>
-          {isVerifiedStore ? (
-            <Text style={styles.verifiedText}>가게인증완료</Text>
-          ) : null}
-
-          <Text
-            style={[
-              styles.levelBadge,
-              {
-                borderColor: sellerLevelStyle.borderColor,
-                backgroundColor: sellerLevelStyle.backgroundColor,
-                color: sellerLevelStyle.textColor,
-              },
-            ]}
-          >
-            LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
-          </Text>
-        </View>
-
-        <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
-
-        {publicPhone ? <Text style={styles.sub}>{publicPhone}</Text> : null}
-
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() => router.push('/profile/edit' as any)}
-        >
-          <Text style={styles.editText}>프로필 수정</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.sub}>
-          상태: {profile?.status === 'active' ? '정상' : '이용 제한'}
-        </Text>
-      </View>
-
-      <Section title="나의 거래">
-        <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
-        <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />
-        <MenuItem title="레벨 꾸미기" onPress={() => router.push('/my/level' as any)} />
-      </Section>
-
-      <Section title="나의 관심">
-        <MenuItem title="관심목록" onPress={() => router.push('/my/favorites' as any)} />
-        <MenuItem title="키워드 알림 설정" onPress={() => router.push('/my/keywords' as any)} />
-      </Section>
-
-      <Section title="고객지원">
-        <MenuItem title="공지사항" onPress={() => router.push('/support/notices' as any)} />
-        <MenuItem title="고객센터" onPress={() => router.push('/support/help' as any)} />
-      </Section>
-
-      <Section title="설정">
-        <MenuItem title="개인정보처리방침" onPress={() => router.push('/my/privacy' as any)} />
-        <MenuItem title="이용약관" onPress={() => router.push('/my/terms' as any)} />
-        <MenuItem title="운영정책" onPress={() => router.push('/my/operation-policy' as any)} />
-        <MenuItem title="차단한 사용자" onPress={() => router.push('/my/blocked-users' as any)} />
-        <MenuItem title="회원탈퇴" onPress={() => router.push('/my/delete-account' as any)} />
-      </Section>
-
-      {profile?.role === 'admin' ? (
-        <Section title="관리자">
-          <MenuItem title="관리자 화면" onPress={() => router.push('/admin' as any)} />
-        </Section>
-      ) : null}
-
-      <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut}>
-        <Text style={styles.logoutText}>로그아웃</Text>
-      </TouchableOpacity>
-    </ScrollView>
-  </SafeAreaView>
-);
 }
 
 function Section({ title, children }: any) {
@@ -227,6 +242,23 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 20,
     alignItems: 'center',
+  },
+  loginBox: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  loginTitle: {
+    color: '#111827',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  loginDesc: {
+    marginTop: 6,
+    color: '#6b7280',
+    fontSize: 14,
+    lineHeight: 20,
   },
   avatar: {
     width: 76,
