@@ -68,50 +68,78 @@ export default function AuthCallbackScreen() {
   const [message, setMessage] = useState('로그인을 완료하는 중입니다.');
 
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    const finish = async (url?: string | null) => {
-      if (handledRef.current) return;
-      handledRef.current = true;
+  const finish = async (url?: string | null) => {
+    if (handledRef.current) return;
+    handledRef.current = true;
 
-      try {
-        if (url) {
-          await createSessionFromCallbackUrl(url);
-        }
-
-        await moveAfterLogin();
-      } catch (e: any) {
-        console.log('OAuth callback 처리 실패:', e);
-        if (mounted) {
-          setMessage(e?.message || '로그인을 완료하지 못했습니다.');
-        }
-
-        setTimeout(() => {
-          router.replace('/login' as any);
-        }, 1200);
-      }
-    };
-
-    Linking.getInitialURL().then((url) => {
+    try {
       if (url) {
-        void finish(url);
+        await createSessionFromCallbackUrl(url);
       }
-    });
 
-    const sub = Linking.addEventListener('url', ({ url }) => {
-      void finish(url);
-    });
+      await moveAfterLogin();
+    } catch (e: any) {
+      console.log('OAuth callback 처리 실패:', e);
+      if (mounted) {
+        setMessage(e?.message || '로그인을 완료하지 못했습니다.');
+      }
 
-    const fallbackTimer = setTimeout(() => {
-      void finish(null);
-    }, 700);
+      setTimeout(() => {
+        router.replace('/login' as any);
+      }, 1200);
+    }
+  };
+
+  if (typeof window !== 'undefined') {
+    const currentUrl = window.location.href;
+
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage(
+        {
+          type: 'SUPABASE_OAUTH_CALLBACK',
+          url: currentUrl,
+        },
+        window.location.origin
+      );
+
+      setMessage('로그인이 완료되었습니다. 창을 닫는 중입니다.');
+
+      setTimeout(() => {
+        window.close();
+      }, 300);
+
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void finish(currentUrl);
 
     return () => {
       mounted = false;
-      clearTimeout(fallbackTimer);
-      sub.remove();
     };
-  }, []);
+  }
+
+  Linking.getInitialURL().then((url) => {
+    if (url) {
+      void finish(url);
+      return;
+    }
+
+    void finish(null);
+  });
+
+  const sub = Linking.addEventListener('url', ({ url }) => {
+    void finish(url);
+  });
+
+  return () => {
+    mounted = false;
+    sub.remove();
+  };
+}, []);
 
   return (
     <View style={styles.screen}>

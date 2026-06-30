@@ -319,65 +319,134 @@ export default function LoginScreen() {
   };
 
   const runOAuthLogin = async (provider: OAuthProvider) => {
-    if (authMode === 'signup' && !validateProfileInput()) return;
+  if (authMode === 'signup' && !validateProfileInput()) return;
 
-    try {
-      setLoading(true);
-      setMessage('');
-      setDeletionPendingProfile(null);
+  try {
+    setLoading(true);
+    setMessage('');
+    setDeletionPendingProfile(null);
 
-      const redirectTo = getOAuthRedirectTo();
+    const redirectTo = getOAuthRedirectTo();
 
-      console.log('redirectTo:', redirectTo);
+    console.log('redirectTo:', redirectTo);
 
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo,
-          skipBrowserRedirect: true,
-        },
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo,
+        skipBrowserRedirect: true,
+      },
+    });
+
+    if (error) throw error;
+
+    if (!data?.url) {
+      throw new Error(`${socialProviderLabel[provider]} 로그인 URL을 받지 못했습니다.`);
+    }
+
+    // 웹에서는 작은 팝업창으로 로그인하고,
+    // 로그인 완료 후 auth/callback에서 부모창으로 URL을 전달받아 원래 창에서 세션 처리
+    if (Platform.OS === 'web') {
+      await new Promise<void>((resolve, reject) => {
+        const popup = window.open(
+          data.url,
+          `${socialProviderLabel[provider]}Login`,
+          'width=430,height=720,menubar=no,toolbar=no,location=no,status=no'
+        );
+
+        if (!popup) {
+          reject(new Error('팝업이 차단되었습니다. 브라우저에서 팝업을 허용해 주세요.'));
+          return;
+        }
+
+        let done = false;
+
+        const cleanup = () => {
+          window.removeEventListener('message', handleMessage);
+          clearInterval(checkClosed);
+        };
+
+        const handleMessage = async (event: MessageEvent) => {
+          if (event.origin !== window.location.origin) return;
+
+          const messageData = event.data;
+
+          if (!messageData || messageData.type !== 'SUPABASE_OAUTH_CALLBACK') {
+            return;
+          }
+
+          done = true;
+          cleanup();
+
+          try {
+            await createSessionFromUrl(messageData.url);
+
+            const profileReady = await ensureProfileAfterLogin();
+
+            if (profileReady) {
+              goNext();
+            }
+
+            resolve();
+          } catch (callbackError) {
+            reject(callbackError);
+          }
+        };
+
+        const checkClosed = setInterval(() => {
+          if (!popup.closed) return;
+
+          cleanup();
+
+          if (!done) {
+            reject(new Error(`${socialProviderLabel[provider]} 로그인이 완료되지 않았습니다.`));
+          }
+        }, 500);
+
+        window.addEventListener('message', handleMessage);
       });
 
-      if (error) throw error;
-      if (!data?.url) {
-        throw new Error(`${socialProviderLabel[provider]} 로그인 URL을 받지 못했습니다.`);
-      }
-
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-      console.log('auth result:', result);
-
-      if (result.type !== 'success') {
-        setMessage(`${socialProviderLabel[provider]} 로그인이 완료되지 않았습니다.`);
-        return;
-      }
-
-      await createSessionFromUrl(result.url);
-      const profileReady = await ensureProfileAfterLogin();
-
-      if (profileReady) {
-        goNext();
-      }
-    } catch (e: any) {
-      console.log(`${socialProviderLabel[provider]} 로그인 오류:`, e);
-      const errorMessage = e?.message || '';
-
-      if (
-        provider === 'custom:naver' &&
-        (errorMessage.includes('Unsupported provider') ||
-          errorMessage.includes('custom provider') ||
-          errorMessage.includes('not found'))
-      ) {
-        setMessage(
-          'Supabase에 네이버 로그인 provider가 아직 등록되지 않았습니다. Auth Providers에서 custom:naver 설정을 확인해 주세요.'
-        );
-        return;
-      }
-
-      setMessage(errorMessage || `${socialProviderLabel[provider]} 로그인 중 오류가 발생했습니다.`);
-    } finally {
-      setLoading(false);
+      return;
     }
-  };
+
+    // 모바일 앱에서는 기존처럼 WebBrowser.openAuthSessionAsync 사용
+    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+    console.log('auth result:', result);
+
+    if (result.type !== 'success') {
+      setMessage(`${socialProviderLabel[provider]} 로그인이 완료되지 않았습니다.`);
+      return;
+    }
+
+    await createSessionFromUrl(result.url);
+
+    const profileReady = await ensureProfileAfterLogin();
+
+    if (profileReady) {
+      goNext();
+    }
+  } catch (e: any) {
+    console.log(`${socialProviderLabel[provider]} 로그인 오류:`, e);
+
+    const errorMessage = e?.message || '';
+
+    if (
+      provider === 'custom:naver' &&
+      (errorMessage.includes('Unsupported provider') ||
+        errorMessage.includes('custom provider') ||
+        errorMessage.includes('not found'))
+    ) {
+      setMessage(
+        'Supabase에 네이버 로그인 provider가 아직 등록되지 않았습니다. Auth Providers에서 custom:naver 설정을 확인해 주세요.'
+      );
+      return;
+    }
+
+    setMessage(errorMessage || `${socialProviderLabel[provider]} 로그인 중 오류가 발생했습니다.`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleKakaoLogin = () => runOAuthLogin('kakao');
 
