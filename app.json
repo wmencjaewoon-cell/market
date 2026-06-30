@@ -44,10 +44,9 @@
         }
       },
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff",
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "monochromeImage": "./assets/images/adaptive-icon-monochrome.png"
-      },
+  "backgroundColor": "#ffffff",
+  "foregroundImage": "./assets/images/interior-market.jpg"
+},
       "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.interiormarket"
