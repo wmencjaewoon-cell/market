@@ -23,7 +23,12 @@ export type Listing = {
   profiles?: {
     display_name: string;
     user_type: UserType;
+    business_verified?: boolean | null;
     phone: string | null;
     is_phone_public: boolean;
+    trust_points?: number | null;
+    trust_level?: number | null;
+    seller_level_style?: string | null;
+    show_level_on_posts?: boolean | null;
   } | null;
 };

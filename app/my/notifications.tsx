@@ -82,6 +82,20 @@ export default function NotificationsScreen() {
       )
     );
 
+    if (item.type === 'review') {
+      const roomId = item.data?.roomId;
+      if (roomId) {
+        router.push(`/chat/${roomId}` as any);
+        return;
+      }
+
+      const listingId = item.data?.listingId;
+      if (listingId) {
+        router.push(`/(tabs)/home/post/${listingId}` as any);
+        return;
+      }
+    }
+
     if (item.type === 'keyword_listing' || item.type === 'favorite_listing_updated') {
       const listingId = item.data?.listingId;
       if (listingId) {

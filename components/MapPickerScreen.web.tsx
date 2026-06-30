@@ -7,6 +7,7 @@ export default function MapPickerScreen() {
     lat?: string;
     lng?: string;
     returnTo?: string;
+    category?: string;
     title?: string;
     desc?: string;
     buttonText?: string;
@@ -23,7 +24,7 @@ export default function MapPickerScreen() {
   }, [params.lat, params.lng]);
 
   const [marker] = useState(initial);
-  const returnTo = params.returnTo || '/(tabs)/home/create/share';
+  const returnTo = params.returnTo || '/(tabs)/home/create';
   const title = params.title || '거래 희망 장소 선택';
   const desc = params.desc || '웹에서는 지도 핀 선택 대신 앱에서 설정하는 방식을 추천합니다.';
   const buttonText = params.buttonText || '이 좌표로 임시 선택';
@@ -52,6 +53,7 @@ export default function MapPickerScreen() {
               params: {
                 lat: String(marker.latitude),
                 lng: String(marker.longitude),
+                ...(params.category ? { category: String(params.category) } : {}),
               },
             })
           }

@@ -38,6 +38,9 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../../contexts/AuthContext';
+import { markMessagesAsRead, sendMessage } from '../../lib/chat';
+import { canStartChat, canUseApp } from '../../lib/guard';
 import {
   InCallManager,
   isNativeCallSupported,
@@ -48,11 +51,9 @@ import {
   RTCSessionDescription,
   RTCView,
 } from '../../lib/nativeCall';
-import { useAuth } from '../../contexts/AuthContext';
-import { markMessagesAsRead, sendMessage } from '../../lib/chat';
-import { canStartChat, canUseApp } from '../../lib/guard';
 import { checkProhibitedContent } from '../../lib/prohibited';
 import { REPORT_REASONS } from '../../lib/reportReasons';
+import { getSellerLevel, getSellerLevelTitle } from '../../lib/sellerLevel';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -84,6 +85,8 @@ type ChatCallSession = {
   status: ChatCallStatus;
   offer: RTCSessionPayload | null;
   answer: RTCSessionPayload | null;
+  caller_camera_off?: boolean | null;
+  callee_camera_off?: boolean | null;
   created_at: string;
   answered_at: string | null;
   ended_at: string | null;
@@ -108,6 +111,17 @@ type ChatCallIceCandidate = {
   created_at: string;
 };
 
+type TradeReviewPreview = {
+  id: number;
+  sale_id: number | null;
+  reviewer_id: string;
+  target_user_id: string;
+  sentiment: 'positive' | 'negative' | string | null;
+  feedback_tags: string[] | null;
+  comment: string | null;
+  created_at: string | null;
+};
+
 type ChatUserProfile = {
   display_name: string | null;
   phone: string | null;
@@ -115,6 +129,8 @@ type ChatUserProfile = {
   user_type?: 'store' | 'personal' | null;
   business_verified?: boolean | null;
   account?: string | null;
+  trust_points?: number | null;
+  trust_level?: number | null;
 };
 
 type RoomInfo = {
@@ -153,6 +169,30 @@ function getListingStockText(listing?: RoomInfo['listing']) {
   if (total <= 1) return '';
 
   return `남은 ${remaining}/${total}개`;
+}
+
+const REVIEW_TAG_LABELS: Record<string, string> = {
+  fast_response: '응답이 빨라요',
+  kind: '친절해요',
+  kept_promise: '약속을 잘 지켜요',
+  accurate_item: '상품 설명이 정확해요',
+  slow_response: '연락이 느렸어요',
+  schedule_issue: '약속 시간이 맞지 않아요',
+  item_mismatch: '상품 상태가 달랐어요',
+  deal_canceled: '거래가 취소됐어요',
+  other: '기타',
+};
+
+function getReviewTagLabel(tag: string) {
+  return REVIEW_TAG_LABELS[tag] || tag;
+}
+
+function getReviewSummary(review: TradeReviewPreview) {
+  const tags = Array.isArray(review.feedback_tags) ? review.feedback_tags : [];
+  const tagText = tags.map(getReviewTagLabel).filter(Boolean).join(', ');
+  if (tagText) return tagText;
+  if (review.comment?.trim()) return review.comment.trim();
+  return review.sentiment === 'negative' ? '아쉬웠어요' : '좋았어요';
 }
 
 function getListingQuantityInfo(listing?: RoomInfo['listing']) {
@@ -296,19 +336,36 @@ function formatCallDuration(totalSeconds: number) {
 
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
+function getCallDurationSeconds(
+  call?: Pick<ChatCallSession, 'answered_at'> | null,
+  endedAtMs = Date.now()
+) {
+  if (!call?.answered_at) return 0;
+
+  const startedAtMs = new Date(call.answered_at).getTime();
+
+  if (Number.isNaN(startedAtMs)) return 0;
+
+  return Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+}
 
 function getCallTypeLabel(callType: ChatCallType) {
   return callType === 'video' ? '영상통화' : '보이스톡';
 }
 
-function getCallStatusMessage(callType: ChatCallType, status: ChatCallStatus) {
+function getCallStatusMessage(
+  callType: ChatCallType,
+  status: ChatCallStatus,
+  durationSeconds = 0
+) {
   const label = getCallTypeLabel(callType);
+  const durationText = durationSeconds > 0 ? ` · ${formatCallDuration(durationSeconds)}` : '';
 
   if (status === 'ringing') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 요청`;
   if (status === 'accepted') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 연결`;
   if (status === 'declined') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 거절`;
   if (status === 'canceled') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 취소`;
-  if (status === 'ended') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 종료`;
+  if (status === 'ended') return `${CALL_STATUS_MESSAGE_PREFIX}${label} 종료${durationText}`;
   return `${CALL_STATUS_MESSAGE_PREFIX}${label} 부재중`;
 }
 
@@ -663,12 +720,15 @@ export default function ChatRoomScreen() {
   const [saleCompleting, setSaleCompleting] = useState(false);
   const [pendingReviewTargetId, setPendingReviewTargetId] = useState<string | null>(null);
   const [reviewOnlySaleId, setReviewOnlySaleId] = useState<number | null>(null);
+  const [counterpartReview, setCounterpartReview] = useState<TradeReviewPreview | null>(null);
+  const [myReciprocalReview, setMyReciprocalReview] = useState<TradeReviewPreview | null>(null);
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountText, setAccountText] = useState('');
   const [callMenuOpen, setCallMenuOpen] = useState(false);
   const [currentCall, setCurrentCall] = useState<ChatCallSession | null>(null);
   const [callActionLoading, setCallActionLoading] = useState(false);
+  const callActionLockRef = useRef(false);
   const [localCallStream, setLocalCallStream] = useState<MediaStream | null>(null);
   const [remoteCallStream, setRemoteCallStream] = useState<MediaStream | null>(null);
   const [callStartedAtMs, setCallStartedAtMs] = useState<number | null>(null);
@@ -679,6 +739,8 @@ export default function ChatRoomScreen() {
   const [callFacingMode, setCallFacingMode] = useState<'user' | 'environment'>('user');
 
   const listing = roomInfo?.listing;
+  const currentListingId = listing?.id ?? null;
+  const currentListingAuthorId = listing?.author_id ?? null;
   const listingQuantityInfo = useMemo(() => getListingQuantityInfo(listing), [listing]);
   const isShareListing = listing?.category === 'share';
   const latestAppointment = useMemo(() => {
@@ -791,7 +853,14 @@ export default function ChatRoomScreen() {
     currentCall?.status === 'ringing' && currentCall.caller_id === user?.id ? currentCall : null;
   const activeCall = currentCall?.status === 'accepted' ? currentCall : null;
 
-    const visibleCall = incomingCall || outgoingCall || activeCall;
+  const visibleCall = incomingCall || outgoingCall || activeCall;
+  const controllableCall = activeCall || outgoingCall || incomingCall;
+  const remoteCameraOff =
+    visibleCall?.call_type === 'video' && visibleCall.caller_id === user?.id
+      ? !!visibleCall.callee_camera_off
+      : visibleCall?.call_type === 'video' && visibleCall?.callee_id === user?.id
+        ? !!visibleCall.caller_camera_off
+        : false;
   const visibleCallLabel = visibleCall ? getCallTypeLabel(visibleCall.call_type) : '';
   const visibleCallTitle = incomingCall
     ? `${visibleCallLabel} 수신`
@@ -833,7 +902,25 @@ export default function ChatRoomScreen() {
     setCurrentCall(isCallParticipant(latestCall) ? latestCall : null);
   }, [roomId, user, isCallParticipant]);
 
+  const stopCallSound = useCallback(() => {
+    try {
+      const manager = InCallManager as any;
+
+      if (typeof manager.stopRingback === 'function') {
+        manager.stopRingback();
+      }
+
+      if (typeof manager.stopRingtone === 'function') {
+        manager.stopRingtone();
+      }
+    } catch (error) {
+      console.log('통화 연결음/벨소리 종료 실패:', error);
+    }
+  }, []);
+
   const cleanupCallMedia = useCallback(() => {
+    stopCallSound();
+
     try {
       peerConnectionRef.current?.close();
     } catch (error) {
@@ -852,39 +939,61 @@ export default function ChatRoomScreen() {
     setLocalCallStream(null);
     setRemoteCallStream(null);
     setCallStartedAtMs(null);
-setCallDurationText('00:00');
-setCallMicMuted(false);
-setCallSpeakerOn(false);
-setCallCameraOff(false);
-setCallFacingMode('user');
+    setCallDurationText('00:00');
+    setCallMicMuted(false);
+    setCallSpeakerOn(false);
+    setCallCameraOff(false);
+    setCallFacingMode('user');
 
-try {
-  InCallManager.stop();
-} catch (error) {
-  console.log('통화 오디오 매니저 종료 실패:', error);
-}
-  }, []);
+    try {
+      InCallManager.stop();
+    } catch (error) {
+      console.log('통화 오디오 매니저 종료 실패:', error);
+    }
+  }, [stopCallSound]);
 
-  const getLocalCallStream = useCallback(async (callType: ChatCallType) => {
-    if (localStreamRef.current) return localStreamRef.current;
+  const getLocalCallStream = useCallback(
+    async (callType: ChatCallType) => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getAudioTracks().forEach((track) => {
+          track.enabled = !callMicMuted;
+        });
 
-    const stream = await mediaDevices.getUserMedia({
-      audio: true,
-      video:
-        callType === 'video'
-          ? {
-              facingMode: 'user',
+        localStreamRef.current.getVideoTracks().forEach((track) => {
+          track.enabled = !callCameraOff;
+        });
+
+        return localStreamRef.current;
+      }
+
+      const stream = await mediaDevices.getUserMedia({
+        audio: true,
+        video:
+          callType === 'video'
+            ? {
+              facingMode: callFacingMode,
               width: 720,
               height: 1280,
               frameRate: 30,
             }
-          : false,
-    });
+            : false,
+      });
 
-    localStreamRef.current = stream;
-    setLocalCallStream(stream);
-    return stream;
-  }, []);
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !callMicMuted;
+      });
+
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = !callCameraOff;
+      });
+
+      localStreamRef.current = stream;
+      setLocalCallStream(stream);
+
+      return stream;
+    },
+    [callMicMuted, callCameraOff, callFacingMode]
+  );
 
   const insertIceCandidate = useCallback(
     async (callId: string, candidate: RTCIceCandidatePayload) => {
@@ -940,6 +1049,34 @@ try {
     },
     [user]
   );
+
+  const startCallSound = useCallback(
+    (call: ChatCallSession) => {
+      try {
+        const manager = InCallManager as any;
+
+        if (call.status !== 'ringing') return;
+
+        if (call.caller_id === user?.id) {
+          if (typeof manager.startRingback === 'function') {
+            manager.startRingback();
+          }
+          return;
+        }
+
+        if (call.callee_id === user?.id) {
+          if (typeof manager.startRingtone === 'function') {
+            manager.startRingtone();
+          }
+        }
+      } catch (error) {
+        console.log('통화 연결음/벨소리 시작 실패:', error);
+      }
+    },
+    [user?.id]
+  );
+
+
 
   const createCallPeerConnection = useCallback(
     (callId: string, stream: MediaStream) => {
@@ -1065,28 +1202,53 @@ try {
   }, [roomId, user?.id]);
 
   useEffect(() => {
-  if (!activeCall) {
-    setCallStartedAtMs(null);
-    setCallDurationText('00:00');
-    return;
-  }
+    if (!activeCall) {
+      setCallStartedAtMs(null);
+      setCallDurationText('00:00');
+      return;
+    }
 
-  const startedAt =
-    activeCall.answered_at && !Number.isNaN(new Date(activeCall.answered_at).getTime())
-      ? new Date(activeCall.answered_at).getTime()
-      : Date.now();
+    const startedAt =
+      activeCall.answered_at && !Number.isNaN(new Date(activeCall.answered_at).getTime())
+        ? new Date(activeCall.answered_at).getTime()
+        : Date.now();
 
-  setCallStartedAtMs(startedAt);
-  setCallDurationText(formatCallDuration(Math.floor((Date.now() - startedAt) / 1000)));
-
-  const intervalId = setInterval(() => {
+    setCallStartedAtMs(startedAt);
     setCallDurationText(formatCallDuration(Math.floor((Date.now() - startedAt) / 1000)));
-  }, 1000);
 
-  return () => {
-    clearInterval(intervalId);
-  };
-}, [activeCall?.id, activeCall?.answered_at]);
+    const intervalId = setInterval(() => {
+      setCallDurationText(formatCallDuration(Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [activeCall?.id, activeCall?.answered_at]);
+
+  useEffect(() => {
+    if (!incomingCall) return;
+    if (incomingCall.call_type !== 'video') return;
+    if (localStreamRef.current) return;
+
+    let cancelled = false;
+
+    const preparePreview = async () => {
+      try {
+        const hasPermission = await ensureCallDevicePermissions('video');
+        if (!hasPermission || cancelled) return;
+
+        await getLocalCallStream('video');
+      } catch (error) {
+        console.log('영상통화 수신 미리보기 준비 실패:', error);
+      }
+    };
+
+    void preparePreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [incomingCall?.id]);
 
   useEffect(() => {
     if (!roomId || !user) return;
@@ -1197,48 +1359,62 @@ try {
   }, [messagesLoaded, targetUserId, roomId, messages.length]);
 
   useEffect(() => {
-  if (!visibleCall) return;
+    if (!visibleCall) return;
 
-  const mediaType = visibleCall.call_type === 'video' ? 'video' : 'audio';
+    const mediaType = visibleCall.call_type === 'video' ? 'video' : 'audio';
 
-  try {
-    InCallManager.start({ media: mediaType });
-    InCallManager.setSpeakerphoneOn(visibleCall.call_type === 'video' || callSpeakerOn);
-    InCallManager.setMicrophoneMute(callMicMuted);
-  } catch (error) {
-    console.log('통화 오디오 매니저 시작 실패:', error);
-  }
-
-  return () => {
     try {
-      InCallManager.stop();
+      InCallManager.start({ media: mediaType });
+      InCallManager.setMicrophoneMute(callMicMuted);
+
+      startCallSound(visibleCall);
+
+      setTimeout(() => {
+        applyCallSpeakerMode(callSpeakerOn);
+      }, 300);
     } catch (error) {
-      console.log('통화 오디오 매니저 종료 실패:', error);
+      console.log('통화 오디오 매니저 시작 실패:', error);
     }
-  };
-}, [visibleCall?.id]);
 
-useEffect(() => {
-  if (!visibleCall) return;
+    return () => {
+      try {
+        stopCallSound();
 
-  try {
-    InCallManager.setMicrophoneMute(callMicMuted);
-  } catch (error) {
-    console.log('마이크 상태 변경 실패:', error);
-  }
-}, [visibleCall?.id, callMicMuted]);
+        const manager = InCallManager as any;
 
-useEffect(() => {
-  if (!visibleCall) return;
+        if (typeof manager.setForceSpeakerphoneOn === 'function') {
+          manager.setForceSpeakerphoneOn(null);
+        }
 
-  try {
-    InCallManager.setSpeakerphoneOn(
-      visibleCall.call_type === 'video' ? true : callSpeakerOn
-    );
-  } catch (error) {
-    console.log('스피커 상태 변경 실패:', error);
-  }
-}, [visibleCall?.id, visibleCall?.call_type, callSpeakerOn]);
+        InCallManager.stop();
+      } catch (error) {
+        console.log('통화 오디오 매니저 종료 실패:', error);
+      }
+    };
+  }, [visibleCall?.id, startCallSound, stopCallSound]);
+  useEffect(() => {
+    if (activeCall) {
+      stopCallSound();
+    }
+  }, [activeCall?.id, stopCallSound]);
+
+
+  useEffect(() => {
+    if (!visibleCall) return;
+
+    try {
+      InCallManager.setMicrophoneMute(callMicMuted);
+    } catch (error) {
+      console.log('마이크 상태 변경 실패:', error);
+    }
+  }, [visibleCall?.id, callMicMuted]);
+
+  useEffect(() => {
+    if (!visibleCall) return;
+
+    applyCallSpeakerMode(callSpeakerOn);
+  }, [visibleCall?.id, callSpeakerOn]);
+
 
   useEffect(() => {
     const intervalId = setInterval(() => {
@@ -1378,7 +1554,7 @@ useEffect(() => {
   const fetchChatTargetProfile = async (targetId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('display_name, phone, is_phone_public, user_type, business_verified, account')
+      .select('display_name, phone, is_phone_public, user_type, business_verified, account, trust_points, trust_level')
       .eq('id', targetId)
       .maybeSingle();
 
@@ -1392,18 +1568,17 @@ useEffect(() => {
   };
 
   const fetchUserRating = async (targetId: string) => {
-    const { data, error } = await supabase
+    const { count, error } = await supabase
       .from('reviews')
-      .select('rating')
+      .select('id', { count: 'exact', head: true })
       .eq('target_user_id', targetId);
 
-    if (error || !data || data.length === 0) {
+    if (error) {
       setChatTargetRating({ avg: null, count: 0 });
       return;
     }
 
-    const sum = data.reduce((acc: number, row: any) => acc + Number(row.rating || 0), 0);
-    setChatTargetRating({ avg: sum / data.length, count: data.length });
+    setChatTargetRating({ avg: null, count: count || 0 });
   };
 
   const fetchUserReportCount = async (targetId: string) => {
@@ -1837,33 +2012,57 @@ useEffect(() => {
   };
 
   const sendTextMessage = async (messageText: string) => {
-    if (!roomId || sending) return;
+  if (!roomId || sending || !user) return;
 
-    const blockedKeyword = checkProhibitedContent(messageText);
+  const blockedKeyword = checkProhibitedContent(messageText);
 
-    if (blockedKeyword) {
-      showChatAlert(
-        '전송 차단',
-        `"${blockedKeyword}" 관련 판매금지 물품이나 내용은 채팅으로 보낼 수 없습니다.`
-      );
-      return;
-    }
+  if (blockedKeyword) {
+    showChatAlert(
+      '전송 차단',
+      `"${blockedKeyword}" 관련 판매금지 물품이나 내용은 채팅으로 보낼 수 없습니다.`
+    );
+    return;
+  }
 
-    try {
-      setSending(true);
-      await sendMessage(roomId, messageText);
-      setText('');
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 120);
-    } catch (e) {
-      console.log('메시지 전송 실패:', e);
-      showChatAlert(
-        '메시지 전송 실패',
-        e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'
-      );
-    } finally {
-      setSending(false);
-    }
+  const tempId = `temp-${Date.now()}`;
+
+  const optimisticMessage: ChatMessage = {
+    id: tempId,
+    room_id: roomId,
+    sender_id: user.id,
+    message: messageText,
+    created_at: new Date().toISOString(),
   };
+
+  try {
+    setSending(true);
+
+    // 먼저 화면에 표시
+    setMessages((prev) => [...prev, optimisticMessage]);
+    setText('');
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    });
+
+    // 실제 DB 전송
+    await sendMessage(roomId, messageText);
+  } catch (e) {
+    // 실패하면 임시 메시지 제거
+    setMessages((prev) => prev.filter((message) => message.id !== tempId));
+
+    console.log('메시지 전송 실패:', e);
+    showChatAlert(
+      '메시지 전송 실패',
+      e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'
+    );
+
+    // 실패했을 때 입력값 복구
+    setText(messageText);
+  } finally {
+    setSending(false);
+  }
+};
 
   const onSend = async () => {
     if (!roomId || !text.trim() || sending) return;
@@ -1972,7 +2171,9 @@ useEffect(() => {
 
   const chatTargetReviewText =
     chatTargetRating.count > 0
-      ? `★ ${chatTargetRating.avg?.toFixed(1)} · 후기 ${chatTargetRating.count}개`
+      ? `LV.${getSellerLevel(chatTargetProfile, chatTargetRating.count * 100)} ${getSellerLevelTitle(
+        getSellerLevel(chatTargetProfile, chatTargetRating.count * 100)
+      )} · 후기 ${chatTargetRating.count}개`
       : '후기 0개';
   const chatTargetSub = `${chatTargetReviewText} · 신고 ${chatTargetReportCount}개`;
   const canStorePhoneCall =
@@ -2042,10 +2243,14 @@ useEffect(() => {
       return true;
     }
 
-    const requiredPermissions = [
+    const requiredPermissions: Parameters<typeof PermissionsAndroid.requestMultiple>[0] = [
       PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
       ...(callType === 'video' ? [PermissionsAndroid.PERMISSIONS.CAMERA] : []),
     ];
+
+    if (Number(Platform.Version) >= 31) {
+      requiredPermissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+    }
 
     const result = await PermissionsAndroid.requestMultiple(requiredPermissions);
     const denied = requiredPermissions.some(
@@ -2066,22 +2271,36 @@ useEffect(() => {
   };
 
   const sendCallStatusMessage = async (
-    call: Pick<ChatCallSession, 'call_type'>,
-    status: ChatCallStatus
+    call: Pick<ChatCallSession, 'call_type' | 'answered_at'>,
+    status: ChatCallStatus,
+    endedAtMs = Date.now()
   ) => {
     if (!roomId) return;
 
+    const durationSeconds =
+      status === 'ended' ? getCallDurationSeconds(call, endedAtMs) : 0;
+
     try {
-      await sendMessage(roomId, getCallStatusMessage(call.call_type, status), {
-        skipProhibitedCheck: true,
-      });
+      await sendMessage(
+        roomId,
+        getCallStatusMessage(call.call_type, status, durationSeconds),
+        {
+          skipProhibitedCheck: true,
+        }
+      );
     } catch (error) {
       console.log('통화 상태 메시지 전송 실패:', error);
     }
   };
 
   const startInAppCall = async (callType: ChatCallType) => {
-    if (!roomId || !user || !targetUserId || callActionLoading) return;
+  if (callActionLockRef.current) return;
+  callActionLockRef.current = true;
+
+  try {
+    if (!roomId || !user || !targetUserId) return;
+
+    if (callActionLoading) return;
 
     if (!isNativeCallSupported) {
       setCallMenuOpen(false);
@@ -2097,6 +2316,13 @@ useEffect(() => {
       return;
     }
 
+    setCallActionLoading(true);
+    setCallMenuOpen(false);
+    setCallSpeakerOn(false);
+    setCallMicMuted(false);
+    setCallCameraOff(false);
+    setCallFacingMode('user');
+
     const guard = await canStartChat();
 
     if (!guard.ok) {
@@ -2107,80 +2333,80 @@ useEffect(() => {
     const hasPermission = await ensureCallDevicePermissions(callType);
     if (!hasPermission) return;
 
-    try {
-      setCallActionLoading(true);
-      setCallMenuOpen(false);
-      setCallSpeakerOn(callType === 'video');
-setCallMicMuted(false);
-setCallCameraOff(false);
-setCallFacingMode('user');
+    const { data, error } = await supabase
+      .from('chat_call_sessions')
+      .insert({
+        room_id: roomId,
+        caller_id: user.id,
+        callee_id: targetUserId,
+        call_type: callType,
+        status: 'ringing',
+      })
+      .select('*')
+      .single();
 
-      const stream = await getLocalCallStream(callType);
-
-      const { data, error } = await supabase
-        .from('chat_call_sessions')
-        .insert({
-          room_id: roomId,
-          caller_id: user.id,
-          callee_id: targetUserId,
-          call_type: callType,
-          status: 'ringing',
-        })
-        .select('*')
-        .single();
-
-      if (error) {
-        console.log('통화 요청 생성 실패:', error);
-        Alert.alert(
-          '통화 요청 실패',
-          error.message.includes('chat_call_sessions')
-            ? 'Supabase에 chat_calls.sql을 먼저 적용해 주세요.'
-            : '통화 요청을 보내지 못했습니다.'
-        );
-        return;
-      }
-
-      const call = data as ChatCallSession;
-      setCurrentCall(call);
-
-      const peer = createCallPeerConnection(call.id, stream);
-      const offer = await peer.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: callType === 'video',
-      });
-
-      await peer.setLocalDescription(offer);
-
-      const offerPayload =
-        typeof offer.toJSON === 'function'
-          ? offer.toJSON()
-          : { type: offer.type, sdp: offer.sdp };
-
-      const { data: callWithOffer, error: offerError } = await supabase
-        .from('chat_call_sessions')
-        .update({ offer: offerPayload })
-        .eq('id', call.id)
-        .select('*')
-        .single();
-
-      if (offerError) {
-        console.log('통화 offer 저장 실패:', offerError);
-        cleanupCallMedia();
-        Alert.alert('통화 요청 실패', '통화 연결 정보를 저장하지 못했습니다.');
-        return;
-      }
-
-      setCurrentCall(callWithOffer as ChatCallSession);
-      await sendCallStatusMessage(call, 'ringing');
-    } finally {
-      setCallActionLoading(false);
+    if (error) {
+      console.log('통화 요청 생성 실패:', error);
+      Alert.alert(
+        '통화 요청 실패',
+        error.message.includes('chat_call_sessions')
+          ? 'Supabase에 chat_calls.sql을 먼저 적용해 주세요.'
+          : '통화 요청을 보내지 못했습니다.'
+      );
+      return;
     }
-  };
+
+    const call = data as ChatCallSession;
+
+    
+    // 먼저 발신 화면 표시
+    setCurrentCall(call);
+    setCallMenuOpen(false);
+
+    const stream = await getLocalCallStream(callType);
+
+    const peer = createCallPeerConnection(call.id, stream);
+    const offer = await peer.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: callType === 'video',
+    });
+
+    await peer.setLocalDescription(offer);
+
+    const offerPayload =
+      typeof offer.toJSON === 'function'
+        ? offer.toJSON()
+        : { type: offer.type, sdp: offer.sdp };
+
+    const { data: callWithOffer, error: offerError } = await supabase
+      .from('chat_call_sessions')
+      .update({ offer: offerPayload })
+      .eq('id', call.id)
+      .select('*')
+      .single();
+
+    if (offerError) {
+      console.log('통화 offer 저장 실패:', offerError);
+      cleanupCallMedia();
+      Alert.alert('통화 요청 실패', '통화 연결 정보를 저장하지 못했습니다.');
+      return;
+    }
+
+    setCurrentCall(callWithOffer as ChatCallSession);
+
+    // 통화 상태 메시지는 기다리지 않음
+    void sendCallStatusMessage(call, 'ringing');
+  } finally {
+    setCallActionLoading(false);
+    callActionLockRef.current = false;
+  }
+};
 
   const updateCallStatus = async (call: ChatCallSession, status: ChatCallStatus) => {
     if (!call || callActionLoading) return;
 
-    const nowIso = new Date().toISOString();
+    const endedAtMs = Date.now();
+    const nowIso = new Date(endedAtMs).toISOString();
     const values: Partial<ChatCallSession> = { status };
 
     if (['declined', 'canceled', 'ended', 'missed'].includes(status)) {
@@ -2199,10 +2425,10 @@ setCallFacingMode('user');
           return;
         }
 
-        setCallSpeakerOn(call.call_type === 'video');
-  setCallMicMuted(false);
-  setCallCameraOff(false);
-  setCallFacingMode('user');
+        // setCallSpeakerOn(false);
+        // setCallMicMuted(false);
+        // setCallCameraOff(false);
+        // setCallFacingMode('user');
         const hasPermission = await ensureCallDevicePermissions(call.call_type);
         if (!hasPermission) return;
 
@@ -2258,7 +2484,7 @@ setCallFacingMode('user');
       }
 
       const updatedCall = data as ChatCallSession;
-      await sendCallStatusMessage(updatedCall, status);
+      await sendCallStatusMessage(updatedCall, status, endedAtMs);
 
       if (status === 'accepted') {
         setCurrentCall(updatedCall);
@@ -2273,63 +2499,166 @@ setCallFacingMode('user');
     }
   };
 
-  const toggleCallMic = () => {
-  const nextMuted = !callMicMuted;
+  const toggleCallMic = async () => {
+    const nextMuted = !callMicMuted;
 
-  localStreamRef.current?.getAudioTracks().forEach((track) => {
-    track.enabled = !nextMuted;
-  });
+    if (!localStreamRef.current && visibleCall) {
+      try {
+        await getLocalCallStream(visibleCall.call_type);
+      } catch (error) {
+        console.log('마이크 제어용 스트림 준비 실패:', error);
+      }
+    }
 
-  setCallMicMuted(nextMuted);
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
 
-  try {
-    InCallManager.setMicrophoneMute(nextMuted);
-  } catch (error) {
-    console.log('마이크 음소거 변경 실패:', error);
-  }
-};
+    setCallMicMuted(nextMuted);
 
-const switchCallCamera = () => {
-  const videoTrack = localStreamRef.current?.getVideoTracks()[0];
+    try {
+      InCallManager.setMicrophoneMute(nextMuted);
+    } catch (error) {
+      console.log('마이크 음소거 변경 실패:', error);
+    }
+  };
 
-  if (!videoTrack) {
-    Alert.alert('카메라 전환', '전환할 카메라가 없습니다.');
-    return;
-  }
+  const switchCallCamera = async () => {
+    if (!visibleCall || visibleCall.call_type !== 'video') return;
 
-  const switchCamera = (videoTrack as any)._switchCamera;
+    if (!localStreamRef.current) {
+      try {
+        await getLocalCallStream('video');
+      } catch (error) {
+        console.log('카메라 전환용 스트림 준비 실패:', error);
+        Alert.alert('카메라 전환', '카메라를 준비하지 못했습니다.');
+        return;
+      }
+    }
 
-  if (typeof switchCamera === 'function') {
-    switchCamera.call(videoTrack);
-    setCallFacingMode((prev) => (prev === 'user' ? 'environment' : 'user'));
-    return;
-  }
+    const videoTrack = localStreamRef.current?.getVideoTracks()[0];
 
-  Alert.alert('카메라 전환', '이 기기에서는 카메라 전환을 지원하지 않습니다.');
-};
+    if (!videoTrack) {
+      Alert.alert('카메라 전환', '전환할 카메라가 없습니다.');
+      return;
+    }
 
-const toggleCallCamera = () => {
-  if (!localStreamRef.current) return;
+    const switchCamera = (videoTrack as any)._switchCamera;
 
-  const nextCameraOff = !callCameraOff;
+    if (typeof switchCamera === 'function') {
+      switchCamera.call(videoTrack);
+      setCallFacingMode((prev) => (prev === 'user' ? 'environment' : 'user'));
+      return;
+    }
 
-  localStreamRef.current.getVideoTracks().forEach((track) => {
-    track.enabled = !nextCameraOff;
-  });
+    Alert.alert('카메라 전환', '이 기기에서는 카메라 전환을 지원하지 않습니다.');
+  };
 
-  setCallCameraOff(nextCameraOff);
-};
+  const syncCallCameraOffState = useCallback(
+    async (cameraOff: boolean) => {
+      const call = visibleCall;
 
-const toggleCallSpeaker = () => {
-  const nextSpeakerOn = !callSpeakerOn;
-  setCallSpeakerOn(nextSpeakerOn);
+      if (!call || !user || call.call_type !== 'video') return;
 
-  try {
-    InCallManager.setSpeakerphoneOn(nextSpeakerOn);
-  } catch (error) {
-    console.log('스피커폰 변경 실패:', error);
-  }
-};
+      const column =
+        call.caller_id === user.id
+          ? 'caller_camera_off'
+          : call.callee_id === user.id
+            ? 'callee_camera_off'
+            : null;
+
+      if (!column) return;
+
+      setCurrentCall((prev) =>
+        prev?.id === call.id ? { ...prev, [column]: cameraOff } : prev
+      );
+
+      const { error } = await supabase
+        .from('chat_call_sessions')
+        .update({ [column]: cameraOff })
+        .eq('id', call.id);
+
+      if (error) {
+        console.log('카메라 꺼짐 상태 저장 실패:', error);
+      }
+    },
+    [user, visibleCall]
+  );
+
+  const toggleCallCamera = async () => {
+    if (!visibleCall || visibleCall.call_type !== 'video') return;
+
+    if (!localStreamRef.current) {
+      try {
+        await getLocalCallStream('video');
+      } catch (error) {
+        console.log('카메라 제어용 스트림 준비 실패:', error);
+        Alert.alert('카메라', '카메라를 준비하지 못했습니다.');
+        return;
+      }
+    }
+
+    const nextCameraOff = !callCameraOff;
+    const nextTrackEnabled = !nextCameraOff;
+
+    localStreamRef.current?.getVideoTracks().forEach((track) => {
+      const setEnabled = (track as any)._setEnabled;
+
+      try {
+        if (typeof setEnabled === 'function') {
+          setEnabled.call(track, nextTrackEnabled);
+        }
+
+        track.enabled = nextTrackEnabled;
+      } catch (error) {
+        console.log('카메라 상태 변경 실패:', error);
+        try {
+          track.enabled = nextTrackEnabled;
+        } catch (fallbackError) {
+          console.log('카메라 상태 재변경 실패:', fallbackError);
+        }
+      }
+    });
+
+    setCallCameraOff(nextCameraOff);
+    void syncCallCameraOffState(nextCameraOff);
+  };
+
+
+
+
+
+  const applyCallSpeakerMode = (speakerOn: boolean) => {
+    try {
+      const manager = InCallManager as any;
+      const route = speakerOn ? 'SPEAKER_PHONE' : 'BLUETOOTH';
+
+      if (typeof manager.setForceSpeakerphoneOn === 'function') {
+        manager.setForceSpeakerphoneOn(speakerOn);
+      }
+
+      InCallManager.setSpeakerphoneOn(speakerOn);
+
+      if (typeof manager.chooseAudioRoute === 'function') {
+        manager.chooseAudioRoute(route).catch((error: unknown) => {
+          console.log('통화 오디오 라우트 변경 실패:', error);
+        });
+      }
+
+      console.log('통화 스피커 라우팅 변경:', speakerOn ? 'speaker' : 'bluetooth/earpiece');
+    } catch (error) {
+      console.log('스피커폰 변경 실패:', error);
+    }
+  };
+
+  const toggleCallSpeaker = () => {
+    setCallSpeakerOn((prev) => {
+      const nextSpeakerOn = !prev;
+      applyCallSpeakerMode(nextSpeakerOn);
+      return nextSpeakerOn;
+    });
+  };
+
 
   const handleAlbum = async () => {
     setPlusMenuOpen(false);
@@ -2593,18 +2922,19 @@ const toggleCallSpeaker = () => {
       params: {
         listingId: String(listing.id),
         targetUserId: reviewTargetId,
+        ...(roomId ? { roomId: String(roomId) } : {}),
         ...(saleId ? { saleId: String(saleId) } : {}),
       },
     } as any);
   };
 
-  const fetchLatestSaleForBuyer = async (buyerId: string) => {
-    if (!listing || !roomId) return null;
+  const fetchLatestSaleForBuyer = useCallback(async (buyerId: string) => {
+    if (!currentListingId || !roomId) return null;
 
     const { data, error } = await supabase
       .from('listing_sales')
       .select('id, created_at')
-      .eq('listing_id', listing.id)
+      .eq('listing_id', currentListingId)
       .eq('buyer_id', buyerId)
       .eq('room_id', roomId)
       .order('created_at', { ascending: false })
@@ -2617,7 +2947,7 @@ const toggleCallSpeaker = () => {
     }
 
     return data as { id: number; created_at: string } | null;
-  };
+  }, [currentListingId, roomId]);
 
   const hasReviewForSale = async (reviewTargetId: string, saleId: number) => {
     if (!user) return false;
@@ -2637,6 +2967,68 @@ const toggleCallSpeaker = () => {
 
     return Boolean(data);
   };
+
+  const fetchTradeReviewPreview = useCallback(async () => {
+    if (!currentListingId || !currentListingAuthorId || !roomId || !user?.id || !targetUserId) {
+      setCounterpartReview(null);
+      setMyReciprocalReview(null);
+      return;
+    }
+
+    const buyerId = currentListingAuthorId === user.id ? targetUserId : user.id;
+    const latestSale = await fetchLatestSaleForBuyer(buyerId);
+
+    if (!latestSale) {
+      setCounterpartReview(null);
+      setMyReciprocalReview(null);
+      return;
+    }
+
+    const reviewSelect =
+      'id, sale_id, reviewer_id, target_user_id, sentiment, feedback_tags, comment, created_at';
+
+    const [{ data: otherReview, error: otherError }, { data: myReview, error: myError }] =
+      await Promise.all([
+        supabase
+          .from('reviews')
+          .select(reviewSelect)
+          .eq('sale_id', latestSale.id)
+          .eq('reviewer_id', targetUserId)
+          .eq('target_user_id', user.id)
+          .maybeSingle(),
+        supabase
+          .from('reviews')
+          .select(reviewSelect)
+          .eq('sale_id', latestSale.id)
+          .eq('reviewer_id', user.id)
+          .eq('target_user_id', targetUserId)
+          .maybeSingle(),
+      ]);
+
+    if (otherError) {
+      console.log('상대 후기 조회 실패:', otherError);
+    }
+
+    if (myError) {
+      console.log('내 후기 조회 실패:', myError);
+    }
+
+    setCounterpartReview((otherReview || null) as TradeReviewPreview | null);
+    setMyReciprocalReview((myReview || null) as TradeReviewPreview | null);
+  }, [
+    currentListingAuthorId,
+    currentListingId,
+    fetchLatestSaleForBuyer,
+    roomId,
+    targetUserId,
+    user?.id,
+  ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void fetchTradeReviewPreview();
+    }, [fetchTradeReviewPreview])
+  );
 
   const openSaleCompleteModal = (reviewTargetId: string, fallbackSaleId?: number | null) => {
     setPendingReviewTargetId(reviewTargetId);
@@ -2718,11 +3110,6 @@ const toggleCallSpeaker = () => {
     }
 
     const latestSale = await fetchLatestSaleForBuyer(reviewTargetId);
-
-    if (latestSale && listingQuantityInfo.remaining > 0) {
-      openSaleCompleteModal(reviewTargetId, latestSale.id);
-      return;
-    }
 
     if (latestSale && !(await hasReviewForSale(reviewTargetId, latestSale.id))) {
       goToReviewCreate(reviewTargetId, latestSale.id);
@@ -3347,6 +3734,59 @@ const toggleCallSpeaker = () => {
               <Text style={styles.quickActionText}>후기 보내기</Text>
             </TouchableOpacity>
           </View>
+
+          {counterpartReview ? (
+            <View style={styles.reviewPreviewCard}>
+              <View style={styles.reviewPreviewHeader}>
+                <View style={styles.reviewPreviewTitleRow}>
+                  <Ionicons
+                    name={myReciprocalReview ? 'chatbubbles-outline' : 'lock-closed-outline'}
+                    size={16}
+                    color={myReciprocalReview ? '#2563eb' : '#6b7280'}
+                  />
+                  <Text style={styles.reviewPreviewTitle}>상대가 남긴 후기</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.reviewPreviewBadge,
+                    myReciprocalReview && styles.reviewPreviewBadgeOpen,
+                  ]}
+                >
+                  {myReciprocalReview ? '전체 공개' : '1줄 미리보기'}
+                </Text>
+              </View>
+
+              <Text
+                style={styles.reviewPreviewSummary}
+                numberOfLines={myReciprocalReview ? undefined : 1}
+              >
+                {getReviewSummary(counterpartReview)}
+              </Text>
+
+              {myReciprocalReview && counterpartReview.comment?.trim() ? (
+                <Text style={styles.reviewPreviewComment}>
+                  {counterpartReview.comment.trim()}
+                </Text>
+              ) : null}
+
+              {!myReciprocalReview ? (
+                <View style={styles.reviewPreviewLockRow}>
+                  <Text style={styles.reviewPreviewHint}>
+                    나도 후기를 남기면 전체 후기를 볼 수 있어요.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.reviewPreviewAction}
+                    onPress={() => {
+                      if (!targetUserId) return;
+                      goToReviewCreate(targetUserId, counterpartReview.sale_id);
+                    }}
+                  >
+                    <Text style={styles.reviewPreviewActionText}>후기 남기기</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -3481,144 +3921,154 @@ const toggleCallSpeaker = () => {
       </Modal>
 
       <Modal visible={!!visibleCall} transparent animationType="fade">
-  <View style={styles.callScreenOverlay}>
-    {visibleCall?.call_type === 'video' ? (
-      <View style={styles.videoCallStage}>
-        {remoteCallStream ? (
-          <RTCView
-            streamURL={remoteCallStream.toURL()}
-            style={styles.videoRemoteFull}
-            objectFit="cover"
-          />
-        ) : (
-          <View style={styles.videoWaitingBox}>
-            <Ionicons name="videocam-outline" size={54} color="#fff" />
-            <Text style={styles.videoWaitingText}>
-              {incomingCall ? '영상통화 수신 중' : outgoingCall ? '상대방 응답 대기 중' : '상대방 영상 대기 중'}
+        <View style={styles.callScreenOverlay}>
+          {visibleCall?.call_type === 'video' ? (
+            <View style={styles.videoCallStage}>
+              {remoteCallStream && !remoteCameraOff ? (
+                <RTCView
+                  streamURL={remoteCallStream.toURL()}
+                  style={styles.videoRemoteFull}
+                  objectFit="cover"
+                />
+              ) : (
+                <View style={[styles.videoWaitingBox, remoteCameraOff ? styles.videoRemoteOffBox : null]}>
+                  <Ionicons
+                    name={remoteCameraOff ? 'videocam-off-outline' : 'videocam-outline'}
+                    size={54}
+                    color="#fff"
+                  />
+                  <Text style={styles.videoWaitingText}>
+                    {remoteCameraOff
+                      ? '상대방 카메라 꺼짐'
+                      : incomingCall
+                        ? '영상통화 수신 중'
+                        : outgoingCall
+                          ? '상대방 응답 대기 중'
+                          : '상대방 영상 대기 중'}
+                  </Text>
+                </View>
+              )}
+
+              {localCallStream ? (
+                callCameraOff ? (
+                  <View style={styles.videoLocalOffPreview}>
+                    <Ionicons name="videocam-off-outline" size={24} color="#fff" />
+                  </View>
+                ) : (
+                  <RTCView
+                    streamURL={localCallStream.toURL()}
+                    style={styles.videoLocalPreview}
+                    objectFit="cover"
+                    mirror={callFacingMode === 'user'}
+                  />
+                )
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.voiceCallStage}>
+              <View style={styles.voiceAvatar}>
+                <Ionicons name="person" size={64} color="#fff" />
+              </View>
+            </View>
+          )}
+
+          <View style={styles.callTopInfo}>
+            <Text style={styles.callTopTitle}>{visibleCallTitle}</Text>
+            <Text style={styles.callTopName}>{chatTargetName}</Text>
+            <Text style={styles.callTimerText}>
+              {activeCall ? callDurationText : outgoingCall ? '연결 대기 중...' : incomingCall ? '전화가 왔습니다' : ''}
             </Text>
           </View>
-        )}
 
-        {localCallStream && !callCameraOff ? (
-          <RTCView
-            streamURL={localCallStream.toURL()}
-            style={styles.videoLocalPreview}
-            objectFit="cover"
-            mirror={callFacingMode === 'user'}
-          />
-        ) : (
-          visibleCall?.call_type === 'video' && activeCall ? (
-            <View style={styles.videoLocalOffPreview}>
-              <Ionicons name="videocam-off-outline" size={24} color="#fff" />
+          {incomingCall ? (
+            <View style={styles.incomingCallActions}>
+              <TouchableOpacity
+                style={[styles.bigCallCircleBtn, styles.callDeclineBtn]}
+                onPress={() => updateCallStatus(incomingCall, 'declined')}
+                disabled={callActionLoading}
+              >
+                <Ionicons name="call" size={30} color="#fff" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.bigCallCircleBtn, styles.callAcceptBtn]}
+                onPress={() => updateCallStatus(incomingCall, 'accepted')}
+                disabled={callActionLoading}
+              >
+                <Ionicons name="call" size={30} color="#fff" />
+              </TouchableOpacity>
             </View>
-          ) : null
-        )}
-      </View>
-    ) : (
-      <View style={styles.voiceCallStage}>
-        <View style={styles.voiceAvatar}>
-          <Ionicons name="person" size={64} color="#fff" />
+          ) : null}
+
+          {controllableCall ? (
+            <View
+              style={[
+                styles.callControlPanel,
+                incomingCall && styles.incomingCallControlPanel,
+              ]}
+            >
+              <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallMic}>
+                <Ionicons
+                  name={callMicMuted ? 'mic-off-outline' : 'mic-outline'}
+                  size={24}
+                  color="#fff"
+                />
+                <Text style={styles.callControlText}>
+                  {callMicMuted ? '마이크 켜기' : '마이크 끄기'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallSpeaker}>
+                <Ionicons
+                  name={callSpeakerOn ? 'volume-high-outline' : 'volume-low-outline'}
+                  size={24}
+                  color="#fff"
+                />
+                <Text style={styles.callControlText}>
+                  {callSpeakerOn ? '한뼘통화 끄기' : '한뼘통화'}
+                </Text>
+              </TouchableOpacity>
+
+              {controllableCall.call_type === 'video' ? (
+                <>
+                  <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallCamera}>
+                    <Ionicons
+                      name={callCameraOff ? 'videocam-off-outline' : 'videocam-outline'}
+                      size={24}
+                      color="#fff"
+                    />
+                    <Text style={styles.callControlText}>
+                      {callCameraOff ? '카메라 켜기' : '카메라 끄기'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.callControlBtn} onPress={switchCallCamera}>
+                    <Ionicons name="camera-reverse-outline" size={24} color="#fff" />
+                    <Text style={styles.callControlText}>카메라 전환</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+
+              {!incomingCall ? (
+                <TouchableOpacity
+                  style={[styles.callControlBtn, styles.endCallControlBtn]}
+                  onPress={() => {
+                    if (activeCall) {
+                      updateCallStatus(activeCall, 'ended');
+                    } else if (outgoingCall) {
+                      updateCallStatus(outgoingCall, 'canceled');
+                    }
+                  }}
+                  disabled={callActionLoading}
+                >
+                  <Ionicons name="call" size={26} color="#fff" />
+                  <Text style={styles.callControlText}>{activeCall ? '종료' : '취소'}</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
         </View>
-      </View>
-    )}
-
-    <View style={styles.callTopInfo}>
-      <Text style={styles.callTopTitle}>{visibleCallTitle}</Text>
-      <Text style={styles.callTopName}>{chatTargetName}</Text>
-      <Text style={styles.callTimerText}>
-        {activeCall ? callDurationText : outgoingCall ? '연결 대기 중...' : incomingCall ? '전화가 왔습니다' : ''}
-      </Text>
-    </View>
-
-    {incomingCall ? (
-      <View style={styles.incomingCallActions}>
-        <TouchableOpacity
-          style={[styles.bigCallCircleBtn, styles.callDeclineBtn]}
-          onPress={() => updateCallStatus(incomingCall, 'declined')}
-          disabled={callActionLoading}
-        >
-          <Ionicons name="call" size={30} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.bigCallCircleBtn, styles.callAcceptBtn]}
-          onPress={() => updateCallStatus(incomingCall, 'accepted')}
-          disabled={callActionLoading}
-        >
-          <Ionicons name="call" size={30} color="#fff" />
-        </TouchableOpacity>
-      </View>
-    ) : null}
-
-    {outgoingCall ? (
-      <View style={styles.outgoingCallActions}>
-        <TouchableOpacity
-          style={[styles.bigCallCircleBtn, styles.callDeclineBtn]}
-          onPress={() => updateCallStatus(outgoingCall, 'canceled')}
-          disabled={callActionLoading}
-        >
-          <Ionicons name="call" size={30} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.callActionLabel}>취소</Text>
-      </View>
-    ) : null}
-
-    {activeCall ? (
-      <View style={styles.callControlPanel}>
-        <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallMic}>
-          <Ionicons
-            name={callMicMuted ? 'mic-off-outline' : 'mic-outline'}
-            size={24}
-            color="#fff"
-          />
-          <Text style={styles.callControlText}>
-            {callMicMuted ? '마이크 켜기' : '마이크 끄기'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallSpeaker}>
-          <Ionicons
-            name={callSpeakerOn ? 'volume-high-outline' : 'volume-low-outline'}
-            size={24}
-            color="#fff"
-          />
-          <Text style={styles.callControlText}>
-            {callSpeakerOn ? '한뼘통화 끄기' : '한뼘통화'}
-          </Text>
-        </TouchableOpacity>
-
-        {activeCall.call_type === 'video' ? (
-          <>
-            <TouchableOpacity style={styles.callControlBtn} onPress={toggleCallCamera}>
-              <Ionicons
-                name={callCameraOff ? 'videocam-off-outline' : 'videocam-outline'}
-                size={24}
-                color="#fff"
-              />
-              <Text style={styles.callControlText}>
-                {callCameraOff ? '카메라 켜기' : '카메라 끄기'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.callControlBtn} onPress={switchCallCamera}>
-              <Ionicons name="camera-reverse-outline" size={24} color="#fff" />
-              <Text style={styles.callControlText}>카메라 전환</Text>
-            </TouchableOpacity>
-          </>
-        ) : null}
-
-        <TouchableOpacity
-          style={[styles.callControlBtn, styles.endCallControlBtn]}
-          onPress={() => updateCallStatus(activeCall, 'ended')}
-          disabled={callActionLoading}
-        >
-          <Ionicons name="call" size={26} color="#fff" />
-          <Text style={styles.callControlText}>종료</Text>
-        </TouchableOpacity>
-      </View>
-    ) : null}
-  </View>
-</Modal>
+      </Modal>
 
       <Modal visible={appointmentModalOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setAppointmentModalOpen(false)}>
@@ -4265,6 +4715,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 
+  incomingCallControlPanel: {
+    bottom: 170,
+  },
+
   imageGrid: {
     width: 200,
     flexDirection: 'row',
@@ -4336,175 +4790,164 @@ const styles = StyleSheet.create({
   },
 
   callScreenOverlay: {
-  flex: 1,
-  backgroundColor: '#020617',
-},
+    flex: 1,
+    backgroundColor: '#020617',
+  },
 
-voiceCallStage: {
-  flex: 1,
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: '#111827',
-},
+  voiceCallStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
 
-voiceAvatar: {
-  width: 132,
-  height: 132,
-  borderRadius: 66,
-  backgroundColor: '#374151',
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  voiceAvatar: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
+    backgroundColor: '#374151',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-videoCallStage: {
-  flex: 1,
-  backgroundColor: '#000',
-},
+  videoCallStage: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
 
-videoRemoteFull: {
-  width: '100%',
-  height: '100%',
-},
+  videoRemoteFull: {
+    width: '100%',
+    height: '100%',
+  },
 
-videoWaitingBox: {
-  flex: 1,
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: '#111827',
-},
+  videoWaitingBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
 
-videoWaitingText: {
-  marginTop: 14,
-  color: '#fff',
-  fontSize: 16,
-  fontWeight: '800',
-},
+  videoRemoteOffBox: {
+    backgroundColor: '#000',
+  },
 
-videoLocalPreview: {
-  position: 'absolute',
-  top: 90,
-  right: 18,
-  width: 108,
-  height: 156,
-  borderRadius: 18,
-  backgroundColor: '#374151',
-  borderWidth: 2,
-  borderColor: '#fff',
-  overflow: 'hidden',
-},
+  videoWaitingText: {
+    marginTop: 14,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
 
-videoLocalOffPreview: {
-  position: 'absolute',
-  top: 90,
-  right: 18,
-  width: 108,
-  height: 156,
-  borderRadius: 18,
-  backgroundColor: 'rgba(31,41,55,0.9)',
-  borderWidth: 2,
-  borderColor: '#fff',
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  videoLocalPreview: {
+    position: 'absolute',
+    top: 90,
+    right: 18,
+    width: 108,
+    height: 156,
+    borderRadius: 18,
+    backgroundColor: '#374151',
+    borderWidth: 2,
+    borderColor: '#fff',
+    overflow: 'hidden',
+  },
 
-callTopInfo: {
-  position: 'absolute',
-  top: 54,
-  left: 20,
-  right: 20,
-  alignItems: 'center',
-},
+  videoLocalOffPreview: {
+    position: 'absolute',
+    top: 90,
+    right: 18,
+    width: 108,
+    height: 156,
+    borderRadius: 18,
+    backgroundColor: '#000',
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-callTopTitle: {
-  color: '#fff',
-  fontSize: 22,
-  fontWeight: '900',
-},
+  callTopInfo: {
+    position: 'absolute',
+    top: 54,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
 
-callTopName: {
-  marginTop: 8,
-  color: '#e5e7eb',
-  fontSize: 15,
-  fontWeight: '800',
-},
+  callTopTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '900',
+  },
 
-callTimerText: {
-  marginTop: 8,
-  color: '#cbd5e1',
-  fontSize: 14,
-  fontWeight: '800',
-},
+  callTopName: {
+    marginTop: 8,
+    color: '#e5e7eb',
+    fontSize: 15,
+    fontWeight: '800',
+  },
 
-incomingCallActions: {
-  position: 'absolute',
-  bottom: 72,
-  left: 0,
-  right: 0,
-  flexDirection: 'row',
-  justifyContent: 'center',
-  gap: 70,
-},
+  callTimerText: {
+    marginTop: 8,
+    color: '#cbd5e1',
+    fontSize: 14,
+    fontWeight: '800',
+  },
 
-outgoingCallActions: {
-  position: 'absolute',
-  bottom: 72,
-  left: 0,
-  right: 0,
-  alignItems: 'center',
-},
+  incomingCallActions: {
+    position: 'absolute',
+    bottom: 72,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 70,
+  },
 
-bigCallCircleBtn: {
-  width: 72,
-  height: 72,
-  borderRadius: 36,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
+  bigCallCircleBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-callActionLabel: {
-  marginTop: 10,
-  color: '#fff',
-  fontSize: 13,
-  fontWeight: '800',
-},
+  callControlPanel: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 26,
+    borderRadius: 24,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
 
-callControlPanel: {
-  position: 'absolute',
-  left: 14,
-  right: 14,
-  bottom: 26,
-  borderRadius: 24,
-  backgroundColor: 'rgba(15,23,42,0.92)',
-  paddingHorizontal: 12,
-  paddingVertical: 16,
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  justifyContent: 'center',
-  gap: 10,
-},
+  callControlBtn: {
+    width: 92,
+    minHeight: 74,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
 
-callControlBtn: {
-  width: 92,
-  minHeight: 74,
-  borderRadius: 18,
-  backgroundColor: 'rgba(255,255,255,0.12)',
-  alignItems: 'center',
-  justifyContent: 'center',
-  paddingHorizontal: 8,
-  paddingVertical: 10,
-},
+  callControlText: {
+    marginTop: 6,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
 
-callControlText: {
-  marginTop: 6,
-  color: '#fff',
-  fontSize: 11,
-  fontWeight: '800',
-  textAlign: 'center',
-},
-
-endCallControlBtn: {
-  backgroundColor: '#ef4444',
-},
+  endCallControlBtn: {
+    backgroundColor: '#ef4444',
+  },
 
 
 
@@ -4575,6 +5018,95 @@ endCallControlBtn: {
     fontSize: 13,
     fontWeight: '700',
     color: '#374151',
+  },
+
+  reviewPreviewCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    padding: 12,
+  },
+
+  reviewPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+
+  reviewPreviewTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+
+  reviewPreviewTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#111827',
+  },
+
+  reviewPreviewBadge: {
+    borderRadius: 999,
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#6b7280',
+  },
+
+  reviewPreviewBadgeOpen: {
+    backgroundColor: '#eff6ff',
+    color: '#2563eb',
+  },
+
+  reviewPreviewSummary: {
+    marginTop: 10,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#111827',
+    lineHeight: 20,
+  },
+
+  reviewPreviewComment: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#4b5563',
+  },
+
+  reviewPreviewLockRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  reviewPreviewHint: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6b7280',
+  },
+
+  reviewPreviewAction: {
+    minHeight: 34,
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+
+  reviewPreviewActionText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#fff',
   },
 
   list: {

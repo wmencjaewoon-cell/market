@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 
 // iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
 // 알림 테스트를 다시 할 때 true로 바꾸면 됩니다.
-const ENABLE_PUSH_NOTIFICATIONS = false;
+const ENABLE_PUSH_NOTIFICATIONS = true;
 
 function PushNotificationRegister() {
   const { isReady } = useAuth();
@@ -18,9 +18,18 @@ function PushNotificationRegister() {
 
     let sub: { remove: () => void } | null = null;
 
-    import('../lib/notifications').then(({ listenNotificationResponse }) => {
+    const setup = async () => {
+      const {
+        setupAndroidNotificationChannels,
+        listenNotificationResponse,
+      } = await import('../lib/notifications');
+
+      await setupAndroidNotificationChannels();
+
       sub = listenNotificationResponse();
-    });
+    };
+
+    setup();
 
     return () => {
       sub?.remove();
@@ -105,6 +114,8 @@ function RootNavigator() {
         />
         <Stack.Screen name="profile/edit" options={{ title: '프로필수정' }} />
         <Stack.Screen name="admin" options={{ title: '관리자' }} />
+        <Stack.Screen name="review/create" options={{ title: '리뷰 작성' }} />
+
         <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
         <Stack.Screen name="my" options={{ headerShown: false }} />
         <Stack.Screen name="support" options={{ headerShown: false }} />

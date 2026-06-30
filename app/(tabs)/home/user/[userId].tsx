@@ -17,6 +17,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
+import {
+  getSellerLevel,
+  getSellerLevelProgress,
+  getSellerLevelStyle,
+  getSellerLevelTitle,
+  getSellerPoints,
+} from '../../../../lib/sellerLevel';
 import { supabase } from '../../../../lib/supabase';
 
 type ListingFilter = 'all' | 'selling' | 'done';
@@ -50,7 +57,6 @@ export default function UserProfileScreen() {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [reviewStats, setReviewStats] = useState({
-  average: 0,
   count: 0,
 });
 
@@ -124,9 +130,9 @@ export default function UserProfileScreen() {
   };
 
   const fetchReviewStats = async () => {
-  const { data, error } = await supabase
+  const { count, error } = await supabase
     .from('reviews')
-    .select('rating')
+    .select('id', { count: 'exact', head: true })
     .eq('target_user_id', userId);
 
   if (error) {
@@ -134,21 +140,19 @@ export default function UserProfileScreen() {
     return;
   }
 
-  const ratings = data || [];
-  const count = ratings.length;
-  const average =
-    count > 0
-      ? ratings.reduce((sum: number, item: any) => sum + Number(item.rating || 0), 0) / count
-      : 0;
-
   setReviewStats({
-    average,
-    count,
+    count: count || 0,
   });
 };
 
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const sellerFallbackPoints = reviewStats.count * 100;
+  const sellerPoints = getSellerPoints(profile, sellerFallbackPoints);
+  const sellerLevel = getSellerLevel(profile, sellerFallbackPoints);
+  const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
+  const sellerProgress = getSellerLevelProgress(sellerPoints);
+  const showSellerLevel = profile?.show_level_on_profile !== false;
   const hasStoreLocation =
     isVerifiedStore &&
     profile?.store_latitude != null &&
@@ -281,7 +285,15 @@ export default function UserProfileScreen() {
   </View>
 </View>
 
-      <View style={styles.profileCard}>
+      <View
+        style={[
+          styles.profileCard,
+          showSellerLevel && {
+            borderColor: sellerLevelStyle.borderColor,
+            backgroundColor: sellerLevelStyle.backgroundColor,
+          },
+        ]}
+      >
         <View style={styles.avatar}>
           {profileImageUrl ? (
             <Image source={{ uri: profileImageUrl }} style={styles.avatarImage} />
@@ -300,6 +312,20 @@ export default function UserProfileScreen() {
 
         {isVerifiedStore ? (
           <Text style={styles.verifiedText}>가게인증완료</Text>
+        ) : null}
+
+        {showSellerLevel ? (
+          <View style={styles.levelBox}>
+            <Text style={[styles.levelText, { color: sellerLevelStyle.textColor }]}>
+              LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
+            </Text>
+            <Text style={styles.levelMeta}>
+              후기 {reviewStats.count}개 · {sellerPoints.toLocaleString()} XP
+            </Text>
+            <View style={styles.levelTrack}>
+              <View style={[styles.levelFill, { width: `${sellerProgress.percent}%` }]} />
+            </View>
+          </View>
         ) : null}
 
         {isVerifiedStore && (profile?.store_address || hasStoreLocation) ? (
@@ -324,11 +350,9 @@ export default function UserProfileScreen() {
 
         <View style={styles.statsRow}>
   <View style={styles.statBox}>
-    <Ionicons name="star" size={16} color="#f59e0b" />
+    <Ionicons name="ribbon-outline" size={16} color="#2563eb" />
     <Text style={styles.statText}>
-      {reviewStats.count > 0
-        ? `${reviewStats.average.toFixed(1)}점 (${reviewStats.count})`
-        : '후기 없음'}
+      후기 {reviewStats.count}개
     </Text>
   </View>
 
@@ -524,7 +548,10 @@ const styles = StyleSheet.create({
   profileCard: {
     alignItems: 'center',
     paddingVertical: 24,
+    paddingHorizontal: 16,
     borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
     backgroundColor: '#f9fafb',
   },
   avatar: {
@@ -551,10 +578,48 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   verifiedText: {
-    marginTop: 6,
-    color: '#2563eb',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#2563eb',
+    borderRadius: 999,
+    backgroundColor: '#1d4ed8',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    color: '#fff',
     fontSize: 13,
+    fontWeight: '900',
+    overflow: 'hidden',
+  },
+  levelBox: {
+    width: '100%',
+    marginTop: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.74)',
+    padding: 12,
+    alignItems: 'center',
+  },
+  levelText: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  levelMeta: {
+    marginTop: 4,
+    color: '#4b5563',
+    fontSize: 12,
     fontWeight: '800',
+  },
+  levelTrack: {
+    width: '100%',
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,24,39,0.12)',
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  levelFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#111827',
   },
   storeLocationBox: {
     width: '100%',

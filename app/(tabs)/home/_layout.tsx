@@ -59,7 +59,7 @@ export default function HomeStackLayout() {
       <Stack.Screen
         name="create/index"
         options={{
-          title: '등록하기',
+          title: '게시글 작성',
           headerShown: true,
           headerLeft: () => <BackButton />,
         }}

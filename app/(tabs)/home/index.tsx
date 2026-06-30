@@ -117,7 +117,11 @@ export default function HomeScreen() {
           user_type,
           business_verified,
           phone,
-          is_phone_public
+          is_phone_public,
+          trust_points,
+          trust_level,
+          seller_level_style,
+          show_level_on_posts
         ),
         listing_images (
           id,

@@ -5,6 +5,8 @@ import { router } from 'expo-router';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
+export const CHAT_NOTIFICATION_CHANNEL_ID = 'chat_v2';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -18,6 +20,8 @@ export async function registerPushToken() {
   try {
     if (Platform.OS === 'web') return;
     if (!Device.isDevice) return;
+
+    await setupAndroidNotificationChannels();
 
     const { data: authData } = await supabase.auth.getUser();
     const user = authData.user;
@@ -49,6 +53,35 @@ export async function registerPushToken() {
   }
 }
 
+export async function setupAndroidNotificationChannels() {
+  if (Platform.OS !== 'android') return;
+
+  await Notifications.setNotificationChannelAsync('default', {
+    name: '기본 알림',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    sound: 'default',
+  });
+
+  await Notifications.setNotificationChannelAsync('chat', {
+    name: '채팅 알림',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#2563eb',
+    sound: 'default',
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+
+  await Notifications.setNotificationChannelAsync(CHAT_NOTIFICATION_CHANNEL_ID, {
+    name: '채팅 알림',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#2563eb',
+    sound: 'default',
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+}
+
 export function listenNotificationResponse() {
   const subscription = Notifications.addNotificationResponseReceivedListener(
     (response) => {
@@ -61,6 +94,18 @@ export function listenNotificationResponse() {
       if (data?.type === 'chat' && data?.roomId) {
         router.push(`/chat/${data.roomId}` as any);
         return;
+      }
+
+      if (data?.type === 'review') {
+        if (data.roomId) {
+          router.push(`/chat/${data.roomId}` as any);
+          return;
+        }
+
+        if (data.listingId) {
+          router.push(`/(tabs)/home/post/${data.listingId}` as any);
+          return;
+        }
       }
 
       if (data?.type === 'keyword_listing' && data?.listingId) {

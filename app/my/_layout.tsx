@@ -24,6 +24,7 @@ export default function MyStackLayout() {
   <Stack.Screen name="sales" options={{ title: '판매 관리' }} />
   <Stack.Screen name="purchases" options={{ title: '거래 내역' }} />
   <Stack.Screen name="favorites" options={{ title: '관심 목록' }} />
+  <Stack.Screen name="level" options={{ title: '레벨 꾸미기' }} />
   <Stack.Screen name="keywords" options={{ title: '키워드 알림' }} />
   <Stack.Screen name="notifications" options={{ title: '알림' }} />
   <Stack.Screen name="privacy" options={{ title: '개인정보처리방침' }} />

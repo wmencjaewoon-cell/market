@@ -28,7 +28,7 @@ export default function RegionsScreen() {
   const [message, setMessage] = useState('');
   const [candidateModalOpen, setCandidateModalOpen] = useState(false);
   const [regionCandidates, setRegionCandidates] = useState<any[]>([]);
-  const params = useLocalSearchParams<{ returnTo?: string }>();
+  const params = useLocalSearchParams<{ returnTo?: string; category?: string }>();
 
   const load = async () => {
     try {
@@ -72,6 +72,34 @@ const handleSelectCandidate = async (candidate: any) => {
     setCandidateModalOpen(false);
     setRegionCandidates([]);
 
+    const myRegions = await fetchMyRegions();
+
+    const selectedRegion =
+      myRegions.find((region) => region.region_name === candidate.region_name) ||
+      myRegions?.[0];
+
+    if (selectedRegion) {
+      setRegions(myRegions);
+      setActiveRegionId(selectedRegion.id);
+
+      await saveMyRegionSettings(selectedRegion.id, radiusKm);
+
+      if (params.returnTo) {
+        router.replace({
+          pathname: params.returnTo as any,
+          params: {
+            regionChanged: String(Date.now()),
+            regionName: selectedRegion.region_name,
+            regionLat: String(selectedRegion.latitude),
+            regionLng: String(selectedRegion.longitude),
+            ...(params.category ? { category: String(params.category) } : {}),
+          },
+        });
+
+        return;
+      }
+    }
+
     await load();
   } catch (e: any) {
     setMessage(e?.message || '동네 등록에 실패했습니다.');
@@ -100,6 +128,7 @@ const handleSelectCandidate = async (candidate: any) => {
           regionName: selectedRegion.region_name,
           regionLat: String(selectedRegion.latitude),
           regionLng: String(selectedRegion.longitude),
+          ...(params.category ? { category: String(params.category) } : {}),
         },
       });
     } else {

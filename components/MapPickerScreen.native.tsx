@@ -11,6 +11,7 @@ export default function MapPickerScreen() {
     lat?: string;
     lng?: string;
     returnTo?: string;
+    category?: string;
     title?: string;
     desc?: string;
     buttonText?: string;
@@ -29,7 +30,7 @@ export default function MapPickerScreen() {
   }, [params.lat, params.lng]);
 
   const [marker, setMarker] = useState(initial);
-  const returnTo = params.returnTo || '/(tabs)/home/create/share';
+  const returnTo = params.returnTo || '/(tabs)/home/create';
   const title = params.title || '거래 희망 장소 선택';
   const desc = params.desc || '핀을 옮겨서 원하는 거래 장소를 선택해 주세요.';
   const buttonText = params.buttonText || '이 위치로 선택';
@@ -109,6 +110,7 @@ export default function MapPickerScreen() {
               params: {
                 lat: String(marker.latitude),
                 lng: String(marker.longitude),
+                ...(params.category ? { category: String(params.category) } : {}),
               },
             })
           }

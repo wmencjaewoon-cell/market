@@ -12,6 +12,8 @@ create table if not exists public.chat_call_sessions (
   status text not null default 'ringing' check (status in ('ringing', 'accepted', 'declined', 'canceled', 'ended', 'missed')),
   offer jsonb,
   answer jsonb,
+  caller_camera_off boolean not null default false,
+  callee_camera_off boolean not null default false,
   created_at timestamptz not null default now(),
   answered_at timestamptz,
   ended_at timestamptz
@@ -19,7 +21,9 @@ create table if not exists public.chat_call_sessions (
 
 alter table public.chat_call_sessions
   add column if not exists offer jsonb,
-  add column if not exists answer jsonb;
+  add column if not exists answer jsonb,
+  add column if not exists caller_camera_off boolean not null default false,
+  add column if not exists callee_camera_off boolean not null default false;
 
 create index if not exists chat_call_sessions_room_status_idx
 on public.chat_call_sessions (room_id, status, created_at desc);

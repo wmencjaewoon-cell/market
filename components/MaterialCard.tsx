@@ -11,7 +11,13 @@ import {
   TouchableWithoutFeedback,
   View
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
 import { canUseApp } from '../lib/guard';
+import {
+  getSellerLevel,
+  getSellerLevelStyle,
+  getSellerLevelTitle,
+} from '../lib/sellerLevel';
 import { supabase } from '../lib/supabase';
 
 type Props = {
@@ -108,6 +114,21 @@ async function confirmBlockSeller(name: string) {
   });
 }
 
+async function confirmDeleteListing(title: string) {
+  const message = `"${title}" 게시글을 삭제할까요?`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return window.confirm(message);
+  }
+
+  return new Promise<boolean>((resolve) => {
+    Alert.alert('게시글 삭제', message, [
+      { text: '취소', style: 'cancel', onPress: () => resolve(false) },
+      { text: '삭제', style: 'destructive', onPress: () => resolve(true) },
+    ]);
+  });
+}
+
 export default function MaterialCard({
   item,
   myLatitude,
@@ -115,8 +136,13 @@ export default function MaterialCard({
   onRefresh,
   showMenu = true,
 }: Props) {
+  const { user } = useAuth();
   const isVerifiedStore =
     item.profiles?.user_type === 'store' && !!item.profiles?.business_verified;
+  const isOwner = !!user?.id && item.author_id === user.id;
+  const sellerLevel = getSellerLevel(item.profiles);
+  const sellerLevelStyle = getSellerLevelStyle(item.profiles, sellerLevel);
+  const showSellerLevel = item.profiles?.show_level_on_posts !== false;
   const [menuOpen, setMenuOpen] = useState(false);
   const [liked, setLiked] = useState(false);
 
@@ -234,6 +260,45 @@ export default function MaterialCard({
     setMenuOpen(false);
   };
 
+  const handleEdit = () => {
+    setMenuOpen(false);
+    router.push(`/(tabs)/home/post/edit/${item.id}` as any);
+  };
+
+  const handleDelete = async () => {
+    if (!user?.id) {
+      setMenuOpen(false);
+      showCardAlert('게시글 삭제', '로그인이 필요합니다.');
+      router.push('/login' as any);
+      return;
+    }
+
+    if (!isOwner) {
+      setMenuOpen(false);
+      showCardAlert('게시글 삭제', '본인 게시글만 삭제할 수 있습니다.');
+      return;
+    }
+
+    const ok = await confirmDeleteListing(item.title || '게시글');
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('listings')
+      .delete()
+      .eq('id', item.id)
+      .eq('author_id', user.id);
+
+    setMenuOpen(false);
+
+    if (error) {
+      console.log('게시글 삭제 실패:', error);
+      showCardAlert('삭제 실패', error.message || '게시글을 삭제하지 못했습니다.');
+      return;
+    }
+
+    onRefresh?.();
+  };
+
   const handleBlockSeller = async () => {
     const { data } = await supabase.auth.getUser();
     const currentUserId = data.user?.id;
@@ -300,7 +365,14 @@ export default function MaterialCard({
   return (
     <>
       <TouchableOpacity
-        style={[styles.card, shouldCompactBadges && styles.compactCard]}
+        style={[
+          styles.card,
+          showSellerLevel && {
+            borderColor: sellerLevelStyle.borderColor,
+            backgroundColor: sellerLevelStyle.backgroundColor,
+          },
+          shouldCompactBadges && styles.compactCard,
+        ]}
         activeOpacity={0.9}
         onPress={() => router.push(`/(tabs)/home/post/${item.id}` as any)}
       >
@@ -330,8 +402,24 @@ export default function MaterialCard({
                     : styles.personalBadge,
                 ]}
               >
-                {isVerifiedStore ? '가게' : '개인'}
+                {isVerifiedStore ? '인증가게' : '개인'}
               </Text>
+
+              {showSellerLevel ? (
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.badge,
+                    shouldCompactBadges && styles.compactBadge,
+                    {
+                      backgroundColor: '#fff',
+                      color: sellerLevelStyle.textColor,
+                    },
+                  ]}
+                >
+                  LV.{sellerLevel}
+                </Text>
+              ) : null}
 
               {item.urgent ? (
                 <Text
@@ -342,7 +430,7 @@ export default function MaterialCard({
                     styles.urgentBadge,
                   ]}
                 >
-                  긴급배송
+                  긴급
                 </Text>
               ) : null}
 
@@ -355,7 +443,7 @@ export default function MaterialCard({
                     styles.todayBadge,
                   ]}
                 >
-                  오늘가능
+                  오늘
                 </Text>
               ) : null}
 
@@ -403,9 +491,16 @@ export default function MaterialCard({
             ) : null}
 
             {/* 판매자 */}
-            <Text style={styles.sellerName} numberOfLines={1}>
-              {item.profiles?.display_name || '이름 없음'}
-            </Text>
+            <View style={styles.sellerRow}>
+              <Text style={styles.sellerName} numberOfLines={1}>
+                {item.profiles?.display_name || '이름 없음'}
+              </Text>
+              {showSellerLevel ? (
+                <Text style={[styles.sellerLevelText, { color: sellerLevelStyle.textColor }]}>
+                  {getSellerLevelTitle(sellerLevel)}
+                </Text>
+              ) : null}
+            </View>
 
             {/* 하단 수치 */}
             <View style={styles.bottomRow}>
@@ -432,21 +527,35 @@ export default function MaterialCard({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.menuBox}>
-                <TouchableOpacity style={styles.menuItem} onPress={handleToggleLike}>
-                  <Text style={styles.menuText}>{liked ? '관심없음' : '관심있음'}</Text>
-                </TouchableOpacity>
+                {isOwner ? (
+                  <>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleEdit}>
+                      <Text style={styles.menuText}>수정하기</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={handleHide}>
-                  <Text style={styles.menuText}>이 글 숨기기</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleDelete}>
+                      <Text style={[styles.menuText, styles.reportText]}>삭제하기</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleToggleLike}>
+                      <Text style={styles.menuText}>{liked ? '관심없음' : '관심있음'}</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
-                  <Text style={[styles.menuText, styles.reportText]}>신고하기</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleHide}>
+                      <Text style={styles.menuText}>이 글 숨기기</Text>
+                    </TouchableOpacity>
 
-                <TouchableOpacity style={styles.menuItem} onPress={handleBlockSeller}>
-                  <Text style={[styles.menuText, styles.reportText]}>판매자 차단하기</Text>
-                </TouchableOpacity>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleReport}>
+                      <Text style={[styles.menuText, styles.reportText]}>신고하기</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.menuItem} onPress={handleBlockSeller}>
+                      <Text style={[styles.menuText, styles.reportText]}>판매자 차단하기</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
 
                 <TouchableOpacity style={styles.menuItem} onPress={() => setMenuOpen(false)}>
                   <Text style={styles.menuText}>닫기</Text>
@@ -543,8 +652,8 @@ const styles = StyleSheet.create({
   },
 
   storeBadge: {
-    backgroundColor: '#dbeafe',
-    color: '#2563eb',
+    backgroundColor: '#1d4ed8',
+    color: '#fff',
   },
 
   personalBadge: {
@@ -605,10 +714,19 @@ const styles = StyleSheet.create({
     color: '#2563eb',
   },
 
-  sellerName: {
+  sellerRow: {
     marginTop: 4,
+  },
+
+  sellerName: {
     fontSize: 13,
     color: '#4b5563',
+  },
+
+  sellerLevelText: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '900',
   },
 
   bottomRow: {

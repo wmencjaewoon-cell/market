@@ -21,7 +21,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 type UserType = 'store' | 'personal';
 type AuthMode = 'login' | 'signup';
-type OAuthProvider = 'kakao' | 'apple' | 'custom:naver';
+type OAuthProvider = 'kakao' | 'custom:naver';
 type ExistingProfile = {
   id: string;
   status: string | null;
@@ -31,7 +31,6 @@ type ExistingProfile = {
 
 const socialProviderLabel: Record<OAuthProvider, string> = {
   kakao: '카카오',
-  apple: 'Apple',
   'custom:naver': '네이버',
 };
 
@@ -193,7 +192,9 @@ export default function LoginScreen() {
       phone: profileInput.phone || null,
       is_phone_public: profileInput.userType === 'store',
       status: 'active',
-      trust_level: 0,
+      trust_points: 0,
+      trust_level: 1,
+      seller_level_style: 'clean',
       reports_count: 0,
       can_create_listing: true,
       can_start_chat: true,
@@ -352,7 +353,21 @@ export default function LoginScreen() {
       }
     } catch (e: any) {
       console.log(`${socialProviderLabel[provider]} 로그인 오류:`, e);
-      setMessage(e?.message || `${socialProviderLabel[provider]} 로그인 중 오류가 발생했습니다.`);
+      const errorMessage = e?.message || '';
+
+      if (
+        provider === 'custom:naver' &&
+        (errorMessage.includes('Unsupported provider') ||
+          errorMessage.includes('custom provider') ||
+          errorMessage.includes('not found'))
+      ) {
+        setMessage(
+          'Supabase에 네이버 로그인 provider가 아직 등록되지 않았습니다. Auth Providers에서 custom:naver 설정을 확인해 주세요.'
+        );
+        return;
+      }
+
+      setMessage(errorMessage || `${socialProviderLabel[provider]} 로그인 중 오류가 발생했습니다.`);
     } finally {
       setLoading(false);
     }
@@ -360,13 +375,13 @@ export default function LoginScreen() {
 
   const handleKakaoLogin = () => runOAuthLogin('kakao');
 
-  // const handleNaverLogin = () => runOAuthLogin('custom:naver');
+  const handleNaverLogin = () => runOAuthLogin('custom:naver');
 
   const handleAppleLogin = async () => {
     if (authMode === 'signup' && !validateProfileInput()) return;
 
     if (Platform.OS !== 'ios' || !isAppleSignInAvailable) {
-      await runOAuthLogin('apple');
+      setMessage('Apple 로그인은 iOS에서만 사용할 수 있습니다.');
       return;
     }
 
@@ -672,19 +687,9 @@ export default function LoginScreen() {
                   style={[styles.appleNativeBtn, loading && styles.disabledNativeBtn]}
                   onPress={loading ? () => {} : handleAppleLogin}
                 />
-              ) : (
-                <TouchableOpacity
-                  style={[styles.appleBtn, loading && styles.disabledBtn]}
-                  onPress={handleAppleLogin}
-                  disabled={loading}
-                >
-                  <Text style={styles.appleText}>
-                    {loading ? '처리 중...' : 'Apple로 로그인'}
-                  </Text>
-                </TouchableOpacity>
-              )}
+              ) : null}
 
-              {/* <TouchableOpacity
+              <TouchableOpacity
                 style={[styles.naverBtn, loading && styles.disabledBtn]}
                 onPress={handleNaverLogin}
                 disabled={loading}
@@ -692,7 +697,7 @@ export default function LoginScreen() {
                 <Text style={styles.naverText}>
                   {loading ? '처리 중...' : '네이버로 로그인'}
                 </Text>
-              </TouchableOpacity> */}
+              </TouchableOpacity>
 
               <View style={styles.divider} />
 
@@ -790,13 +795,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 50,
   },
-  appleBtn: {
-    backgroundColor: '#000',
-    borderRadius: 14,
-    padding: 15,
-    alignItems: 'center',
-  },
-  appleText: { color: '#fff', fontWeight: '800' },
   naverBtn: {
     backgroundColor: '#03c75a',
     borderRadius: 14,

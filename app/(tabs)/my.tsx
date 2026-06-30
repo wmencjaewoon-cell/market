@@ -4,6 +4,12 @@ import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProfileImageUrl } from '../../lib/profileImage';
+import {
+  getSellerLevel,
+  getSellerLevelStyle,
+  getSellerLevelTitle,
+  getSellerPoints,
+} from '../../lib/sellerLevel';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
@@ -51,6 +57,9 @@ export default function MyScreen() {
       user_type: 'personal',
       status: 'active',
       trust_status: 'normal',
+      trust_points: 0,
+      trust_level: 1,
+      seller_level_style: 'clean',
       reports_count: 0,
     })
     .select()
@@ -68,8 +77,17 @@ export default function MyScreen() {
     void fetchProfile();
   });
 
+  const handleSignOut = async () => {
+    await signOut();
+    setProfile(null);
+    router.replace('/login' as any);
+  };
+
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const sellerLevel = getSellerLevel(profile);
+  const sellerPoints = getSellerPoints(profile);
+  const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
   const publicPhone =
     isVerifiedStore && profile?.is_phone_public ? profile?.phone : null;
 
@@ -108,9 +126,26 @@ export default function MyScreen() {
           {isVerifiedStore ? '가게' : '개인'}
         </Text>
 
-        {isVerifiedStore ? (
-          <Text style={styles.verifiedText}>가게인증완료</Text>
-        ) : null}
+        <View style={styles.profileBadgeRow}>
+          {isVerifiedStore ? (
+            <Text style={styles.verifiedText}>가게인증완료</Text>
+          ) : null}
+
+          <Text
+            style={[
+              styles.levelBadge,
+              {
+                borderColor: sellerLevelStyle.borderColor,
+                backgroundColor: sellerLevelStyle.backgroundColor,
+                color: sellerLevelStyle.textColor,
+              },
+            ]}
+          >
+            LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
+          </Text>
+        </View>
+
+        <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
 
         {publicPhone ? <Text style={styles.sub}>{publicPhone}</Text> : null}
 
@@ -129,6 +164,7 @@ export default function MyScreen() {
       <Section title="나의 거래">
         <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
         <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />
+        <MenuItem title="레벨 꾸미기" onPress={() => router.push('/my/level' as any)} />
       </Section>
 
       <Section title="나의 관심">
@@ -155,7 +191,7 @@ export default function MyScreen() {
         </Section>
       ) : null}
 
-      <TouchableOpacity style={styles.logoutBtn} onPress={signOut}>
+      <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut}>
         <Text style={styles.logoutText}>로그아웃</Text>
       </TouchableOpacity>
     </ScrollView>
@@ -213,10 +249,38 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 20, fontWeight: '800' },
   sub: { color: '#6b7280', marginTop: 4 },
+  profileBadgeRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+  },
   verifiedText: {
-    marginTop: 6,
-    color: '#2563eb',
+    borderWidth: 1,
+    borderColor: '#2563eb',
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    color: '#1d4ed8',
     fontSize: 13,
+    fontWeight: '900',
+    overflow: 'hidden',
+  },
+  levelBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 13,
+    fontWeight: '900',
+    overflow: 'hidden',
+  },
+  levelSub: {
+    marginTop: 6,
+    color: '#6b7280',
+    fontSize: 12,
     fontWeight: '800',
   },
   editBtn: { marginTop: 10 },

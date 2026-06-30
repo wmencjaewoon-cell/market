@@ -47,6 +47,8 @@ type ChatRoomListItem = {
   members: {
     user_id: string;
   }[];
+  target_user_id?: string | null;
+  target_name?: string | null;
   latest_message: {
     id: string;
     message: string;
@@ -248,10 +250,47 @@ export default function ChatScreen() {
         return;
       }
 
+      const targetIds = Array.from(
+        new Set(
+          (roomRows || [])
+            .map((room: any) => {
+              const members = room.chat_room_members || [];
+              return (
+                members.find((member: any) => member.user_id !== user.id)?.user_id ||
+                (room.listings?.author_id !== user.id ? room.listings?.author_id : null)
+              );
+            })
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      const targetNameMap = new Map<string, string>();
+
+      if (targetIds.length > 0) {
+        const { data: targetProfiles, error: targetProfileError } = await supabase
+          .from('profiles')
+          .select('id, display_name')
+          .in('id', targetIds);
+
+        if (targetProfileError) {
+          console.log('채팅 상대 프로필 조회 실패:', targetProfileError);
+        }
+
+        (targetProfiles || []).forEach((profile: any) => {
+          if (profile.id) {
+            targetNameMap.set(profile.id, profile.display_name || '상대방');
+          }
+        });
+      }
+
       const mapped: ChatRoomListItem[] = (roomRows || []).map((room: any) => {
         const sellerProfile = Array.isArray(room.listings?.profiles)
           ? room.listings.profiles[0]
           : room.listings?.profiles;
+        const members = room.chat_room_members || [];
+        const targetUserId =
+          members.find((member: any) => member.user_id !== user.id)?.user_id ||
+          (room.listings?.author_id !== user.id ? room.listings?.author_id : null);
         const sortedImages = [...(room.listings?.listing_images || [])].sort(
           (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
         );
@@ -273,7 +312,9 @@ export default function ChatScreen() {
                 listing_images: sortedImages,
               }
             : null,
-          members: room.chat_room_members || [],
+          members,
+          target_user_id: targetUserId,
+          target_name: targetUserId ? targetNameMap.get(targetUserId) || null : null,
           latest_message: latestMessage,
         };
       });
@@ -332,15 +373,7 @@ setRooms(mappedWithUnread);
   };
 
   const getOtherUserLabel = (room: ChatRoomListItem) => {
-    const sellerName = room.listing?.seller_name || '판매자';
-
-    if (!user) return `판매자: ${sellerName}`;
-
-    if (room.listing?.author_id === user.id) {
-      return `판매자: ${sellerName} · 구매자와의 채팅`;
-    }
-
-    return `판매자: ${sellerName}`;
+    return `상대방: ${room.target_name || '상대방'}`;
   };
 
   const getCategoryLabel = (category?: 'trade' | 'share' | 'want') => {

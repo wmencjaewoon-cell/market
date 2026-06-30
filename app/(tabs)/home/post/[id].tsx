@@ -40,10 +40,35 @@ import { canChatToListing } from '../../../../lib/chat_guard';
 import { canUseApp } from '../../../../lib/guard';
 import { checkProhibitedContent } from '../../../../lib/prohibited';
 import { REPORT_REASONS } from '../../../../lib/reportReasons';
+import {
+  getSellerLevel,
+  getSellerLevelStyle,
+  getSellerLevelTitle,
+} from '../../../../lib/sellerLevel';
 import { supabase } from '../../../../lib/supabase';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const HEADER_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
+const SIMILAR_STOP_WORDS = new Set([
+  '판매',
+  '나눔',
+  '구함',
+  '구해요',
+  '무료',
+  '가격',
+  '문의',
+  '거래',
+  '자재',
+  '인테리어',
+  '가능',
+  '오늘',
+  '급구',
+  '급매',
+  '있어요',
+  '합니다',
+  '드립니다',
+  '주세요',
+]);
 
 function formatTimeAgo(dateString?: string) {
   if (!dateString) return '';
@@ -97,6 +122,73 @@ function showPostAlert(title: string, message = '') {
   }
 
   Alert.alert(title, message);
+}
+
+function normalizeSimilarText(value?: string | null) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeSimilarText(value?: string | null) {
+  const normalized = normalizeSimilarText(value);
+
+  if (!normalized) return [];
+
+  return Array.from(
+    new Set(
+      normalized
+        .split(' ')
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2 && !SIMILAR_STOP_WORDS.has(token))
+    )
+  );
+}
+
+function getSimilarListingScore(source: any, candidate: any) {
+  const sourceTitle = normalizeSimilarText(source?.title);
+  const sourceDescription = normalizeSimilarText(source?.description);
+  const candidateTitle = normalizeSimilarText(candidate?.title);
+  const candidateDescription = normalizeSimilarText(candidate?.description);
+  const sourceTitleTokens = tokenizeSimilarText(source?.title);
+  const sourceDescriptionTokens = tokenizeSimilarText(source?.description);
+  const sourceTokens = Array.from(new Set([...sourceTitleTokens, ...sourceDescriptionTokens]));
+
+  if (sourceTokens.length === 0) return 0;
+
+  let score = 0;
+
+  sourceTokens.forEach((token) => {
+    const inSourceTitle = sourceTitleTokens.includes(token);
+
+    if (candidateTitle.includes(token)) {
+      score += inSourceTitle ? 6 : 4;
+    }
+
+    if (candidateDescription.includes(token)) {
+      score += inSourceTitle ? 3 : 2;
+    }
+  });
+
+  tokenizeSimilarText(candidate?.title).forEach((token) => {
+    if (sourceTitle.includes(token)) {
+      score += 4;
+    } else if (sourceDescription.includes(token)) {
+      score += 2;
+    }
+  });
+
+  tokenizeSimilarText(candidate?.description).forEach((token) => {
+    if (sourceTitle.includes(token)) {
+      score += 2;
+    } else if (sourceDescription.includes(token)) {
+      score += 1;
+    }
+  });
+
+  return score;
 }
 
 async function confirmBlockAuthor(name: string) {
@@ -272,7 +364,11 @@ export default function PostDetailScreen() {
           business_verified,
           phone,
           is_phone_public,
-          avatar_path
+          avatar_path,
+          trust_points,
+          trust_level,
+          seller_level_style,
+          show_level_on_posts
         ),
         listing_images (
           id,
@@ -312,7 +408,7 @@ export default function PostDetailScreen() {
       fetchFavoriteCount(listingId),
       fetchChatCount(listingId),
       fetchLiked(listingId),
-      fetchSimilar(data.category, data.region, listingId),
+      fetchSimilar(data, listingId),
     ]);
 
     return true;
@@ -413,19 +509,19 @@ export default function PostDetailScreen() {
     setLiked(!!data);
   };
 
-  const fetchSimilar = async (
-    category: string,
-    region: string | null,
-    currentId: number
-  ) => {
-    let query = supabase
+  const fetchSimilar = async (sourceItem: any, currentId: number) => {
+    const { data, error } = await supabase
       .from('listings')
       .select(`
         *,
         profiles!listings_author_id_fkey (
           display_name,
           user_type,
-          business_verified
+          business_verified,
+          trust_points,
+          trust_level,
+          seller_level_style,
+          show_level_on_posts
         ),
         listing_images (
           id,
@@ -434,22 +530,38 @@ export default function PostDetailScreen() {
         )
       `)
       .eq('status', 'active')
-      .eq('category', category)
+      .eq('category', sourceItem.category)
       .neq('id', currentId)
-      .limit(4);
-
-    if (region) {
-      query = query.eq('region', region);
-    }
-
-    const { data, error } = await query;
+      .order('created_at', { ascending: false })
+      .limit(40);
 
     if (error) {
       console.log('비슷한 물품 조회 실패:', error);
       return;
     }
 
-    setSimilarItems(data || []);
+    const scoredItems = (data || [])
+      .map((candidate: any) => {
+        const textScore = getSimilarListingScore(sourceItem, candidate);
+        const regionBonus =
+          textScore > 0 && sourceItem.region && candidate.region === sourceItem.region ? 2 : 0;
+
+        return {
+          item: candidate,
+          score: textScore + regionBonus,
+        };
+      })
+      .filter(({ score }) => score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map(({ item }) => ({
+        ...item,
+        listing_images: [...(item.listing_images || [])].sort(
+          (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        ),
+      }));
+
+    setSimilarItems(scoredItems);
   };
 
   
@@ -473,6 +585,9 @@ export default function PostDetailScreen() {
   const sellerType = isVerifiedStore ? 'store' : 'personal';
   const sellerName = item?.profiles?.display_name ?? '알 수 없음';
   const publicPhone = sellerType === 'store' ? item?.profiles?.phone : null;
+  const sellerLevel = getSellerLevel(item?.profiles);
+  const sellerLevelStyle = getSellerLevelStyle(item?.profiles, sellerLevel);
+  const showSellerLevel = item?.profiles?.show_level_on_posts !== false;
   const appChatDeepLink = item ? `interiormarket://open-chat/${item.id}` : '';
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
   const isShareListing = item?.category === 'share';
@@ -1160,7 +1275,16 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   )}
 </View>
 
-        <TouchableOpacity style={styles.sellerCard} onPress={goToSellerProfile}>
+        <TouchableOpacity
+          style={[
+            styles.sellerCard,
+            showSellerLevel && {
+              borderColor: sellerLevelStyle.borderColor,
+              backgroundColor: sellerLevelStyle.backgroundColor,
+            },
+          ]}
+          onPress={goToSellerProfile}
+        >
   <View style={styles.sellerAvatar}>
     {item?.profiles?.avatar_path ? (
       <Image
@@ -1179,6 +1303,24 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     <Text style={styles.sellerType}>
       {sellerType === 'store' ? '가게 판매자' : '개인 판매자'}
     </Text>
+    <View style={styles.sellerDecorRow}>
+      {isVerifiedStore ? (
+        <Text style={styles.sellerVerifiedBadge}>가게인증 완료</Text>
+      ) : null}
+      {showSellerLevel ? (
+        <Text
+          style={[
+            styles.sellerLevelBadge,
+            {
+              borderColor: sellerLevelStyle.borderColor,
+              color: sellerLevelStyle.textColor,
+            },
+          ]}
+        >
+          LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
+        </Text>
+      ) : null}
+    </View>
   </View>
 
   <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
@@ -1191,7 +1333,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
               sellerType === 'store' ? styles.storeBadge : styles.personalBadge,
             ]}
           >
-            {sellerType === 'store' ? '가게' : '개인'}
+            {sellerType === 'store' ? '인증가게' : '개인'}
           </Text>
 
           {item.urgent ? (
@@ -1284,46 +1426,48 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>비슷한 물품 추천</Text>
+        {similarItems.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>비슷한 물품 추천</Text>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.similarRow}>
-              {similarItems.map((similar) => {
-                const similarImagePath = similar.listing_images?.[0]?.image_path;
-                const similarImageUrl = similarImagePath
-                  ? supabase.storage
-                      .from('listing-images')
-                      .getPublicUrl(similarImagePath).data.publicUrl
-                  : null;
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.similarRow}>
+                {similarItems.map((similar) => {
+                  const similarImagePath = similar.listing_images?.[0]?.image_path;
+                  const similarImageUrl = similarImagePath
+                    ? supabase.storage
+                        .from('listing-images')
+                        .getPublicUrl(similarImagePath).data.publicUrl
+                    : null;
 
-                return (
-                  <TouchableOpacity
-                    key={similar.id}
-                    style={styles.similarCard}
-                    onPress={() => router.push(`/(tabs)/home/post/${similar.id}` as any)}
-                  >
-                    <View style={styles.similarImageWrap}>
-                      {similarImageUrl ? (
-                        <Image source={{ uri: similarImageUrl }} style={styles.similarImage} />
-                      ) : (
-                        <View style={styles.similarPlaceholder}>
-                          <Ionicons name="image-outline" size={22} color="#9ca3af" />
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.similarTitle} numberOfLines={2}>
-                      {similar.title}
-                    </Text>
-                    <Text style={styles.similarPrice} numberOfLines={1}>
-                      {similar.price_text || '가격 문의'}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </View>
+                  return (
+                    <TouchableOpacity
+                      key={similar.id}
+                      style={styles.similarCard}
+                      onPress={() => router.push(`/(tabs)/home/post/${similar.id}` as any)}
+                    >
+                      <View style={styles.similarImageWrap}>
+                        {similarImageUrl ? (
+                          <Image source={{ uri: similarImageUrl }} style={styles.similarImage} />
+                        ) : (
+                          <View style={styles.similarPlaceholder}>
+                            <Ionicons name="image-outline" size={22} color="#9ca3af" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.similarTitle} numberOfLines={2}>
+                        {similar.title}
+                      </Text>
+                      <Text style={styles.similarPrice} numberOfLines={1}>
+                        {similar.price_text || '가격 문의'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.bottomBar}>
@@ -1659,7 +1803,9 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 14,
     borderBottomWidth: 1,
+    borderTopWidth: 1,
     borderBottomColor: '#f3f4f6',
+    borderTopColor: '#f3f4f6',
   },
 
   sellerAvatar: {
@@ -1750,6 +1896,32 @@ hiddenStatusBadge: {
     fontSize: 13,
     color: '#6b7280',
   },
+  sellerDecorRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  sellerVerifiedBadge: {
+    borderRadius: 999,
+    backgroundColor: '#1d4ed8',
+    color: '#fff',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    overflow: 'hidden',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  sellerLevelBadge: {
+    borderWidth: 1,
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    overflow: 'hidden',
+    fontSize: 11,
+    fontWeight: '900',
+  },
 
   badgesRow: {
     flexDirection: 'row',
@@ -1769,8 +1941,8 @@ hiddenStatusBadge: {
   },
 
   storeBadge: {
-    backgroundColor: '#dbeafe',
-    color: '#2563eb',
+    backgroundColor: '#1d4ed8',
+    color: '#fff',
   },
 
   personalBadge: {
