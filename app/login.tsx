@@ -1,6 +1,5 @@
 import type { User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import * as Crypto from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -96,43 +95,58 @@ export default function LoginScreen() {
   };
 
   const createSessionFromUrl = async (url: string) => {
-    console.log('callback url:', url);
+  console.log('callback url:', url);
 
-    const { params, errorCode } = QueryParams.getQueryParams(url);
+  const parsedUrl = new URL(url);
 
-    if (errorCode) {
-      throw new Error(errorCode);
-    }
+  const searchParams = parsedUrl.searchParams;
+  const hashParams = new URLSearchParams(parsedUrl.hash.replace(/^#/, ''));
 
-    const code = (params as any)?.code;
+  const error =
+    searchParams.get('error') ||
+    hashParams.get('error') ||
+    searchParams.get('error_code') ||
+    hashParams.get('error_code');
 
-    if (code) {
-      const { error } = await supabase.auth.exchangeCodeForSession(String(code));
-      if (error) throw error;
-      return;
-    }
+  const errorDescription =
+    searchParams.get('error_description') ||
+    hashParams.get('error_description');
 
-    let access_token = (params as any)?.access_token;
-    let refresh_token = (params as any)?.refresh_token;
+  if (error) {
+    throw new Error(errorDescription || error);
+  }
 
-    if ((!access_token || !refresh_token) && url.includes('#')) {
-      const hash = url.split('#')[1];
-      const hashParams = new URLSearchParams(hash);
-      access_token = access_token || hashParams.get('access_token') || undefined;
-      refresh_token = refresh_token || hashParams.get('refresh_token') || undefined;
-    }
+  const code = searchParams.get('code') || hashParams.get('code');
 
-    if (!access_token || !refresh_token) {
-      throw new Error('OAuth 토큰을 받지 못했습니다.');
-    }
+  if (code) {
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    if (exchangeError) throw exchangeError;
+    return;
+  }
 
-    const { error } = await supabase.auth.setSession({
-      access_token,
-      refresh_token,
+  const accessToken = searchParams.get('access_token') || hashParams.get('access_token');
+  const refreshToken = searchParams.get('refresh_token') || hashParams.get('refresh_token');
+
+  if (accessToken && refreshToken) {
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
     });
 
-    if (error) throw error;
-  };
+    if (sessionError) throw sessionError;
+    return;
+  }
+
+  const { data } = await supabase.auth.getSession();
+
+  if (data.session) {
+    return;
+  }
+
+  throw new Error(
+    `OAuth 토큰을 받지 못했습니다. callback URL을 확인해 주세요: ${parsedUrl.origin}${parsedUrl.pathname}`
+  );
+};;
 
   const getCurrentUser = async () => {
     const { data } = await supabase.auth.getUser();
@@ -370,6 +384,8 @@ export default function LoginScreen() {
           if (event.origin !== window.location.origin) return;
 
           const messageData = event.data;
+
+          console.log('popup message:', messageData);
 
           if (!messageData || messageData.type !== 'SUPABASE_OAUTH_CALLBACK') {
             return;
