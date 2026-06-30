@@ -2,7 +2,6 @@ import type { User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import * as Crypto from 'expo-crypto';
-import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
@@ -144,10 +143,17 @@ export default function LoginScreen() {
     return data.user;
   };
 
-  const getOAuthRedirectTo = () =>
-    Platform.OS === 'web'
-      ? Linking.createURL('/auth/callback')
-      : 'interiormarket://auth/callback';
+  const getOAuthRedirectTo = () => {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/auth/callback`;
+    }
+
+    return 'https://interior-market.wmenc.co.kr/auth/callback';
+  }
+
+  return 'interiormarket:///auth/callback';
+};
 
   const getAppleNonce = async () => {
     const rawBytes = Crypto.getRandomBytes(32);
