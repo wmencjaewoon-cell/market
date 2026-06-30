@@ -93,34 +93,71 @@ export default function AuthCallbackScreen() {
   };
 
   if (typeof window !== 'undefined') {
-    const currentUrl = window.location.href;
+  const currentUrl = window.location.href;
 
-    if (window.opener && !window.opener.closed) {
-      window.opener.postMessage(
-        {
-          type: 'SUPABASE_OAUTH_CALLBACK',
-          url: currentUrl,
-        },
-        window.location.origin
-      );
+  const finishWebPopup = async () => {
+    try {
+      await createSessionFromCallbackUrl(currentUrl);
 
-      setMessage('로그인이 완료되었습니다. 창을 닫는 중입니다.');
+      const { data } = await supabase.auth.getSession();
+
+      if (!data.session) {
+        throw new Error('로그인 세션을 저장하지 못했습니다.');
+      }
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(
+          {
+            type: 'SUPABASE_OAUTH_CALLBACK_SUCCESS',
+          },
+          window.location.origin
+        );
+
+        setMessage('로그인이 완료되었습니다. 창을 닫는 중입니다.');
+
+        setTimeout(() => {
+          window.close();
+        }, 300);
+
+        return;
+      }
+
+      await moveAfterLogin();
+    } catch (e: any) {
+      console.log('웹 OAuth callback 처리 실패:', e);
+
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(
+          {
+            type: 'SUPABASE_OAUTH_CALLBACK_ERROR',
+            message: e?.message || '로그인을 완료하지 못했습니다.',
+          },
+          window.location.origin
+        );
+
+        setTimeout(() => {
+          window.close();
+        }, 700);
+
+        return;
+      }
+
+      if (mounted) {
+        setMessage(e?.message || '로그인을 완료하지 못했습니다.');
+      }
 
       setTimeout(() => {
-        window.close();
-      }, 300);
-
-      return () => {
-        mounted = false;
-      };
+        router.replace('/login' as any);
+      }, 1200);
     }
+  };
 
-    void finish(currentUrl);
+  void finishWebPopup();
 
-    return () => {
-      mounted = false;
-    };
-  }
+  return () => {
+    mounted = false;
+  };
+}
 
   Linking.getInitialURL().then((url) => {
     if (url) {

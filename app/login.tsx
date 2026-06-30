@@ -381,33 +381,46 @@ export default function LoginScreen() {
         };
 
         const handleMessage = async (event: MessageEvent) => {
-          if (event.origin !== window.location.origin) return;
+  if (event.origin !== window.location.origin) return;
 
-          const messageData = event.data;
+  const messageData = event.data;
 
-          console.log('popup message:', messageData);
+  console.log('oauth popup message:', messageData);
 
-          if (!messageData || messageData.type !== 'SUPABASE_OAUTH_CALLBACK') {
-            return;
-          }
+  if (!messageData) return;
 
-          done = true;
-          cleanup();
+  if (messageData.type === 'SUPABASE_OAUTH_CALLBACK_ERROR') {
+    done = true;
+    cleanup();
+    reject(new Error(messageData.message || `${socialProviderLabel[provider]} 로그인에 실패했습니다.`));
+    return;
+  }
 
-          try {
-            await createSessionFromUrl(messageData.url);
+  if (messageData.type !== 'SUPABASE_OAUTH_CALLBACK_SUCCESS') {
+    return;
+  }
 
-            const profileReady = await ensureProfileAfterLogin();
+  done = true;
+  cleanup();
 
-            if (profileReady) {
-              goNext();
-            }
+  try {
+    const { data } = await supabase.auth.getSession();
 
-            resolve();
-          } catch (callbackError) {
-            reject(callbackError);
-          }
-        };
+    if (!data.session) {
+      throw new Error('로그인 세션을 찾지 못했습니다.');
+    }
+
+    const profileReady = await ensureProfileAfterLogin();
+
+    if (profileReady) {
+      goNext();
+    }
+
+    resolve();
+  } catch (callbackError) {
+    reject(callbackError);
+  }
+};
 
         const checkClosed = setInterval(() => {
           if (!popup.closed) return;
