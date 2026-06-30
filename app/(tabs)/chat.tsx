@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -108,6 +108,7 @@ export default function ChatScreen() {
   const [selectedTab, setSelectedTab] = useState<ChatFilterTab>('전체');
   const [rooms, setRooms] = useState<ChatRoomListItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const fetchSeqRef = useRef(0);
 
   const getRoomTargetUserId = (room: ChatRoomListItem) => {
     if (!user) return null;
@@ -118,99 +119,49 @@ export default function ChatScreen() {
     );
   };
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchRooms();
-    }, [user?.id])
-  );
-  useEffect(() => {
-  if (!user) return;
 
-  supabase.getChannels().forEach((channel) => {
-    if (channel.topic.includes(`chat-list-${user.id}`)) {
-      supabase.removeChannel(channel);
+
+  const fetchRooms = useCallback(async () => {
+  if (!user?.id) {
+    setRooms([]);
+    return;
+  }
+
+  const fetchSeq = ++fetchSeqRef.current;
+
+  try {
+    setRefreshing(true);
+
+    const { data: memberRows, error: memberError } = await supabase
+      .from('chat_room_members')
+      .select('room_id')
+      .eq('user_id', user.id);
+
+    if (memberError) {
+      console.log('내 채팅방 멤버 조회 실패:', memberError);
+      return;
     }
-  });
 
-  const channel = supabase
-    .channel(`chat-list-${user.id}-${Date.now()}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'chat_messages',
-      },
-      () => {
-        fetchRooms();
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'chat_message_reads',
-      },
-      () => {
-        fetchRooms();
-      }
-    )
-    .subscribe();
+    const roomIds = (memberRows || []).map((row: any) => row.room_id);
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, [user?.id]);
-
-  const fetchRooms = async () => {
-    if (!user) {
+    if (roomIds.length === 0) {
       setRooms([]);
       return;
     }
 
-    try {
-      setRefreshing(true);
-
-      const { data: memberRows, error: memberError } = await supabase
-        .from('chat_room_members')
-        .select('room_id')
-        .eq('user_id', user.id);
-
-      if (memberError) {
-        console.log('내 채팅방 멤버 조회 실패:', memberError);
-        return;
-      }
-
-      const roomIds = (memberRows || []).map((row: any) => row.room_id);
-
-      if (roomIds.length === 0) {
-        setRooms([]);
-        return;
-      }
-
-      const { data: settingRows } = await supabase
+    const [settingResult, blockResult, roomResult] = await Promise.all([
+      supabase
         .from('chat_room_settings')
         .select('room_id, muted')
         .eq('user_id', user.id)
-        .in('room_id', roomIds);
+        .in('room_id', roomIds),
 
-      const muteMap = new Map(
-        (settingRows || []).map((row: any) => [row.room_id, row.muted])
-      );
-
-      const { data: blockRows, error: blockError } = await supabase
+      supabase
         .from('user_blocks')
         .select('blocked_id')
-        .eq('blocker_id', user.id);
+        .eq('blocker_id', user.id),
 
-      if (blockError) {
-        console.log('채팅 목록 차단 사용자 조회 실패:', blockError);
-      }
-
-      const blockedIds = new Set((blockRows || []).map((row: any) => row.blocked_id));
-
-      const { data: roomRows, error: roomError } = await supabase
+      supabase
         .from('chat_rooms')
         .select(`
           id,
@@ -243,107 +194,196 @@ export default function ChatScreen() {
           )
         `)
         .in('id', roomIds)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .order('created_at', {
+          ascending: false,
+          foreignTable: 'chat_messages',
+        })
+        .limit(1, {
+          foreignTable: 'chat_messages',
+        }),
+    ]);
 
-      if (roomError) {
-        console.log('채팅방 조회 실패:', roomError);
-        return;
+    if (fetchSeq !== fetchSeqRef.current) return;
+
+    if (roomResult.error) {
+      console.log('채팅방 조회 실패:', roomResult.error);
+      return;
+    }
+
+    if (blockResult.error) {
+      console.log('채팅 목록 차단 사용자 조회 실패:', blockResult.error);
+    }
+
+    const muteMap = new Map(
+      (settingResult.data || []).map((row: any) => [row.room_id, row.muted])
+    );
+
+    const blockedIds = new Set(
+      (blockResult.data || []).map((row: any) => row.blocked_id)
+    );
+
+    const roomRows = roomResult.data || [];
+
+    const targetIds = Array.from(
+      new Set(
+        roomRows
+          .map((room: any) => {
+            const members = room.chat_room_members || [];
+
+            return (
+              members.find((member: any) => member.user_id !== user.id)?.user_id ||
+              (room.listings?.author_id !== user.id ? room.listings?.author_id : null)
+            );
+          })
+          .filter(Boolean)
+      )
+    ) as string[];
+
+    const targetNameMap = new Map<string, string>();
+
+    if (targetIds.length > 0) {
+      const { data: targetProfiles, error: targetProfileError } = await supabase
+        .from('profiles')
+        .select('id, display_name')
+        .in('id', targetIds);
+
+      if (targetProfileError) {
+        console.log('채팅 상대 프로필 조회 실패:', targetProfileError);
       }
 
-      const targetIds = Array.from(
-        new Set(
-          (roomRows || [])
-            .map((room: any) => {
-              const members = room.chat_room_members || [];
-              return (
-                members.find((member: any) => member.user_id !== user.id)?.user_id ||
-                (room.listings?.author_id !== user.id ? room.listings?.author_id : null)
-              );
-            })
-            .filter(Boolean)
-        )
-      ) as string[];
-
-      const targetNameMap = new Map<string, string>();
-
-      if (targetIds.length > 0) {
-        const { data: targetProfiles, error: targetProfileError } = await supabase
-          .from('profiles')
-          .select('id, display_name')
-          .in('id', targetIds);
-
-        if (targetProfileError) {
-          console.log('채팅 상대 프로필 조회 실패:', targetProfileError);
+      (targetProfiles || []).forEach((profile: any) => {
+        if (profile.id) {
+          targetNameMap.set(profile.id, profile.display_name || '상대방');
         }
-
-        (targetProfiles || []).forEach((profile: any) => {
-          if (profile.id) {
-            targetNameMap.set(profile.id, profile.display_name || '상대방');
-          }
-        });
-      }
-
-      const mapped: ChatRoomListItem[] = (roomRows || []).map((room: any) => {
-        const sellerProfile = Array.isArray(room.listings?.profiles)
-          ? room.listings.profiles[0]
-          : room.listings?.profiles;
-        const members = room.chat_room_members || [];
-        const targetUserId =
-          members.find((member: any) => member.user_id !== user.id)?.user_id ||
-          (room.listings?.author_id !== user.id ? room.listings?.author_id : null);
-        const sortedImages = [...(room.listings?.listing_images || [])].sort(
-          (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
-        );
-
-        const latestMessage = [...(room.chat_messages || [])].sort(
-          (a: any, b: any) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )[0] || null;
-
-        return {
-          id: room.id,
-          listing_id: room.listing_id,
-          created_at: room.created_at,
-          muted: muteMap.get(room.id) ?? false,
-          listing: room.listings
-            ? {
-                ...room.listings,
-                seller_name: sellerProfile?.display_name || null,
-                listing_images: sortedImages,
-              }
-            : null,
-          members,
-          target_user_id: targetUserId,
-          target_name: targetUserId ? targetNameMap.get(targetUserId) || null : null,
-          latest_message: latestMessage,
-        };
       });
+    }
 
-      mapped.sort((a, b) => {
-        const aTime = a.latest_message?.created_at || a.created_at;
-        const bTime = b.latest_message?.created_at || b.created_at;
-        return new Date(bTime).getTime() - new Date(aTime).getTime();
-      });
+    const mapped: ChatRoomListItem[] = roomRows.map((room: any) => {
+      const sellerProfile = Array.isArray(room.listings?.profiles)
+        ? room.listings.profiles[0]
+        : room.listings?.profiles;
 
-      const visibleRooms = mapped.filter((room) => {
-        const targetId = getRoomTargetUserId(room);
-        return !targetId || !blockedIds.has(targetId);
-      });
+      const members = room.chat_room_members || [];
 
-      const mappedWithUnread = await Promise.all(
-  visibleRooms.map(async (room) => ({
-    ...room,
-    unread_count: await getUnreadCountByRoom(room.id),
-  }))
-);
+      const targetUserId =
+        members.find((member: any) => member.user_id !== user.id)?.user_id ||
+        (room.listings?.author_id !== user.id ? room.listings?.author_id : null);
 
-setRooms(mappedWithUnread);
-    } catch (e) {
-      console.log('채팅방 목록 불러오기 실패:', e);
-    } finally {
+      const sortedImages = [...(room.listings?.listing_images || [])].sort(
+        (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      );
+
+      const latestMessage = Array.isArray(room.chat_messages)
+        ? room.chat_messages[0] || null
+        : null;
+
+      return {
+        id: room.id,
+        listing_id: room.listing_id,
+        created_at: room.created_at,
+        muted: muteMap.get(room.id) ?? false,
+        listing: room.listings
+          ? {
+              ...room.listings,
+              seller_name: sellerProfile?.display_name || null,
+              listing_images: sortedImages,
+            }
+          : null,
+        members,
+        target_user_id: targetUserId,
+        target_name: targetUserId ? targetNameMap.get(targetUserId) || null : null,
+        latest_message: latestMessage,
+        unread_count: 0,
+      };
+    });
+
+    mapped.sort((a, b) => {
+      const aTime = a.latest_message?.created_at || a.created_at;
+      const bTime = b.latest_message?.created_at || b.created_at;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
+
+    const visibleRooms = mapped.filter((room) => {
+      const targetId = room.target_user_id;
+      return !targetId || !blockedIds.has(targetId);
+    });
+
+    // 먼저 목록부터 빠르게 보여줌
+    setRooms(visibleRooms);
+
+    // 안읽은 수는 뒤에서 붙임
+    const roomsWithUnread = await Promise.all(
+      visibleRooms.map(async (room) => ({
+        ...room,
+        unread_count: await getUnreadCountByRoom(room.id),
+      }))
+    );
+
+    if (fetchSeq === fetchSeqRef.current) {
+      setRooms(roomsWithUnread);
+    }
+  } catch (e) {
+    console.log('채팅방 목록 불러오기 실패:', e);
+  } finally {
+    if (fetchSeq === fetchSeqRef.current) {
       setRefreshing(false);
     }
+  }
+}, [user?.id]);
+
+  useEffect(() => {
+  if (!user?.id) return;
+
+  supabase.getChannels().forEach((channel) => {
+    if (channel.topic.includes(`chat-list-${user.id}`)) {
+      supabase.removeChannel(channel);
+    }
+  });
+
+  const channel = supabase
+    .channel(`chat-list-${user.id}-${Date.now()}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'chat_messages',
+      },
+      () => {
+        void fetchRooms();
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'chat_message_reads',
+      },
+      () => {
+        void fetchRooms();
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
   };
+}, [user?.id, fetchRooms]);
+
+useEffect(() => {
+  if (!user?.id) return;
+  void fetchRooms();
+}, [user?.id, fetchRooms]);
+
+useFocusEffect(
+  useCallback(() => {
+    if (!user?.id) return;
+
+    void fetchRooms();
+  }, [user?.id, fetchRooms])
+);
 
   useTabRefresh('chat', () => {
     void fetchRooms();

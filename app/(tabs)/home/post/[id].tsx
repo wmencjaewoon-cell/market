@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -327,6 +327,7 @@ export default function PostDetailScreen() {
 
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const mainImageScrollRef = useRef<any>(null);
 
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [buyerModalOpen, setBuyerModalOpen] = useState(false);
@@ -609,6 +610,37 @@ const goNextImage = () => {
     prev >= imageUrls.length - 1 ? 0 : prev + 1
   );
 };
+
+const handleMainImageScroll = (event: any) => {
+  if (imageUrls.length === 0) return;
+
+  const offsetX = Number(event.nativeEvent.contentOffset?.x ?? 0);
+  const index = Math.round(offsetX / SCREEN_WIDTH);
+  const nextIndex = Math.max(0, Math.min(index, imageUrls.length - 1));
+
+  setSelectedImageIndex((prev) => (prev === nextIndex ? prev : nextIndex));
+};
+
+const goToMainImage = (index: number) => {
+  const nextIndex = Math.max(0, Math.min(index, imageUrls.length - 1));
+  setSelectedImageIndex(nextIndex);
+  mainImageScrollRef.current?.scrollTo({
+    x: nextIndex * SCREEN_WIDTH,
+    y: 0,
+    animated: true,
+  });
+};
+
+useEffect(() => {
+  if (imageUrls.length === 0) {
+    setSelectedImageIndex(0);
+    return;
+  }
+
+  if (selectedImageIndex >= imageUrls.length) {
+    setSelectedImageIndex(0);
+  }
+}, [imageUrls.length, selectedImageIndex]);
 
   const handleChat = async () => {
   if (!item || chatStarting) return;
@@ -1215,6 +1247,39 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     );
   };
 
+  const renderActionBar = (style?: any) => (
+    <View style={[styles.bottomBar, style]}>
+      <TouchableOpacity style={styles.heartBtn} onPress={handleToggleLike}>
+        <Ionicons
+          name={liked ? 'heart' : 'heart-outline'}
+          size={24}
+          color={liked ? '#ef4444' : '#111827'}
+        />
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.chatBtn, chatStarting && styles.chatBtnDisabled]}
+        onPress={handleChat}
+        activeOpacity={0.85}
+        disabled={chatStarting}
+      >
+        {chatStarting ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Text style={styles.chatBtnText}>
+            {Platform.OS === 'web' ? '앱으로 채팅하기' : '채팅하기'}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      {sellerType === 'store' && publicPhone ? (
+        <TouchableOpacity style={styles.phoneBtn} onPress={handlePhone}>
+          <Text style={styles.phoneBtnText}>전화하기</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+
   if (!item) {
     return (
       <>
@@ -1245,29 +1310,77 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.imageWrap}>
   {imageUrls.length > 0 ? (
-    <ScrollView
-      horizontal
-      pagingEnabled
-      showsHorizontalScrollIndicator={false}
-    >
-      {imageUrls.map((url: any, index: number) => (
-  <TouchableOpacity
-    key={`${url}-${index}`}
-    style={styles.mainImageTouch}
-    activeOpacity={0.95}
-    onPress={() => {
-      setSelectedImageIndex(index);
-      setImageViewerOpen(true);
-    }}
-  >
-    <Image
-      source={{ uri: url }}
-      style={styles.mainImage}
-      resizeMode="cover"
-    />
-  </TouchableOpacity>
-))}
-    </ScrollView>
+    <>
+      <ScrollView
+        ref={mainImageScrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={handleMainImageScroll}
+        onMomentumScrollEnd={handleMainImageScroll}
+        scrollEventThrottle={16}
+      >
+        {imageUrls.map((url: any, index: number) => (
+          <TouchableOpacity
+            key={`${url}-${index}`}
+            style={styles.mainImageTouch}
+            activeOpacity={0.95}
+            onPress={() => {
+              setSelectedImageIndex(index);
+              setImageViewerOpen(true);
+            }}
+          >
+            <Image
+              source={{ uri: url }}
+              style={styles.mainImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      <View style={styles.imageCountBadge}>
+        <Text style={styles.imageCountText}>
+          {selectedImageIndex + 1}/{imageUrls.length}
+        </Text>
+      </View>
+
+      {imageUrls.length > 1 ? (
+        <View style={styles.imageDots}>
+          {imageUrls.map((_: any, index: number) => (
+            <View
+              key={`image-dot-${index}`}
+              style={[
+                styles.imageDot,
+                selectedImageIndex === index && styles.imageDotActive,
+              ]}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {Platform.OS === 'web' && imageUrls.length > 1 && selectedImageIndex > 0 ? (
+        <TouchableOpacity
+          style={[styles.imageNavBtn, styles.imageNavLeft]}
+          activeOpacity={0.85}
+          onPress={() => goToMainImage(selectedImageIndex - 1)}
+        >
+          <Ionicons name="chevron-back" size={28} color="#111827" />
+        </TouchableOpacity>
+      ) : null}
+
+      {Platform.OS === 'web' &&
+      imageUrls.length > 1 &&
+      selectedImageIndex < imageUrls.length - 1 ? (
+        <TouchableOpacity
+          style={[styles.imageNavBtn, styles.imageNavRight]}
+          activeOpacity={0.85}
+          onPress={() => goToMainImage(selectedImageIndex + 1)}
+        >
+          <Ionicons name="chevron-forward" size={28} color="#111827" />
+        </TouchableOpacity>
+      ) : null}
+    </>
   ) : (
     <View style={styles.imagePlaceholder}>
       <Ionicons name="image-outline" size={54} color="#9ca3af" />
@@ -1470,36 +1583,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         ) : null}
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.heartBtn} onPress={handleToggleLike}>
-          <Ionicons
-            name={liked ? 'heart' : 'heart-outline'}
-            size={24}
-            color={liked ? '#ef4444' : '#111827'}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.chatBtn, chatStarting && styles.chatBtnDisabled]}
-          onPress={handleChat}
-          activeOpacity={0.85}
-          disabled={chatStarting}
-        >
-          {chatStarting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.chatBtnText}>
-              {Platform.OS === 'web' ? '앱으로 채팅하기' : '채팅하기'}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        {sellerType === 'store' && publicPhone ? (
-          <TouchableOpacity style={styles.phoneBtn} onPress={handlePhone}>
-            <Text style={styles.phoneBtnText}>전화하기</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
+      {renderActionBar()}
 
       <Modal visible={menuOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
@@ -1781,14 +1865,16 @@ const styles = StyleSheet.create({
 
   imageWrap: {
     width: '100%',
-    height: 380,
-    backgroundColor: '#f3f4f6',
+    height: Platform.OS === 'web' ? 560 : 460,
+    backgroundColor: '#f6f7f9',
+    overflow: 'hidden',
   },
 
   mainImage: {
-  width: SCREEN_WIDTH,
-  height: '100%',
-},
+    width: SCREEN_WIDTH,
+    height: '100%',
+    backgroundColor: '#f6f7f9',
+  },
 
   imagePlaceholder: {
     flex: 1,
@@ -2078,9 +2164,77 @@ emptyBuyerText: {
     paddingTop: 10,
   },
   mainImageTouch: {
-  width: SCREEN_WIDTH,
-  height: '100%',
-},
+    width: SCREEN_WIDTH,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  imageCountBadge: {
+    position: 'absolute',
+    right: 14,
+    bottom: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,24,39,0.78)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+
+  imageCountText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  imageDots: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 18,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 64,
+  },
+
+  imageDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(17,24,39,0.25)',
+  },
+
+  imageDotActive: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#111827',
+  },
+
+  imageNavBtn: {
+    position: 'absolute',
+    top: '50%',
+    width: 48,
+    height: 48,
+    marginTop: -24,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+  },
+
+  imageNavLeft: {
+    left: 18,
+  },
+
+  imageNavRight: {
+    right: 18,
+  },
 
 fullImageOverlay: {
   flex: 1,
