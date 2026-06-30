@@ -2,9 +2,9 @@
   "expo": {
     "name": "interior-market",
     "slug": "interior-market",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/interior-market.jpg",
     "scheme": "interiormarket",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -44,16 +44,21 @@
         }
       },
       "adaptiveIcon": {
-  "backgroundColor": "#ffffff",
-  "foregroundImage": "./assets/images/interior-market.jpg"
-},
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/images/interior-market.jpg"
+      },
       "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.interiormarket"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/interior-market.jpg"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "04729bbb-3cc4-460b-a9f3-007ae34c5297"
+      }
     }
   }
 }
