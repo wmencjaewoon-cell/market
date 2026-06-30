@@ -55,7 +55,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/interior-market.jpg"
     },
     "plugins": [
   "expo-router",
