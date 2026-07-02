@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "interior-market",
+    "name": "인테리어마켓",
     "slug": "interior-market",
-    "version": "1.1.7",
+    "version": "1.1.8",
     "orientation": "portrait",
     "icon": "./assets/images/interior-market.jpg",
     "scheme": "interiormarket",

@@ -158,7 +158,7 @@ export default function MyScreen() {
           <View style={styles.loginBox}>
             <Text style={styles.loginTitle}>로그인이 필요해요</Text>
             <Text style={styles.loginDesc}>
-              로그인하지 않아도 공지사항과 정책 문서는 확인할 수 있습니다.
+              공지사항과 정책 문서는 확인할 수 있습니다.
             </Text>
             <TouchableOpacity style={styles.btn} onPress={() => router.push('/login' as any)}>
               <Text style={styles.btnText}>로그인하기</Text>

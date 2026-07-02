@@ -2024,34 +2024,22 @@ export default function ChatRoomScreen() {
     return;
   }
 
-  const tempId = `temp-${Date.now()}`;
-
-  const optimisticMessage: ChatMessage = {
-    id: tempId,
-    room_id: roomId,
-    sender_id: user.id,
-    message: messageText,
-    created_at: new Date().toISOString(),
-  };
-
   try {
     setSending(true);
 
-    // 먼저 화면에 표시
-    setMessages((prev) => [...prev, optimisticMessage]);
+    // 입력창은 바로 비우기
     setText('');
+
+    // DB에만 저장
+    // 화면 표시는 Supabase realtime INSERT 구독에서 자동으로 들어오게 둠
+    await sendMessage(roomId, messageText);
 
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     });
-
-    // 실제 DB 전송
-    await sendMessage(roomId, messageText);
   } catch (e) {
-    // 실패하면 임시 메시지 제거
-    setMessages((prev) => prev.filter((message) => message.id !== tempId));
-
     console.log('메시지 전송 실패:', e);
+
     showChatAlert(
       '메시지 전송 실패',
       e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'
