@@ -64,7 +64,7 @@ export default function OpenChatScreen() {
     };
 
     run();
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     const run = async () => {
@@ -100,7 +100,7 @@ export default function OpenChatScreen() {
   }
 
   if (needsRegionVerify) {
-    return <Redirect href={`/(tabs)/my/regions?returnTo=/open-chat/${id}` as any} />;
+    return <Redirect href={`/(tabs)/home/regions?returnTo=/open-chat/${id}` as any} />;
   }
 
   if (roomId) {

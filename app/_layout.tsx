@@ -117,6 +117,7 @@ function RootNavigator() {
         <Stack.Screen name="admin" options={{ title: '관리자' }} />
         <Stack.Screen name="review/create" options={{ title: '리뷰 작성' }} />
 
+        <Stack.Screen name="open-chat/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
         <Stack.Screen name="my" options={{ headerShown: false }} />
         <Stack.Screen name="support" options={{ headerShown: false }} />

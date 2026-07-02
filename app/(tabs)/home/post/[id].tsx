@@ -589,7 +589,7 @@ export default function PostDetailScreen() {
   const sellerLevel = getSellerLevel(item?.profiles);
   const sellerLevelStyle = getSellerLevelStyle(item?.profiles, sellerLevel);
   const showSellerLevel = item?.profiles?.show_level_on_posts !== false;
-  const appChatDeepLink = item ? `interiormarket://open-chat/${item.id}` : '';
+  const appChatDeepLink = item ? `interiormarket:///open-chat/${item.id}` : '';
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
   const isShareListing = item?.category === 'share';
 
@@ -714,7 +714,7 @@ useEffect(() => {
   const handleShare = async () => {
   if (!item) return;
 
-  const deepLink = `interiormarket://post/${item.id}`;
+  const deepLink = `interior-market://post/${item.id}`;
 
   try {
     await Share.share({
