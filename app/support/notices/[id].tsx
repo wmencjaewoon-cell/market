@@ -61,6 +61,7 @@ export default function NoticeDetailScreen() {
         .from('notices')
         .select('id, title, content, is_published, created_at, updated_at')
         .eq('id', Number(id))
+        .eq('is_published', true)
         .maybeSingle();
 
       if (error) {
@@ -155,9 +156,9 @@ export default function NoticeDetailScreen() {
       <View style={styles.article}>
         <View style={styles.metaRow}>
           <Text style={styles.noticeLabel}>공지</Text>
-          {notice.is_published === false ? (
+          {/* {notice.is_published === false ? (
             <Text style={styles.privateLabel}>비공개</Text>
-          ) : null}
+          ) : null} */}
         </View>
 
         <Text style={styles.title}>{notice.title}</Text>
