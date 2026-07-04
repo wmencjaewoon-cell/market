@@ -23,7 +23,10 @@ export default function TradeMapScreen() {
   const detailPlaceText = params.place || `${mapTitle} 상세 정보가 입력되지 않았습니다.`;
   const [pinAddress, setPinAddress] = useState(params.region || '');
   const copyAddressText = pinAddress.trim();
-  const canCopyAddress = mapTitle === '가게 위치' && copyAddressText.length > 0;
+  const canCopyAddress = copyAddressText.length > 0;
+  const showDetailPlace =
+    detailPlaceText.trim().length > 0 &&
+    detailPlaceText.trim() !== copyAddressText;
 
   useEffect(() => {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -52,7 +55,7 @@ export default function TradeMapScreen() {
 
     try {
       await Clipboard.setStringAsync(copyAddressText);
-      Alert.alert('주소 복사', '가게 주소를 복사했습니다.');
+      Alert.alert('주소 복사', '주소를 복사했습니다.');
     } catch (e) {
       console.log('주소 복사 실패:', e);
       Alert.alert('주소 복사', '주소를 복사하지 못했습니다.');
@@ -91,10 +94,10 @@ export default function TradeMapScreen() {
         {canCopyAddress ? (
           <TouchableOpacity style={styles.copyAddressBtn} onPress={handleCopyAddress}>
             <Ionicons name="copy-outline" size={16} color="#2563eb" />
-            <Text style={styles.copyAddressText}>주소 복사</Text>
+            <Text style={styles.copyAddressText}>주소 복사하기</Text>
           </TouchableOpacity>
         ) : null}
-        <Text style={styles.detailPlace}>{detailPlaceText}</Text>
+        {showDetailPlace ? <Text style={styles.detailPlace}>{detailPlaceText}</Text> : null}
       </View>
     </View>
   );

@@ -1,6 +1,7 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { emitChatPlaceSelection } from '../lib/placeSelection';
 
 export default function MapPickerScreen() {
   const params = useLocalSearchParams<{
@@ -11,6 +12,8 @@ export default function MapPickerScreen() {
     title?: string;
     desc?: string;
     buttonText?: string;
+    mode?: string;
+    chatRoomId?: string;
   }>();
 
   const initial = useMemo(() => {
@@ -28,9 +31,36 @@ export default function MapPickerScreen() {
   const title = params.title || '거래 희망 장소 선택';
   const desc = params.desc || '웹에서는 지도 핀 선택 대신 앱에서 설정하는 방식을 추천합니다.';
   const buttonText = params.buttonText || '이 좌표로 임시 선택';
+  const fallbackAddress = '서울 중구 세종대로 110';
+  const isChatPlacePicker = params.mode === 'chat-place' && Boolean(params.chatRoomId);
+
+  const handleSelectLocation = () => {
+    if (isChatPlacePicker) {
+      emitChatPlaceSelection({
+        roomId: String(params.chatRoomId),
+        address: fallbackAddress,
+        latitude: marker.latitude,
+        longitude: marker.longitude,
+      });
+      router.back();
+      return;
+    }
+
+    router.replace({
+      pathname: returnTo as any,
+      params: {
+        lat: String(marker.latitude),
+        lng: String(marker.longitude),
+        address: fallbackAddress,
+        ...(params.category ? { category: String(params.category) } : {}),
+      },
+    });
+  };
 
   return (
     <View style={styles.screen}>
+      <Stack.Screen options={{ title }} />
+
       <View style={styles.fakeMap}>
         <Text style={styles.fakeMapTitle}>웹에서는 지도를 직접 조작할 수 없어요.</Text>
         <Text style={styles.fakeMapDesc}>
@@ -47,16 +77,7 @@ export default function MapPickerScreen() {
 
         <TouchableOpacity
           style={styles.btn}
-          onPress={() =>
-            router.replace({
-              pathname: returnTo as any,
-              params: {
-                lat: String(marker.latitude),
-                lng: String(marker.longitude),
-                ...(params.category ? { category: String(params.category) } : {}),
-              },
-            })
-          }
+          onPress={handleSelectLocation}
         >
           <Text style={styles.btnText}>{buttonText}</Text>
         </TouchableOpacity>

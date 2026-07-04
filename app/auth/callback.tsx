@@ -1,7 +1,7 @@
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../../lib/supabase';
 
 function getHashParam(url: string, key: string) {
@@ -92,7 +92,7 @@ export default function AuthCallbackScreen() {
     }
   };
 
-  if (typeof window !== 'undefined') {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
   const currentUrl = window.location.href;
 
   const finishWebPopup = async () => {

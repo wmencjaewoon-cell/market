@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getOAuthProfileDefaults } from '../../lib/oauthProfile';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { supabase } from '../../lib/supabase';
 
@@ -132,6 +133,7 @@ export default function ProfileEditScreen() {
   const [userType, setUserType] = useState<'store' | 'personal'>('personal');
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [isPhonePublic, setIsPhonePublic] = useState(false);
   const [avatarPath, setAvatarPath] = useState<string | null>(null);
   const [avatarPreviewUri, setAvatarPreviewUri] = useState<string | null>(null);
@@ -183,6 +185,8 @@ export default function ProfileEditScreen() {
   }, [params.lat, params.lng]);
 
   const fetchProfile = async () => {
+    const oauthProfile = getOAuthProfileDefaults(user);
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -191,8 +195,9 @@ export default function ProfileEditScreen() {
 
     if (!error && data) {
       setUserType(data.user_type === 'store' ? 'store' : 'personal');
-      setDisplayName(data.display_name || '');
-      setPhone(data.phone || '');
+      setDisplayName(data.display_name || oauthProfile.displayName || '');
+      setPhone(data.phone || oauthProfile.phone || '');
+      setEmail(data.email || oauthProfile.email || '');
       setIsPhonePublic(!!data.is_phone_public);
       setAvatarPath(data.avatar_path || data.avatar_url || null);
       setAvatarPreviewUri(null);
@@ -206,6 +211,10 @@ export default function ProfileEditScreen() {
         setStoreLatitude(data.store_latitude ?? null);
         setStoreLongitude(data.store_longitude ?? null);
       }
+    } else if (!data) {
+      setDisplayName((current) => current || oauthProfile.displayName || '');
+      setPhone((current) => current || oauthProfile.phone || '');
+      setEmail((current) => current || oauthProfile.email || '');
     }
 
     const requestResult = await supabase
@@ -553,6 +562,7 @@ export default function ProfileEditScreen() {
           .update({
             user_type: 'store',
             display_name: displayName.trim(),
+            email: email.trim() || null,
             phone: phone.trim(),
             is_phone_public: isPhonePublic,
             avatar_path: nextAvatarPath,
@@ -638,19 +648,18 @@ export default function ProfileEditScreen() {
           return;
         }
 
-        if (nextAvatarPath !== avatarPath) {
-          const { error: avatarError } = await supabase
-            .from('profiles')
-            .update({
-              avatar_path: nextAvatarPath,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', user.id);
+        const { error: profileUpdateError } = await supabase
+          .from('profiles')
+          .update({
+            email: email.trim() || null,
+            avatar_path: nextAvatarPath,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
 
-          if (avatarError) {
-            setMessage(avatarError.message);
-            return;
-          }
+        if (profileUpdateError) {
+          setMessage(profileUpdateError.message);
+          return;
         }
 
         setLatestStoreRequest((requestResult.data || null) as StoreVerificationRequest | null);
@@ -686,6 +695,7 @@ export default function ProfileEditScreen() {
         .update({
           user_type: 'personal',
           display_name: displayName.trim(),
+          email: email.trim() || null,
           phone: phone.trim() || null,
           is_phone_public: false,
           avatar_path: nextAvatarPath,
@@ -993,6 +1003,16 @@ export default function ProfileEditScreen() {
           placeholder="01012345678"
           keyboardType="phone-pad"
           editable={!(userType === 'store' && storeVerificationStatus === 'approved')}
+        />
+
+        <Text style={styles.label}>이메일</Text>
+        <TextInput
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          placeholder="email@example.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
         />
 
         {userType === 'store' && storeVerificationStatus === 'approved' && (

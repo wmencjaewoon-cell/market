@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { getOAuthProfileDefaults } from '../lib/oauthProfile';
 import { supabase } from '../lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -247,18 +248,16 @@ export default function LoginScreen() {
   const getProfileInputFromMetadata = (currentUser: User) => {
     const metadata = currentUser.user_metadata || {};
     const metadataUserType: UserType = metadata.user_type === 'store' ? 'store' : 'personal';
-    const metadataDisplayName =
-      typeof metadata.display_name === 'string' ? metadata.display_name.trim() : '';
-    const metadataPhone = typeof metadata.phone === 'string' ? metadata.phone.trim() : '';
+    const oauthProfile = getOAuthProfileDefaults(currentUser);
 
-    if (!metadataDisplayName || !metadataPhone) {
+    if (!oauthProfile.displayName || !oauthProfile.phone) {
       return null;
     }
 
     return {
       userType: metadataUserType,
-      displayName: metadataDisplayName,
-      phone: metadataPhone,
+      displayName: oauthProfile.displayName,
+      phone: oauthProfile.phone,
     };
   };
 

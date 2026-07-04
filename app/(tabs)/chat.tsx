@@ -86,6 +86,25 @@ function showChatListAlert(title: string, message = '') {
   Alert.alert(title, message);
 }
 
+function getChatPreviewText(message?: string | null) {
+  if (!message) return '아직 메시지가 없습니다.';
+
+  if (message.startsWith('📍 약속 장소')) {
+    const addressLine = message
+      .split('\n')
+      .find((line) => line.trim().startsWith('주소:'));
+    const address = addressLine?.replace(/^주소:\s*/, '').trim();
+
+    return address ? `약속장소: ${address}` : '약속장소를 보냈습니다.';
+  }
+
+  if (message.startsWith('📍 거래 장소')) {
+    return '약속장소를 보냈습니다.';
+  }
+
+  return message;
+}
+
 async function confirmBlockChatUser() {
   const message = '상대방을 차단할까요?\n차단한 사용자는 내정보에서 해제할 수 있습니다.';
 
@@ -710,7 +729,7 @@ const exitRoom = (room: ChatRoomListItem) => {
                     </Text>
 
                     <Text style={styles.messageText} numberOfLines={1}>
-                      {room.latest_message?.message || '아직 메시지가 없습니다.'}
+                      {getChatPreviewText(room.latest_message?.message)}
                     </Text>
 
                     <View style={styles.bottomRow}>

@@ -19,8 +19,12 @@ export const ANIMAL_KEYWORDS = [
   '애견',
 
   '고양이',
+  '고냥이',
+  '고냉이',
   '냥이',
   '냥냥이',
+  '냐옹이',
+  '야옹이',
   '괭이',
   '고앵이',
   '고먐미',
@@ -109,6 +113,30 @@ export const PROHIBITED_KEYWORDS = [
   '정부지원물품', '혈액', '장기',
 ];
 
+export const PROHIBITED_KEYWORD_ALIASES = [
+  '댬배', '댐배', '땀배', '땸배', '담베', '담뱨',
+  '전담', '전자담베', '전자댬배', '전자댐배',
+  '액쌍', '액샹',
+  '니코뛴', '니코틴액상',
+
+  '술', '알콜', '알코올', '쏘주', '맥쥬', '위스키', '보드카',
+
+  '민증', '주민증', '면허증',
+  '대포통장', '대포계좌',
+
+  '아이디거래', '아이디공유', '계정양도', '계정양수',
+
+  '짭', '짭퉁', '레플', '이미테이션', '이미태이션',
+
+  '처방전', '수면제', '스테로이드',
+  '대마초', 'weed',
+
+  '성인물', '야동',
+
+  '고냥이', '고냉이', '냐옹이', '야옹이',
+  '댕댕이', '멍멍이', '멍뭉이',
+];
+
 function normalize(text: string) {
   return text
     .toLowerCase()
@@ -116,14 +144,146 @@ function normalize(text: string) {
     .replace(/[^a-z0-9가-힣]/g, '');
 }
 
+const HANGUL_BASE = 0xac00;
+const HANGUL_END = 0xd7a3;
+const HANGUL_JUNG_COUNT = 21;
+const HANGUL_JONG_COUNT = 28;
+
+const FOLDED_CHO: Record<number, number> = {
+  1: 0,
+  4: 3,
+  8: 7,
+  10: 9,
+  13: 12,
+};
+
+const FOLDED_JUNG: Record<number, number> = {
+  1: 0,
+  2: 0,
+  3: 0,
+  5: 4,
+  6: 4,
+  7: 4,
+  12: 8,
+  17: 13,
+};
+
+const DIRECT_ANIMAL_KEYWORDS = ANIMAL_KEYWORDS.filter(
+  (keyword) => Array.from(normalize(keyword)).length > 1
+);
+
+function foldHangulForSearch(text: string) {
+  return normalize(text)
+    .split('')
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      if (code < HANGUL_BASE || code > HANGUL_END) return char;
+
+      const offset = code - HANGUL_BASE;
+      const cho = Math.floor(offset / (HANGUL_JUNG_COUNT * HANGUL_JONG_COUNT));
+      const jung = Math.floor((offset % (HANGUL_JUNG_COUNT * HANGUL_JONG_COUNT)) / HANGUL_JONG_COUNT);
+      const jong = offset % HANGUL_JONG_COUNT;
+      const foldedCho = FOLDED_CHO[cho] ?? cho;
+      const foldedJung = FOLDED_JUNG[jung] ?? jung;
+
+      return String.fromCharCode(
+        HANGUL_BASE +
+          (foldedCho * HANGUL_JUNG_COUNT + foldedJung) * HANGUL_JONG_COUNT +
+          jong
+      );
+    })
+    .join('');
+}
+
+function getFuzzyKeywordDistance(keyword: string) {
+  const length = Array.from(keyword).length;
+
+  if (length <= 2) return 0;
+  if (/^[a-z0-9]+$/.test(keyword) && length <= 4) return 0;
+  if (length <= 4) return 1;
+  return 2;
+}
+
+function getLevenshteinDistanceWithin(left: string, right: string, maxDistance: number) {
+  const leftChars = Array.from(left);
+  const rightChars = Array.from(right);
+
+  if (Math.abs(leftChars.length - rightChars.length) > maxDistance) {
+    return maxDistance + 1;
+  }
+
+  let previous = rightChars.map((_, index) => index + 1);
+  previous.unshift(0);
+
+  for (let i = 0; i < leftChars.length; i += 1) {
+    const current = [i + 1];
+    let rowMin = current[0];
+
+    for (let j = 0; j < rightChars.length; j += 1) {
+      const cost = leftChars[i] === rightChars[j] ? 0 : 1;
+      const distance = Math.min(
+        previous[j + 1] + 1,
+        current[j] + 1,
+        previous[j] + cost
+      );
+
+      current[j + 1] = distance;
+      rowMin = Math.min(rowMin, distance);
+    }
+
+    if (rowMin > maxDistance) return maxDistance + 1;
+    previous = current;
+  }
+
+  return previous[rightChars.length] ?? maxDistance + 1;
+}
+
+function includesNearKeyword(text: string, keyword: string, maxDistance: number) {
+  if (maxDistance <= 0) return false;
+
+  const textChars = Array.from(text);
+  const keywordLength = Array.from(keyword).length;
+  const minLength = Math.max(1, keywordLength - maxDistance);
+  const maxLength = keywordLength + maxDistance;
+
+  for (let start = 0; start < textChars.length; start += 1) {
+    for (let length = minLength; length <= maxLength; length += 1) {
+      if (start + length > textChars.length) continue;
+
+      const candidate = textChars.slice(start, start + length).join('');
+      if (getLevenshteinDistanceWithin(candidate, keyword, maxDistance) <= maxDistance) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 function includesAny(text: string, keywords: string[]) {
-  return keywords.find((keyword) => text.includes(normalize(keyword)));
+  const foldedText = foldHangulForSearch(text);
+
+  return keywords.find((keyword) => {
+    const normalizedKeyword = normalize(keyword);
+    const foldedKeyword = foldHangulForSearch(keyword);
+    const fuzzyDistance = getFuzzyKeywordDistance(foldedKeyword);
+
+    return (
+      text.includes(normalizedKeyword) ||
+      foldedText.includes(foldedKeyword) ||
+      includesNearKeyword(foldedText, foldedKeyword, fuzzyDistance)
+    );
+  });
 }
 
 export function checkProhibitedContent(...values: Array<string | null | undefined>) {
   const text = normalize(values.filter(Boolean).join(' '));
 
-  const directBlocked = includesAny(text, PROHIBITED_KEYWORDS);
+  const directBlocked = includesAny(text, [
+    ...PROHIBITED_KEYWORDS,
+    ...PROHIBITED_KEYWORD_ALIASES,
+    ...DIRECT_ANIMAL_KEYWORDS,
+  ]);
   if (directBlocked) return directBlocked;
 
   const animalKeyword = includesAny(text, ANIMAL_KEYWORDS);

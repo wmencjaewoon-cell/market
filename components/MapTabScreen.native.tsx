@@ -2,17 +2,17 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Image,
-    Modal,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Image,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,7 +43,7 @@ type GroupedMarker = {
 };
 
 function roundCoord(value: number, precision = 3) {
-  const factor = Math.pow(10, precision);
+  const factor = Math.pow(1, precision);
   return Math.round(value * factor) / factor;
 }
 
@@ -299,17 +299,18 @@ export default function MapTabScreen() {
               tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
               onPress={() => handleMarkerPress(group)}
             >
-              <View
-                collapsable={false}
-                style={[
-                  styles.markerWrap,
-                  { backgroundColor: single ? color : '#111827' },
-                ]}
-              >
-                <Text style={styles.markerText}>
-                  {single ? getCategoryLabel(first.category) : String(group.items.length)}
-                </Text>
-              </View>
+              <View collapsable={false} style={styles.markerOuter}>
+  <View
+    style={[
+      styles.markerWrap,
+      { backgroundColor: single ? color : '#111827' },
+    ]}
+  >
+    <Text style={styles.markerText}>
+      {single ? getCategoryLabel(first.category) : String(group.items.length)}
+    </Text>
+  </View>
+</View>
             </Marker>
           );
         })}
@@ -490,16 +491,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  markerWrap: {
-    minWidth: 44,
-    height: 44,
-    paddingHorizontal: 10,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
+  markerOuter: {
+  width: 38,
+  height: 38,
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'visible',
+},
+
+markerWrap: {
+  minWidth: 38,
+  height: 38,
+  paddingHorizontal: 10,
+  borderRadius: 22,
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderWidth: 2,
+  borderColor: '#fff',
+  overflow: 'hidden',
+},
+
+
   markerText: {
     color: '#fff',
     fontSize: 12,

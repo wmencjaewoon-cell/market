@@ -51,6 +51,12 @@ import {
   RTCSessionDescription,
   RTCView,
 } from '../../lib/nativeCall';
+import {
+  clearChatPlaceSelection,
+  consumeLatestChatPlaceSelection,
+  subscribeChatPlaceSelection,
+  type ChatPlaceSelection,
+} from '../../lib/placeSelection';
 import { checkProhibitedContent } from '../../lib/prohibited';
 import { REPORT_REASONS } from '../../lib/reportReasons';
 import { getSellerLevel, getSellerLevelTitle } from '../../lib/sellerLevel';
@@ -370,6 +376,10 @@ function getCallStatusMessage(
 }
 
 const PAYMENT_REQUEST_PREFIX = '💸 송금 요청\n';
+const PLACE_MESSAGE_PREFIX = '📍 약속 장소\n';
+const LEGACY_PLACE_MESSAGE_PREFIX = '📍 거래 장소\n';
+const PLACE_ADDRESS_PREFIX = '주소:';
+const PLACE_COORDS_PREFIX = '좌표:';
 const APPOINTMENT_REQUEST_PREFIX = '📅 약속 제안\n';
 const APPOINTMENT_COMPLETION_PROMPT_PREFIX = '✅ 거래 완료 확인\n';
 const APPOINTMENT_COMPLETION_RESPONSE_PREFIX = '✅ 거래 완료 응답\n';
@@ -395,6 +405,50 @@ type ChatImageItem = {
   url: string;
   thumbnailUrl: string;
 };
+
+type PlaceMessagePayload = {
+  address: string;
+  latitude: number;
+  longitude: number;
+};
+
+function makePlaceMessage(address: string, latitude: string | number, longitude: string | number) {
+  return `${PLACE_MESSAGE_PREFIX}${PLACE_ADDRESS_PREFIX} ${address.trim()}\n${PLACE_COORDS_PREFIX} ${latitude},${longitude}`;
+}
+
+function parsePlaceMessage(message: string): PlaceMessagePayload | null {
+  if (!message.startsWith(PLACE_MESSAGE_PREFIX) && !message.startsWith(LEGACY_PLACE_MESSAGE_PREFIX)) {
+    return null;
+  }
+
+  const lines = message.split('\n').map((line) => line.trim()).filter(Boolean);
+  const addressLine = lines.find((line) => line.startsWith(PLACE_ADDRESS_PREFIX));
+  const coordsLine = lines.find((line) => line.startsWith(PLACE_COORDS_PREFIX));
+  const latitudeLine = lines.find((line) => line.startsWith('위도:'));
+  const longitudeLine = lines.find((line) => line.startsWith('경도:'));
+
+  const address = addressLine
+    ? addressLine.slice(PLACE_ADDRESS_PREFIX.length).trim()
+    : '약속장소';
+
+  let latitude = Number.NaN;
+  let longitude = Number.NaN;
+
+  if (coordsLine) {
+    const coords = coordsLine.slice(PLACE_COORDS_PREFIX.length).split(',');
+    latitude = Number(coords[0]?.trim());
+    longitude = Number(coords[1]?.trim());
+  } else if (latitudeLine && longitudeLine) {
+    latitude = Number(latitudeLine.slice('위도:'.length).trim());
+    longitude = Number(longitudeLine.slice('경도:'.length).trim());
+  }
+
+  if (!address || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return null;
+  }
+
+  return { address, latitude, longitude };
+}
 
 function getChatImageUploadInfo(asset: ImagePicker.ImagePickerAsset) {
   const rawMimeType = asset.mimeType?.toLowerCase() || '';
@@ -662,10 +716,11 @@ function ZoomableChatImage({
 }
 
 export default function ChatRoomScreen() {
-  const { roomId, lat, lng } = useLocalSearchParams<{
+  const { roomId, lat, lng, address } = useLocalSearchParams<{
     roomId: string;
     lat?: string;
     lng?: string;
+    address?: string;
   }>();
 
   const { user } = useAuth();
@@ -676,6 +731,7 @@ export default function ChatRoomScreen() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const sentPlaceKeysRef = useRef<Set<string>>(new Set());
   const processedIceCandidateIdsRef = useRef<Set<number>>(new Set());
   const queuedIceCandidatesRef = useRef<ChatCallIceCandidate[]>([]);
   const remoteDescriptionSetRef = useRef(false);
@@ -1510,12 +1566,69 @@ export default function ChatRoomScreen() {
 
   useEffect(() => {
     if (!roomId || !lat || !lng) return;
-    sendMessage(roomId, `📍 거래 장소\n위도: ${lat}\n경도: ${lng}`, {
+
+    const placeAddress = String(address || '').trim();
+    if (!placeAddress) {
+      showChatAlert('장소 전송 실패', '선택한 장소의 주소를 확인하지 못했습니다.');
+      router.setParams({ lat: '', lng: '', address: '' } as any);
+      return;
+    }
+
+    const placeKey = `${roomId}:${lat}:${lng}:${placeAddress}`;
+    if (sentPlaceKeysRef.current.has(placeKey)) return;
+    sentPlaceKeysRef.current.add(placeKey);
+
+    sendMessage(roomId, makePlaceMessage(placeAddress, lat, lng), {
       skipProhibitedCheck: true,
-    }).catch((e: any) => {
-      showChatAlert('장소 전송 실패', e?.message || '거래 장소를 전송하지 못했습니다.');
-    });
-  }, [roomId, lat, lng]);
+    })
+      .then(() => {
+        router.setParams({ lat: '', lng: '', address: '' } as any);
+      })
+      .catch((e: any) => {
+        router.setParams({ lat: '', lng: '', address: '' } as any);
+        showChatAlert('장소 전송 실패', e?.message || '거래 장소를 전송하지 못했습니다.');
+      });
+  }, [roomId, lat, lng, address]);
+
+  const sendSelectedPlace = useCallback(
+    (selection: ChatPlaceSelection) => {
+      if (!roomId || selection.roomId !== roomId) return;
+
+      const placeAddress = selection.address.trim();
+      if (!placeAddress) {
+        clearChatPlaceSelection(selection.id);
+        showChatAlert('장소 전송 실패', '선택한 장소의 주소를 확인하지 못했습니다.');
+        return;
+      }
+
+      const placeKey = `${selection.id}:${roomId}`;
+      if (sentPlaceKeysRef.current.has(placeKey)) return;
+      sentPlaceKeysRef.current.add(placeKey);
+      clearChatPlaceSelection(selection.id);
+
+      sendMessage(
+        roomId,
+        makePlaceMessage(placeAddress, selection.latitude, selection.longitude),
+        {
+          skipProhibitedCheck: true,
+        }
+      ).catch((e: any) => {
+        showChatAlert('장소 전송 실패', e?.message || '약속장소를 전송하지 못했습니다.');
+      });
+    },
+    [roomId]
+  );
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    const pendingSelection = consumeLatestChatPlaceSelection(roomId);
+    if (pendingSelection) {
+      sendSelectedPlace(pendingSelection);
+    }
+
+    return subscribeChatPlaceSelection(sendSelectedPlace);
+  }, [roomId, sendSelectedPlace]);
 
   useEffect(() => {
     if (!targetUserId) {
@@ -2734,7 +2847,14 @@ export default function ChatRoomScreen() {
     setPlusMenuOpen(false);
     router.push({
       pathname: '/map-picker',
-      params: { returnTo: `/chat/${roomId}` },
+      params: {
+        returnTo: `/chat/${roomId}`,
+        mode: 'chat-place',
+        chatRoomId: roomId,
+        title: '약속장소 선택',
+        desc: '핀을 옮겨서 채팅방에 보낼 약속장소를 선택해 주세요.',
+        buttonText: '이 위치로 선택',
+      },
     } as any);
   };
 
@@ -3491,6 +3611,18 @@ export default function ChatRoomScreen() {
     ]);
   };
 
+  const openPlaceMessageMap = (place: PlaceMessagePayload) => {
+    router.push({
+      pathname: '/trade-map',
+      params: {
+        lat: String(place.latitude),
+        lng: String(place.longitude),
+        region: place.address,
+        title: '약속장소',
+      },
+    } as any);
+  };
+
   const renderMessageTextWithLinks = (message: string, isMine: boolean) => {
     const parts = message.split(URL_REGEX);
 
@@ -3529,6 +3661,7 @@ export default function ChatRoomScreen() {
 
     const imageItems = parseImageMessage(item.message);
     const isImageMessage = imageItems.length > 0;
+    const placeMessage = parsePlaceMessage(item.message);
     const appointmentCompletionDate = item.message.startsWith(
       APPOINTMENT_COMPLETION_PROMPT_PREFIX
     )
@@ -3581,6 +3714,31 @@ export default function ChatRoomScreen() {
                 </View>
               )}
             </View>
+          ) : placeMessage ? (
+            <TouchableOpacity
+              style={styles.placeMessageCard}
+              onPress={() => openPlaceMessageMap(placeMessage)}
+            >
+              <View style={styles.placeMessageHeader}>
+                <Ionicons
+                  name="location"
+                  size={18}
+                  color={isMine ? '#bfdbfe' : '#2563eb'}
+                />
+                <Text style={[styles.placeMessageTitle, isMine && styles.myPlaceMessageTitle]}>
+                  약속장소
+                </Text>
+              </View>
+              <Text
+                style={[styles.placeMessageAddress, isMine && styles.myPlaceMessageAddress]}
+                numberOfLines={2}
+              >
+                {placeMessage.address}
+              </Text>
+              <Text style={[styles.placeMessageHint, isMine && styles.myPlaceMessageHint]}>
+                지도에서 보기
+              </Text>
+            </TouchableOpacity>
           ) : isImageMessage ? (
             <TouchableOpacity
               onPress={() => {
@@ -5140,6 +5298,50 @@ const styles = StyleSheet.create({
 
   myMessageText: {
     color: '#fff',
+  },
+
+  placeMessageCard: {
+    minWidth: 190,
+    maxWidth: 240,
+  },
+
+  placeMessageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  placeMessageTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  myPlaceMessageTitle: {
+    color: '#fff',
+  },
+
+  placeMessageAddress: {
+    marginTop: 8,
+    color: '#111827',
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 21,
+  },
+
+  myPlaceMessageAddress: {
+    color: '#fff',
+  },
+
+  placeMessageHint: {
+    marginTop: 8,
+    color: '#2563eb',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  myPlaceMessageHint: {
+    color: '#dbeafe',
   },
 
   completionActions: {

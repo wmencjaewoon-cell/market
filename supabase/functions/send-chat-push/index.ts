@@ -117,10 +117,20 @@ serve(async (req) => {
       });
     }
 
+    const rawMessage = String(message);
+    const placeAddressLine = rawMessage
+      .split('\n')
+      .find((line) => line.trim().startsWith('주소:'));
+    const placeAddress = placeAddressLine
+      ? placeAddressLine.replace(/^주소:\s*/, '').trim()
+      : '';
+
     const bodyText =
-      String(message).startsWith('📷')
+      rawMessage.startsWith('📷')
         ? '사진을 보냈습니다.'
-        : String(message).slice(0, 80);
+        : rawMessage.startsWith('📍 약속 장소') && placeAddress
+          ? `약속장소: ${placeAddress}`.slice(0, 80)
+          : rawMessage.slice(0, 80);
 
     const expoMessages = tokens.map((row: any) => ({
       to: row.token,

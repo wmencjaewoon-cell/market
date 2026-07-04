@@ -15,7 +15,10 @@ export default function TradeMapScreenWeb() {
   const mapTitle = params.title || '거래 희망 장소';
   const detailPlaceText = params.place || `${mapTitle} 상세 정보가 입력되지 않았습니다.`;
   const copyAddressText = pinAddress === '주소 정보가 없습니다.' ? '' : pinAddress.trim();
-  const canCopyAddress = mapTitle === '가게 위치' && copyAddressText.length > 0;
+  const canCopyAddress = copyAddressText.length > 0;
+  const showDetailPlace =
+    detailPlaceText.trim().length > 0 &&
+    detailPlaceText.trim() !== copyAddressText;
 
   const handleCopyAddress = async () => {
     if (!canCopyAddress) return;
@@ -28,7 +31,7 @@ export default function TradeMapScreenWeb() {
       }
 
       if (typeof window !== 'undefined') {
-        window.alert('가게 주소를 복사했습니다.');
+        window.alert('주소를 복사했습니다.');
       }
     } catch (e) {
       console.log('주소 복사 실패:', e);
@@ -56,10 +59,10 @@ export default function TradeMapScreenWeb() {
         {canCopyAddress ? (
           <TouchableOpacity style={styles.copyAddressBtn} onPress={handleCopyAddress}>
             <Ionicons name="copy-outline" size={16} color="#2563eb" />
-            <Text style={styles.copyAddressText}>주소 복사</Text>
+            <Text style={styles.copyAddressText}>주소 복사하기</Text>
           </TouchableOpacity>
         ) : null}
-        <Text style={styles.detailPlace}>{detailPlaceText}</Text>
+        {showDetailPlace ? <Text style={styles.detailPlace}>{detailPlaceText}</Text> : null}
       </View>
     </View>
   );
