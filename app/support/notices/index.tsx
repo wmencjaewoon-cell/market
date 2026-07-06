@@ -43,7 +43,9 @@ export default function NoticesScreen() {
     const { data, error } = await supabase
       .from('notices')
       .select('id, title, content, is_published, created_at')
+      .eq('is_published', true)
       .order('created_at', { ascending: false });
+      
 
     if (error) {
       console.log('공지사항 조회 실패:', error);
@@ -112,9 +114,9 @@ export default function NoticesScreen() {
           <View style={styles.noticeBody}>
             <View style={styles.noticeMetaRow}>
               <Text style={styles.noticeLabel}>공지</Text>
-              {item.is_published === false ? (
+              {/* {item.is_published === false ? (
                 <Text style={styles.privateLabel}>비공개</Text>
-              ) : null}
+              ) : null} */}
               <Text style={styles.noticeDate}>{formatNoticeDate(item.created_at)}</Text>
             </View>
 
