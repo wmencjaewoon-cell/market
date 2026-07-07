@@ -248,13 +248,15 @@ export default function MyScreen() {
                   <Text style={styles.companyValue}>{value}</Text>
                 </View>
               ))}
-
-              <Text style={styles.companyNotice}>
-                인테리어마켓은 본 플랫폼을 통한 통신판매의 당사자가 아니며,
-                해당 거래정보 및 내용에 대하여 책임을 지지 않습니다.
-              </Text>
             </View>
           ) : null}
+
+          <View style={styles.companyNoticeBox}>
+            <Text style={styles.companyNotice}>
+              인테리어마켓은 본 플랫폼을 통한 통신판매의 당사자가 아니며,
+              해당 거래정보 및 내용에 대하여 책임을 지지 않습니다.
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -434,7 +436,7 @@ container: {
   companyRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
     gap: 12,
   },
   companyLabel: {
@@ -450,13 +452,16 @@ container: {
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
-    textAlign: 'right',
+    textAlign: 'left',
   },
-  companyNotice: {
-    marginTop: 8,
+  companyNoticeBox: {
+    paddingHorizontal: 16,
     paddingTop: 12,
+    paddingBottom: 16,
     borderTopWidth: 1,
     borderTopColor: '#f3f4f6',
+  },
+  companyNotice: {
     color: '#6b7280',
     fontSize: 12,
     lineHeight: 18,
