@@ -22,7 +22,8 @@ const COMPANY_INFO_ROWS = [
   ['전화번호', '051-723-0624'],
   ['서비스명', '인테리어마켓'],
   ['문의 이메일', 'wmenc.jaewoon@gmail.com'],
-  ['웹사이트', 'https://interior-market.wmenc.co.kr','https://wmenc.co.kr'],
+  ['웹사이트', 'https://interior-market.wmenc.co.kr'],
+  ['홈페이지', 'https://wmenc.co.kr'],
 ];
 
 export default function MyScreen() {
