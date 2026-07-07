@@ -13,9 +13,22 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
+const COMPANY_INFO_ROWS = [
+  ['상호', '(주)우명건축'],
+  ['대표자', '장기승'],
+  ['사업자등록번호', '292-81-03793'],
+  // ['통신판매업 신고번호', '제2023-서울금천-00001호'],
+  ['주소', '부산광역시 기장군 기장읍 기장해안로 98, 3층 318호 (오시리아스퀘어)'],
+  ['전화번호', '051-723-0624'],
+  ['서비스명', '인테리어마켓'],
+  ['문의 이메일', 'wmenc.jaewoon@gmail.com'],
+  ['웹사이트', 'https://interior-market.wmenc.co.kr','https://wmenc.co.kr'],
+];
+
 export default function MyScreen() {
   const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<any>(null);
+  const [companyInfoOpen, setCompanyInfoOpen] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -209,6 +222,40 @@ export default function MyScreen() {
             <Text style={styles.logoutText}>로그아웃</Text>
           </TouchableOpacity>
         ) : null}
+
+        <View style={styles.companyBox}>
+          <TouchableOpacity
+            style={styles.companyHeader}
+            onPress={() => setCompanyInfoOpen((open) => !open)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.companyTitle}>(주)우명건축 사업자 정보</Text>
+            <Text
+              style={[
+                styles.companyArrow,
+                companyInfoOpen && styles.companyArrowOpen,
+              ]}
+            >
+              {'>'}
+            </Text>
+          </TouchableOpacity>
+
+          {companyInfoOpen ? (
+            <View style={styles.companyBody}>
+              {COMPANY_INFO_ROWS.map(([label, value]) => (
+                <View key={label} style={styles.companyRow}>
+                  <Text style={styles.companyLabel}>{label}</Text>
+                  <Text style={styles.companyValue}>{value}</Text>
+                </View>
+              ))}
+
+              <Text style={styles.companyNotice}>
+                인테리어마켓은 본 플랫폼을 통한 통신판매의 당사자가 아니며,
+                해당 거래정보 및 내용에 대하여 책임을 지지 않습니다.
+              </Text>
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -349,6 +396,72 @@ container: {
     alignItems: 'center',
   },
   logoutText: { color: '#fff', fontWeight: '800' },
+
+  companyBox: {
+    marginTop: 18,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+  },
+  companyHeader: {
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  companyTitle: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  companyArrow: {
+    color: '#9ca3af',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  companyArrowOpen: {
+    transform: [{ rotate: '90deg' }],
+  },
+  companyBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    gap: 8,
+  },
+  companyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  companyLabel: {
+    width: 110,
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  companyValue: {
+    flex: 1,
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'right',
+  },
+  companyNotice: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    color: '#6b7280',
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
 
   btn: {
     marginTop: 20,
