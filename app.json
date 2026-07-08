@@ -2,7 +2,7 @@
   "expo": {
     "name": "인테리어마켓",
     "slug": "interior-market",
-    "version": "1.2.7",
+    "version": "1.2.8",
     "orientation": "portrait",  
     "icon": "./assets/images/interior-market.jpg",
     "scheme": "interiormarket",
