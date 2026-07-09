@@ -13,6 +13,8 @@
       "bundleIdentifier": "com.anonymous.interiormarket",
       "usesAppleSignIn": true,
       "infoPlist": {
+        "CFBundleDevelopmentRegion": "ko",
+        "CFBundleLocalizations": ["ko", "en"],
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "게시글 사진 촬영과 영상통화를 위해 카메라를 사용합니다. 예: 판매할 자재 사진을 직접 촬영하거나 채팅방에서 영상통화를 할 때 사용합니다.",
         "NSMicrophoneUsageDescription": "보이스톡과 영상통화 중 음성 전달을 위해 마이크를 사용합니다. 예: 채팅 상대와 통화할 때 내 목소리를 전달하는 데 사용합니다.",

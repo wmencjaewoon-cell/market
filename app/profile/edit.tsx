@@ -95,6 +95,8 @@ type StoreVerificationRequest = {
   business_number: string;
   store_name: string;
   representative_name: string | null;
+  business_hours: string | null;
+  store_intro: string | null;
   phone: string;
   store_address: string | null;
   store_latitude: number | null;
@@ -144,6 +146,8 @@ export default function ProfileEditScreen() {
   const [businessVerified, setBusinessVerified] = useState(false);
   const [verifyingBusiness, setVerifyingBusiness] = useState(false);
   const [representativeName, setRepresentativeName] = useState('');
+  const [businessHours, setBusinessHours] = useState('');
+  const [storeIntro, setStoreIntro] = useState('');
   const [storeVerificationStatus, setStoreVerificationStatus] =
     useState<StoreVerificationStatus>('none');
   const [latestStoreRequest, setLatestStoreRequest] =
@@ -204,6 +208,9 @@ export default function ProfileEditScreen() {
       setSelectedAvatarAsset(null);
       setBusinessNumber(data.business_number || '');
       setBusinessVerified(!!data.business_verified);
+      setRepresentativeName(data.representative_name || '');
+      setBusinessHours(data.business_hours || '');
+      setStoreIntro(data.store_intro || '');
       setStoreVerificationStatus(data.store_verification_status || 'none');
       setStoreAddress(data.store_address || '');
 
@@ -220,7 +227,7 @@ export default function ProfileEditScreen() {
     const requestResult = await supabase
       .from('store_verification_requests')
       .select(
-        'id, business_number, store_name, representative_name, phone, store_address, store_latitude, store_longitude, document_path, document_mime_type, status, admin_note, created_at, reviewed_at, seller_tax_policy_agreed, business_identity_policy_agreed, store_restriction_policy_agreed, seller_policy_agreed_at'
+        'id, business_number, store_name, representative_name, business_hours, store_intro, phone, store_address, store_latitude, store_longitude, document_path, document_mime_type, status, admin_note, created_at, reviewed_at, seller_tax_policy_agreed, business_identity_policy_agreed, store_restriction_policy_agreed, seller_policy_agreed_at'
       )
       .eq('user_id', user?.id)
       .order('created_at', { ascending: false })
@@ -239,6 +246,9 @@ export default function ProfileEditScreen() {
         setBusinessDocumentPath(null);
         setBusinessDocumentMimeType(null);
         setBusinessDocumentName('');
+        setRepresentativeName('');
+        setBusinessHours('');
+        setStoreIntro('');
         setSelectedBusinessDocumentAsset(null);
         setBusinessDocumentPreviewUri(null);
         setSellerTaxPolicyAgreed(false);
@@ -272,6 +282,8 @@ export default function ProfileEditScreen() {
         setBusinessNumber(request.business_number || '');
         setDisplayName(request.store_name || '');
         setRepresentativeName(request.representative_name || '');
+        setBusinessHours(request.business_hours || '');
+        setStoreIntro(request.store_intro || '');
         setPhone(request.phone || '');
         setStoreAddress(request.store_address || '');
 
@@ -556,7 +568,7 @@ export default function ProfileEditScreen() {
         nextAvatarPath = await uploadProfileImage(selectedAvatarAsset);
       }
 
-      if (userType === 'store' && businessVerified && storeVerificationStatus === 'approved') {
+      if (userType === 'store' && storeVerificationStatus === 'approved') {
         const { error } = await supabase
           .from('profiles')
           .update({
@@ -566,6 +578,9 @@ export default function ProfileEditScreen() {
             phone: phone.trim(),
             is_phone_public: isPhonePublic,
             avatar_path: nextAvatarPath,
+            representative_name: representativeName.trim() || null,
+            business_hours: businessHours.trim() || null,
+            store_intro: storeIntro.trim() || null,
             store_address: storeAddress.trim() || null,
             store_latitude: storeLatitude,
             store_longitude: storeLongitude,
@@ -606,6 +621,8 @@ export default function ProfileEditScreen() {
           p_business_number: businessNumber.replace(/[^0-9]/g, ''),
           p_store_name: displayName.trim(),
           p_representative_name: representativeName.trim() || null,
+          p_business_hours: businessHours.trim() || null,
+          p_store_intro: storeIntro.trim() || null,
           p_phone: phone.trim(),
           p_store_address: storeAddress.trim() || null,
           p_store_latitude: storeLatitude,
@@ -699,6 +716,9 @@ export default function ProfileEditScreen() {
           phone: phone.trim() || null,
           is_phone_public: false,
           avatar_path: nextAvatarPath,
+          representative_name: null,
+          business_hours: null,
+          store_intro: null,
           store_address: null,
           store_latitude: null,
           store_longitude: null,
@@ -720,6 +740,9 @@ export default function ProfileEditScreen() {
       setAvatarPreviewUri(null);
       setLatestStoreRequest(null);
       setStoreVerificationStatus('none');
+      setRepresentativeName('');
+      setBusinessHours('');
+      setStoreIntro('');
       setBusinessDocumentPath(null);
       setBusinessDocumentMimeType(null);
       setBusinessDocumentName('');
@@ -769,6 +792,8 @@ export default function ProfileEditScreen() {
               setBusinessVerified(false);
               setBusinessNumber('');
               setRepresentativeName('');
+              setBusinessHours('');
+              setStoreIntro('');
               setBusinessDocumentPath(null);
               setSellerTaxPolicyAgreed(false);
               setBusinessIdentityPolicyAgreed(false);
@@ -866,8 +891,26 @@ export default function ProfileEditScreen() {
               style={styles.input}
               value={representativeName}
               onChangeText={setRepresentativeName}
-              placeholder="선택 입력"
+              placeholder="예: 홍길동"
               editable={storeVerificationStatus !== 'approved'}
+            />
+
+            <Text style={styles.label}>영업시간</Text>
+            <TextInput
+              style={styles.input}
+              value={businessHours}
+              onChangeText={setBusinessHours}
+              placeholder="예: 평일 09:00~18:00 / 토요일 예약제"
+            />
+
+            <Text style={styles.label}>가게 소개</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={storeIntro}
+              onChangeText={setStoreIntro}
+              placeholder="가게 소개, 취급 자재, 배송 가능 지역 등을 입력해 주세요."
+              multiline
+              textAlignVertical="top"
             />
 
             <Text style={styles.label}>가게 주소</Text>
@@ -1122,6 +1165,7 @@ const styles = StyleSheet.create({
     borderColor: '#2563eb',
   },
 
+
   typeText: { fontWeight: '700', color: '#374151' },
   typeTextActive: { color: '#fff' },
 
@@ -1130,6 +1174,10 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
     borderRadius: 14,
     padding: 14,
+  },
+
+  textArea: {
+    minHeight: 110,
   },
 
   switchRow: {
