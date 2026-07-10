@@ -13,9 +13,17 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getStoreCategoryLabel } from '../lib/storeCategories';
 import { supabase } from '../lib/supabase';
 
-type AdminTab = 'overview' | 'notices' | 'reports' | 'users' | 'listings' | 'stores';
+type AdminTab =
+  | 'overview'
+  | 'notices'
+  | 'reports'
+  | 'users'
+  | 'listings'
+  | 'stores'
+  | 'estimates';
 
 type AdminViewMode = 'grid' | 'list';
 type DateFilter = 'all' | 'today' | '7days' | '30days';
@@ -117,6 +125,28 @@ type StoreVerificationRequest = {
         email: string | null;
       }[]
     | null;
+};
+
+type AdminEstimateRequest = {
+  id: number;
+  user_id: string | null;
+  category: string;
+  region: string | null;
+  address: string | null;
+  title: string;
+  status: string | null;
+  routing_status: string | null;
+  fallback_destination: string | null;
+  preferred_store_user_id: string | null;
+  assigned_store_user_id: string | null;
+  created_at: string;
+};
+
+type VerifiedStoreOption = {
+  id: string;
+  display_name: string | null;
+  store_category: string | null;
+  store_address: string | null;
 };
 
 const RESTRICTION_OPTIONS: { value: RestrictionOption; label: string }[] = [
@@ -271,6 +301,8 @@ export default function AdminScreen() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [listings, setListings] = useState<AdminListing[]>([]);
   const [storeRequests, setStoreRequests] = useState<StoreVerificationRequest[]>([]);
+  const [estimateRequests, setEstimateRequests] = useState<AdminEstimateRequest[]>([]);
+  const [verifiedStores, setVerifiedStores] = useState<VerifiedStoreOption[]>([]);
 
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
@@ -358,7 +390,15 @@ const goToListingDetail = (listingId: number) => {
       refreshExpiredUserRestrictions(),
     ]);
 
-    const [noticeResult, reportResult, userResult, listingResult, storeRequestResult] = await Promise.all([
+    const [
+      noticeResult,
+      reportResult,
+      userResult,
+      listingResult,
+      storeRequestResult,
+      estimateRequestResult,
+      verifiedStoreResult,
+    ] = await Promise.all([
       supabase
         .from('notices')
         .select('id, title, content, is_published, created_at')
@@ -423,6 +463,20 @@ const goToListingDetail = (listingId: number) => {
         )
         .order('created_at', { ascending: false })
         .limit(100),
+      supabase
+        .from('estimate_requests')
+        .select(
+          'id, user_id, category, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
+        )
+        .order('created_at', { ascending: false })
+        .limit(80),
+      supabase
+        .from('profiles')
+        .select('id, display_name, store_category, store_address')
+        .eq('user_type', 'store')
+        .eq('business_verified', true)
+        .order('display_name', { ascending: true })
+        .limit(80),
     ]);
 
     if (noticeResult.error) throw noticeResult.error;
@@ -432,6 +486,10 @@ const goToListingDetail = (listingId: number) => {
     if (storeRequestResult.error && storeRequestResult.error.code !== 'PGRST205') {
       throw storeRequestResult.error;
     }
+    if (estimateRequestResult.error && estimateRequestResult.error.code !== 'PGRST205') {
+      throw estimateRequestResult.error;
+    }
+    if (verifiedStoreResult.error) throw verifiedStoreResult.error;
 
     setNotices((noticeResult.data || []) as NoticeItem[]);
     setReports((reportResult.data || []) as ReportItem[]);
@@ -442,6 +500,12 @@ const goToListingDetail = (listingId: number) => {
         ? []
         : ((storeRequestResult.data || []) as StoreVerificationRequest[])
     );
+    setEstimateRequests(
+      estimateRequestResult.error
+        ? []
+        : ((estimateRequestResult.data || []) as AdminEstimateRequest[])
+    );
+    setVerifiedStores((verifiedStoreResult.data || []) as VerifiedStoreOption[]);
   }, [refreshExpiredUserRestrictions, runExpiredListingCleanup]);
 
   const loadAdmin = useCallback(async () => {
@@ -795,6 +859,38 @@ const goToListingDetail = (listingId: number) => {
     await loadAdminData();
   };
 
+  const assignEstimateRequest = async (
+    item: AdminEstimateRequest,
+    storeId: string | null
+  ) => {
+    const targetStore = verifiedStores.find((store) => store.id === storeId);
+    const ok = await confirmAdminAction(
+      storeId ? '견적문의 가게 배정' : '견적문의 배정 해제',
+      storeId
+        ? `"${item.title}" 문의를 "${targetStore?.display_name || storeId}" 가게에 배정할까요?`
+        : `"${item.title}" 문의를 관리자 배정 대기로 되돌릴까요?`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase
+      .from('estimate_requests')
+      .update({
+        assigned_store_user_id: storeId,
+        routing_status: storeId ? 'admin_assigned' : 'admin_pending',
+        fallback_destination: storeId ? 'selected_store' : 'designwish',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', item.id);
+
+    if (error) {
+      showAdminAlert('견적문의 배정 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
   const reportReasons = useMemo(() => {
   return Array.from(new Set(reports.map((item) => item.reason).filter(Boolean)));
 }, [reports]);
@@ -881,6 +977,10 @@ const filteredStoreRequests = useMemo(() => {
     { label: '공지', value: notices.length },
     { label: '신고', value: reports.filter((item) => item.status !== 'reviewed').length },
     { label: '가게인증', value: storeRequests.filter((item) => item.status === 'pending').length },
+    {
+      label: '견적문의',
+      value: estimateRequests.filter((item) => !item.assigned_store_user_id).length,
+    },
     { label: '사용자', value: users.length },
     { label: '게시글', value: listings.length },
   ];
@@ -925,6 +1025,7 @@ const filteredStoreRequests = useMemo(() => {
             ['notices', '공지'],
             ['reports', '신고'],
             ['stores', '가게인증'],
+            ['estimates', '견적'],
             ['users', '사용자'],
             ['listings', '게시글'],
           ].map(([key, label]) => (
@@ -1197,6 +1298,66 @@ const filteredStoreRequests = useMemo(() => {
         ) : null}
       </View>
     ))}
+  </View>
+) : null}
+
+        {activeTab === 'estimates' ? (
+  <View>
+    <View style={styles.toolCard}>
+      <Text style={styles.toolTitle}>견적문의 {estimateRequests.length}건</Text>
+      <Text style={styles.desc}>
+        가게 미선택 문의는 디자인위쇼 접수 상태이며, 아래에서 인증 가게로 배정할 수 있습니다.
+      </Text>
+    </View>
+
+    {estimateRequests.map((item) => {
+      const assignedStoreId = item.assigned_store_user_id || item.preferred_store_user_id;
+      const assignedStore = verifiedStores.find((store) => store.id === assignedStoreId);
+
+      return (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{item.title}</Text>
+          <Text style={styles.desc}>
+            #{item.id} · {item.category} · {new Date(item.created_at).toLocaleString()}
+          </Text>
+          <Text style={styles.metaText}>지역: {[item.region, item.address].filter(Boolean).join(' ') || '-'}</Text>
+          <Text style={styles.metaText}>문의자: {item.user_id || '-'}</Text>
+          <Text style={styles.metaText}>
+            배정 상태: {assignedStore ? assignedStore.display_name || assignedStore.id : '관리자 배정 대기 / 디자인위쇼'}
+          </Text>
+          <Text style={styles.metaText}>
+            라우팅: {item.routing_status || 'admin_pending'} · {item.fallback_destination || 'designwish'}
+          </Text>
+
+          {assignedStore ? (
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => assignEstimateRequest(item, null)}
+            >
+              <Text style={styles.secondaryText}>배정 해제</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+            {verifiedStores.map((store) => {
+              const selected = assignedStoreId === store.id;
+
+              return (
+                <TouchableOpacity
+                  key={store.id}
+                  style={[styles.filterChip, selected && styles.filterChipActive]}
+                  onPress={() => assignEstimateRequest(item, store.id)}
+                >
+                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
+                    {store.display_name || '인증 가게'} · {getStoreCategoryLabel(store.store_category)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      );
+    })}
   </View>
 ) : null}
 

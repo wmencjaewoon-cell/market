@@ -1,8 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { decode } from 'base64-arraybuffer';
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
+  Image,
   Platform,
   ScrollView,
   StyleSheet,
@@ -68,11 +72,15 @@ export default function ReviewCreateScreen() {
   const roomId = Array.isArray(params.roomId) ? params.roomId[0] : params.roomId;
 
   const [loading, setLoading] = useState(false);
+  const [targetProfile, setTargetProfile] = useState<any | null>(null);
   const [sentiment, setSentiment] = useState<ReviewSentiment>('positive');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [comment, setComment] = useState('');
+  const [imageUris, setImageUris] = useState<string[]>([]);
 
   const activeTags = sentiment === 'positive' ? positiveTags : negativeTags;
+  const isStoreReview =
+    targetProfile?.user_type === 'store' && !!targetProfile?.business_verified;
   const pointPreview =
     (sentiment === 'positive' ? POSITIVE_REVIEW_POINTS : 0) +
     (selectedTags.includes('fast_response') ? FAST_RESPONSE_POINTS : 0) +
@@ -101,6 +109,95 @@ export default function ReviewCreateScreen() {
     }
 
     Alert.alert(title, message);
+  };
+
+  useEffect(() => {
+    const loadTargetProfile = async () => {
+      if (!targetUserId) return;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, user_type, business_verified')
+        .eq('id', targetUserId)
+        .maybeSingle();
+
+      if (error) {
+        console.log('후기 대상 프로필 조회 실패:', error);
+        return;
+      }
+
+      setTargetProfile(data || null);
+    };
+
+    void loadTargetProfile();
+  }, [targetUserId]);
+
+  const pickReviewImages = async () => {
+    const remain = 5 - imageUris.length;
+    if (remain <= 0) {
+      showAlert('사진 첨부', '가게 후기는 사진을 최대 5장까지 첨부할 수 있습니다.');
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      showAlert('사진 권한 필요', '후기 사진을 첨부하려면 사진 접근 권한이 필요합니다.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsMultipleSelection: true,
+      selectionLimit: remain,
+      quality: 0.8,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+
+    if (!result.canceled && result.assets?.length > 0) {
+      setImageUris((prev) => [
+        ...prev,
+        ...result.assets.map((asset) => asset.uri),
+      ].slice(0, 5));
+    }
+  };
+
+  const uploadReviewImage = async (
+    reviewId: string,
+    reviewerId: string,
+    uri: string,
+    sortOrder: number
+  ) => {
+    const filePath = `${reviewerId}/${reviewId}/${Date.now()}-${sortOrder}.jpg`;
+    let uploadData: Blob | ArrayBuffer;
+
+    if (Platform.OS === 'web') {
+      const response = await fetch(uri);
+      uploadData = await response.blob();
+    } else {
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: 'base64',
+      });
+      uploadData = decode(base64);
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from('review-images')
+      .upload(filePath, uploadData, {
+        contentType: 'image/jpeg',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { error: rowError } = await supabase.from('review_images').insert({
+      review_id: reviewId,
+      image_path: filePath,
+      sort_order: sortOrder,
+    });
+
+    if (rowError) throw rowError;
   };
 
   const selectSentiment = (nextSentiment: ReviewSentiment) => {
@@ -234,6 +331,12 @@ export default function ReviewCreateScreen() {
         return;
       }
 
+      if (isStoreReview && createdReview?.id && imageUris.length > 0) {
+        for (let i = 0; i < imageUris.length; i += 1) {
+          await uploadReviewImage(String(createdReview.id), me, imageUris[i], i);
+        }
+      }
+
       try {
         const { error: notificationError } = await supabase.functions.invoke(
           'send-review-notification',
@@ -337,6 +440,43 @@ export default function ReviewCreateScreen() {
           maxLength={120}
         />
       </View>
+
+      {isStoreReview ? (
+        <View style={styles.section}>
+          <View style={styles.photoHeader}>
+            <Text style={styles.sectionTitle}>가게 후기 사진</Text>
+            <TouchableOpacity style={styles.photoAddBtn} onPress={pickReviewImages}>
+              <Ionicons name="image-outline" size={16} color="#2563eb" />
+              <Text style={styles.photoAddText}>추가</Text>
+            </TouchableOpacity>
+          </View>
+          {imageUris.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.photoRow}
+            >
+              {imageUris.map((uri, index) => (
+                <View key={`${uri}-${index}`} style={styles.photoPreviewBox}>
+                  <Image source={{ uri }} style={styles.photoPreview} />
+                  <TouchableOpacity
+                    style={styles.removePhotoBtn}
+                    onPress={() =>
+                      setImageUris((prev) => prev.filter((_, itemIndex) => itemIndex !== index))
+                    }
+                  >
+                    <Ionicons name="close" size={13} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          ) : (
+            <Text style={styles.photoHelp}>
+              시공 결과나 자재 상태 사진을 첨부하면 가게 프로필 후기에서 함께 보입니다.
+            </Text>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.pointBox}>
         <Text style={styles.pointLabel}>이번 후기 점수</Text>
@@ -470,6 +610,43 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  photoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  photoAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  photoAddText: { color: '#2563eb', fontSize: 13, fontWeight: '900' },
+  photoRow: { gap: 10 },
+  photoPreviewBox: {
+    width: 88,
+    height: 88,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f3f4f6',
+  },
+  photoPreview: { width: '100%', height: '100%' },
+  removePhotoBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(17,24,39,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoHelp: { color: '#6b7280', fontSize: 13, lineHeight: 19, fontWeight: '700' },
   pointBox: {
     marginTop: 24,
     borderRadius: 12,

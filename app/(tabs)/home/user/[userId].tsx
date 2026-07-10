@@ -24,6 +24,7 @@ import {
   getSellerLevelTitle,
   getSellerPoints,
 } from '../../../../lib/sellerLevel';
+import { getStoreCategoryLabel } from '../../../../lib/storeCategories';
 import { supabase } from '../../../../lib/supabase';
 
 type ListingFilter = 'all' | 'selling' | 'done';
@@ -314,6 +315,12 @@ export default function UserProfileScreen() {
           <Text style={styles.verifiedText}>가게인증완료</Text>
         ) : null}
 
+        {isVerifiedStore ? (
+          <Text style={styles.storeCategoryText}>
+            {getStoreCategoryLabel(profile?.store_category)}
+          </Text>
+        ) : null}
+
         {showSellerLevel ? (
           <View style={styles.levelBox}>
             <Text style={[styles.levelText, { color: sellerLevelStyle.textColor }]}>
@@ -553,6 +560,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f3f4f6',
     backgroundColor: '#f9fafb',
+  },
+  storeCategoryText: {
+    marginTop: 8,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    color: '#1d4ed8',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 12,
+    fontWeight: '900',
   },
   avatar: {
     width: 72,

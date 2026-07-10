@@ -3,7 +3,7 @@ import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -16,7 +16,9 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getProfileImageUrl } from '../../lib/profileImage';
 import { fetchMyRegionSettings, fetchMyRegions } from '../../lib/region';
+import { getStoreCategoryLabel, STORE_CATEGORY_OPTIONS } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
 
 const ESTIMATE_CATEGORIES = [
@@ -64,6 +66,9 @@ export default function EstimateCreateScreen() {
   const [preferredContact, setPreferredContact] = useState('앱 채팅');
   const [description, setDescription] = useState('');
   const [imageUris, setImageUris] = useState<string[]>([]);
+  const [stores, setStores] = useState<any[]>([]);
+  const [selectedStoreCategory, setSelectedStoreCategory] = useState('전체');
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -82,7 +87,49 @@ export default function EstimateCreateScreen() {
     };
 
     void loadDefaultRegion();
+    void loadStores();
   }, []);
+
+  const loadStores = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        display_name,
+        avatar_path,
+        avatar_url,
+        store_category,
+        store_address,
+        store_intro,
+        store_accepts_inquiries,
+        business_verified,
+        user_type
+      `)
+      .eq('user_type', 'store')
+      .eq('business_verified', true)
+      .neq('store_accepts_inquiries', false)
+      .order('display_name', { ascending: true })
+      .limit(50);
+
+    if (error) {
+      console.log('견적문의 가게 목록 조회 실패:', error);
+      setStores([]);
+      return;
+    }
+
+    setStores(data || []);
+  };
+
+  const filteredStores = useMemo(() => {
+    return stores.filter((store) => {
+      const categoryLabel = getStoreCategoryLabel(store.store_category);
+      if (selectedStoreCategory === '전체') return true;
+      if (selectedStoreCategory === '기타') {
+        return categoryLabel === '기타' || !STORE_CATEGORY_OPTIONS.includes(categoryLabel);
+      }
+      return categoryLabel === selectedStoreCategory;
+    });
+  }, [selectedStoreCategory, stores]);
 
   const pickImages = async () => {
     const remain = 6 - imageUris.length;
@@ -182,6 +229,10 @@ export default function EstimateCreateScreen() {
           budget: budget.trim() || null,
           desired_date: desiredDate.trim() || null,
           preferred_contact: preferredContact.trim() || null,
+          preferred_store_user_id: selectedStoreId,
+          assigned_store_user_id: selectedStoreId,
+          routing_status: selectedStoreId ? 'store_selected' : 'admin_pending',
+          fallback_destination: selectedStoreId ? 'selected_store' : 'designwish',
           title: trimmedTitle,
           description: trimmedDescription,
           status: 'open',
@@ -204,7 +255,12 @@ export default function EstimateCreateScreen() {
         await uploadEstimateImage(requestId, imageUris[i], i);
       }
 
-      showAlert('견적문의 등록 완료', '등록된 문의는 인증 가게가 확인할 수 있습니다.');
+      showAlert(
+        '견적문의 등록 완료',
+        selectedStoreId
+          ? '선택한 가게에 견적문의가 전달됩니다.'
+          : '선택한 가게가 없어 관리자 배정 또는 디자인위쇼 문의로 접수됩니다.'
+      );
       router.replace('/(tabs)/home' as any);
     } catch (error: any) {
       console.log('견적문의 등록 실패:', error);
@@ -236,6 +292,96 @@ export default function EstimateCreateScreen() {
             </TouchableOpacity>
           );
         })}
+      </View>
+
+      <View style={styles.storeSelectSection}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>상담 받을 가게 선택</Text>
+          {selectedStoreId ? (
+            <TouchableOpacity onPress={() => setSelectedStoreId(null)}>
+              <Text style={styles.clearStoreText}>선택 해제</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Text style={styles.storeSelectHelp}>
+          원하는 가게를 선택하지 않으면 관리자가 배정하거나 디자인위쇼로 문의가 전달됩니다.
+        </Text>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.storeCategoryRow}
+        >
+          {STORE_CATEGORY_OPTIONS.map((item) => {
+            const active = selectedStoreCategory === item;
+
+            return (
+              <TouchableOpacity
+                key={item}
+                style={[styles.storeCategoryChip, active && styles.storeCategoryChipActive]}
+                onPress={() => setSelectedStoreCategory(item)}
+              >
+                <Text
+                  style={[
+                    styles.storeCategoryText,
+                    active && styles.storeCategoryTextActive,
+                  ]}
+                >
+                  {item}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {filteredStores.length === 0 ? (
+          <Text style={styles.storeEmptyText}>선택할 수 있는 가게가 없습니다.</Text>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.storeCardRow}
+          >
+            {filteredStores.map((store) => {
+              const active = selectedStoreId === store.id;
+              const avatarUrl =
+                store.avatar_path || store.avatar_url
+                  ? getProfileImageUrl(store.avatar_path || store.avatar_url)
+                  : null;
+
+              return (
+                <TouchableOpacity
+                  key={store.id}
+                  style={[styles.storeCard, active && styles.storeCardActive]}
+                  onPress={() => setSelectedStoreId(active ? null : store.id)}
+                >
+                  <View style={styles.storeAvatar}>
+                    {avatarUrl ? (
+                      <Image source={{ uri: avatarUrl }} style={styles.storeAvatarImage} />
+                    ) : (
+                      <Ionicons name="storefront-outline" size={24} color="#6b7280" />
+                    )}
+                  </View>
+                  <Text style={styles.storeName} numberOfLines={1}>
+                    {store.display_name || '인증 가게'}
+                  </Text>
+                  <Text style={styles.storeCategoryLabel} numberOfLines={1}>
+                    {getStoreCategoryLabel(store.store_category)}
+                  </Text>
+                  <Text style={styles.storeAddress} numberOfLines={2}>
+                    {store.store_address || '주소 미등록'}
+                  </Text>
+                  {active ? (
+                    <View style={styles.selectedBadge}>
+                      <Ionicons name="checkmark" size={13} color="#fff" />
+                      <Text style={styles.selectedBadgeText}>선택됨</Text>
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
       </View>
 
       <View style={styles.formSection}>
@@ -363,6 +509,94 @@ const styles = StyleSheet.create({
   },
   categoryText: { color: '#374151', fontSize: 13, fontWeight: '800' },
   categoryTextActive: { color: '#fff' },
+  storeSelectSection: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    padding: 14,
+    gap: 10,
+  },
+  storeSelectHelp: {
+    color: '#6b7280',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+  clearStoreText: {
+    color: '#2563eb',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  storeCategoryRow: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  storeCategoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  storeCategoryChipActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  storeCategoryText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  storeCategoryTextActive: {
+    color: '#1d4ed8',
+  },
+  storeEmptyText: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  storeCardRow: {
+    gap: 10,
+    paddingRight: 4,
+  },
+  storeCard: {
+    width: 172,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    padding: 12,
+    gap: 6,
+  },
+  storeCardActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  storeAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  storeAvatarImage: { width: '100%', height: '100%' },
+  storeName: { color: '#111827', fontSize: 14, fontWeight: '900' },
+  storeCategoryLabel: { color: '#2563eb', fontSize: 12, fontWeight: '900' },
+  storeAddress: { color: '#6b7280', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  selectedBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  selectedBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
   formSection: { gap: 10 },
   label: { color: '#111827', fontSize: 14, fontWeight: '900' },
   input: {

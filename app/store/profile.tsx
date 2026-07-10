@@ -11,11 +11,14 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { STORE_CATEGORY_SELECT_OPTIONS } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreProfileScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any | null>(null);
+  const [storeCategory, setStoreCategory] = useState('');
+  const [customStoreCategory, setCustomStoreCategory] = useState('');
   const [intro, setIntro] = useState('');
   const [notice, setNotice] = useState('');
   const [businessHours, setBusinessHours] = useState('');
@@ -42,6 +45,14 @@ export default function StoreProfileScreen() {
     }
 
     setProfile(data || null);
+    const savedCategory = data?.store_category || '';
+    if (savedCategory && !STORE_CATEGORY_SELECT_OPTIONS.includes(savedCategory)) {
+      setStoreCategory('기타');
+      setCustomStoreCategory(savedCategory);
+    } else {
+      setStoreCategory(savedCategory);
+      setCustomStoreCategory('');
+    }
     setIntro(data?.store_intro || '');
     setNotice(data?.store_notice || '');
     setBusinessHours(data?.store_business_hours || '');
@@ -62,10 +73,13 @@ export default function StoreProfileScreen() {
     try {
       setSaving(true);
       setMessage('');
+      const finalStoreCategory =
+        storeCategory === '기타' ? customStoreCategory.trim() : storeCategory.trim();
 
       const { error } = await supabase
         .from('profiles')
         .update({
+          store_category: finalStoreCategory || null,
           store_intro: intro.trim() || null,
           store_notice: notice.trim() || null,
           store_business_hours: businessHours.trim() || null,
@@ -107,9 +121,48 @@ export default function StoreProfileScreen() {
         <>
           <View style={styles.storeSummary}>
             <Text style={styles.storeName}>{profile?.display_name || '가게'}</Text>
+            <Text style={styles.storeCategory}>
+              {storeCategory === '기타'
+                ? customStoreCategory.trim() || '업종 미등록'
+                : storeCategory || '업종 미등록'}
+            </Text>
             <Text style={styles.storeMeta}>{profile?.store_address || '등록된 주소 없음'}</Text>
             <Text style={styles.storeMeta}>{profile?.phone || '등록된 전화번호 없음'}</Text>
           </View>
+
+          <Text style={styles.label}>가게 종류</Text>
+          <View style={styles.categoryWrap}>
+            {STORE_CATEGORY_SELECT_OPTIONS.map((item) => {
+              const active = storeCategory === item;
+
+              return (
+                <TouchableOpacity
+                  key={item}
+                  style={[styles.categoryChip, active && styles.categoryChipActive]}
+                  onPress={() => setStoreCategory(item)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      active && styles.categoryChipTextActive,
+                    ]}
+                  >
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {storeCategory === '기타' ? (
+            <TextInput
+              style={styles.input}
+              value={customStoreCategory}
+              onChangeText={setCustomStoreCategory}
+              placeholder="가게 종류를 직접 입력해 주세요."
+              maxLength={20}
+            />
+          ) : null}
 
           <Text style={styles.label}>가게 소개</Text>
           <TextInput
@@ -202,8 +255,44 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   storeName: { color: '#111827', fontSize: 18, fontWeight: '900' },
+  storeCategory: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    color: '#1d4ed8',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    fontSize: 12,
+    fontWeight: '900',
+  },
   storeMeta: { color: '#6b7280', fontSize: 13, fontWeight: '700', lineHeight: 19 },
   label: { color: '#111827', fontSize: 15, fontWeight: '900' },
+  categoryWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  categoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  categoryChipActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  categoryChipText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  categoryChipTextActive: {
+    color: '#1d4ed8',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#e5e7eb',

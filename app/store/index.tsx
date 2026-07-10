@@ -12,11 +12,13 @@ import {
   View,
 } from 'react-native';
 import { getProfileImageUrl } from '../../lib/profileImage';
+import { STORE_CATEGORY_OPTIONS, getStoreCategoryLabel } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreListScreen() {
   const [stores, setStores] = useState<any[]>([]);
   const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('전체');
   const [refreshing, setRefreshing] = useState(false);
 
   const loadStores = async () => {
@@ -28,6 +30,7 @@ export default function StoreListScreen() {
         avatar_path,
         avatar_url,
         phone,
+        store_category,
         store_address,
         store_intro,
         store_notice,
@@ -65,11 +68,23 @@ export default function StoreListScreen() {
 
   const filteredStores = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return stores;
 
     return stores.filter((store) => {
+      const categoryLabel = getStoreCategoryLabel(store.store_category);
+
+      if (selectedCategory === '기타') {
+        if (categoryLabel !== '기타' && STORE_CATEGORY_OPTIONS.includes(categoryLabel)) {
+          return false;
+        }
+      } else if (selectedCategory !== '전체' && categoryLabel !== selectedCategory) {
+        return false;
+      }
+
+      if (!keyword) return true;
+
       const searchableText = [
         store.display_name,
+        store.store_category,
         store.store_address,
         store.store_intro,
         store.store_notice,
@@ -81,7 +96,7 @@ export default function StoreListScreen() {
 
       return searchableText.includes(keyword);
     });
-  }, [search, stores]);
+  }, [search, selectedCategory, stores]);
 
   return (
     <ScrollView
@@ -105,6 +120,33 @@ export default function StoreListScreen() {
           placeholderTextColor="#9ca3af"
         />
       </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.categoryRow}
+      >
+        {STORE_CATEGORY_OPTIONS.map((item) => {
+          const active = selectedCategory === item;
+
+          return (
+            <TouchableOpacity
+              key={item}
+              style={[styles.categoryChip, active && styles.categoryChipActive]}
+              onPress={() => setSelectedCategory(item)}
+            >
+              <Text
+                style={[
+                  styles.categoryChipText,
+                  active && styles.categoryChipTextActive,
+                ]}
+              >
+                {item}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
       {filteredStores.length === 0 ? (
         <View style={styles.emptyBox}>
@@ -142,6 +184,10 @@ export default function StoreListScreen() {
 
                 <Text style={styles.meta} numberOfLines={1}>
                   {store.store_address || '주소 미등록'}
+                </Text>
+
+                <Text style={styles.categoryText} numberOfLines={1}>
+                  {getStoreCategoryLabel(store.store_category)}
                 </Text>
 
                 {store.store_intro ? (
@@ -184,6 +230,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   searchInput: { flex: 1, color: '#111827', fontSize: 15, paddingVertical: 0 },
+  categoryRow: {
+    gap: 8,
+    paddingRight: 4,
+  },
+  categoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  categoryChipActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  categoryChipText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  categoryChipTextActive: {
+    color: '#1d4ed8',
+  },
   card: {
     flexDirection: 'row',
     gap: 12,
@@ -217,6 +287,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   meta: { marginTop: 4, color: '#6b7280', fontSize: 12, fontWeight: '700' },
+  categoryText: {
+    marginTop: 4,
+    color: '#1d4ed8',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   intro: { marginTop: 6, color: '#374151', fontSize: 13, lineHeight: 18 },
   badgeRow: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   badge: {
