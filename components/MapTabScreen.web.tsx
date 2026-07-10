@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -36,12 +37,34 @@ type ListingMapItem = {
   }[];
 };
 
+type StoreMapItem = {
+  id: string;
+  display_name: string | null;
+  store_address: string | null;
+  store_intro: string | null;
+  store_today_available: boolean | null;
+  store_card_available: boolean | null;
+  store_cash_receipt_available: boolean | null;
+  store_tax_invoice_available: boolean | null;
+  store_latitude: number;
+  store_longitude: number;
+};
+
 type GroupedMarker = {
   key: string;
   latitude: number;
   longitude: number;
   items: ListingMapItem[];
 };
+
+type StoreGroupedMarker = {
+  key: string;
+  latitude: number;
+  longitude: number;
+  items: StoreMapItem[];
+};
+
+type MapLayer = 'listings' | 'stores';
 
 const KAKAO_KEY = process.env.EXPO_PUBLIC_KAKAO_JAVASCRIPT_KEY;
 
@@ -56,16 +79,22 @@ export default function MapTabScreen() {
   const markersRef = useRef<any[]>([]);
 
   const [items, setItems] = useState<ListingMapItem[]>([]);
+  const [stores, setStores] = useState<StoreMapItem[]>([]);
+  const [activeLayer, setActiveLayer] = useState<MapLayer>('listings');
   const [search, setSearch] = useState('');
   const [searchBlockedMessage, setSearchBlockedMessage] = useState('');
   const [selectedItem, setSelectedItem] = useState<ListingMapItem | null>(null);
+  const [selectedStore, setSelectedStore] = useState<StoreMapItem | null>(null);
   const [selectedGroup, setSelectedGroup] = useState<ListingMapItem[]>([]);
+  const [selectedStoreGroup, setSelectedStoreGroup] = useState<StoreMapItem[]>([]);
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [storeGroupModalOpen, setStoreGroupModalOpen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState('');
 
   useEffect(() => {
     fetchListings();
+    fetchStores();
   }, []);
 
   useEffect(() => {
@@ -75,7 +104,7 @@ export default function MapTabScreen() {
   useEffect(() => {
     if (!window.kakao || !mapInstanceRef.current || !mapReady) return;
     renderMarkers();
-  }, [items, search, mapReady]);
+  }, [items, stores, search, activeLayer, mapReady]);
 
   const fetchListings = async () => {
     const { data, error } = await supabase
@@ -113,11 +142,43 @@ export default function MapTabScreen() {
     setItems(mapped as ListingMapItem[]);
   };
 
+  const fetchStores = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        display_name,
+        store_address,
+        store_intro,
+        store_today_available,
+        store_card_available,
+        store_cash_receipt_available,
+        store_tax_invoice_available,
+        store_latitude,
+        store_longitude
+      `)
+      .eq('user_type', 'store')
+      .eq('business_verified', true)
+      .not('store_latitude', 'is', null)
+      .not('store_longitude', 'is', null);
+
+    if (error) {
+      console.log('웹 지도 가게 조회 실패:', error);
+      return;
+    }
+
+    setStores(data as StoreMapItem[]);
+  };
+
   useTabRefresh('map', () => {
     setSelectedItem(null);
+    setSelectedStore(null);
     setSelectedGroup([]);
+    setSelectedStoreGroup([]);
     setGroupModalOpen(false);
+    setStoreGroupModalOpen(false);
     void fetchListings();
+    void fetchStores();
   });
 
   const filteredItems = useMemo(() => {
@@ -132,6 +193,19 @@ export default function MapTabScreen() {
       );
     });
   }, [items, search]);
+
+  const filteredStores = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return stores;
+
+    return stores.filter((store) => {
+      return (
+        store.display_name?.toLowerCase().includes(keyword) ||
+        store.store_address?.toLowerCase().includes(keyword) ||
+        store.store_intro?.toLowerCase().includes(keyword)
+      );
+    });
+  }, [search, stores]);
 
   const groupedMarkers = useMemo<GroupedMarker[]>(() => {
     const grouped = new Map<string, ListingMapItem[]>();
@@ -153,6 +227,27 @@ export default function MapTabScreen() {
       items: bucket,
     }));
   }, [filteredItems]);
+
+  const groupedStoreMarkers = useMemo<StoreGroupedMarker[]>(() => {
+    const grouped = new Map<string, StoreMapItem[]>();
+
+    filteredStores.forEach((store) => {
+      const lat = roundCoord(store.store_latitude, 3);
+      const lng = roundCoord(store.store_longitude, 3);
+      const key = `${lat},${lng}`;
+
+      const bucket = grouped.get(key) || [];
+      bucket.push(store);
+      grouped.set(key, bucket);
+    });
+
+    return Array.from(grouped.entries()).map(([key, bucket]) => ({
+      key,
+      latitude: bucket[0].store_latitude,
+      longitude: bucket[0].store_longitude,
+      items: bucket,
+    }));
+  }, [filteredStores]);
 
   const loadKakaoMap = () => {
     if (!KAKAO_KEY) {
@@ -232,14 +327,36 @@ export default function MapTabScreen() {
     setGroupModalOpen(true);
   };
 
+  const handleStoreMarkerClick = (group: StoreGroupedMarker) => {
+    if (group.items.length === 1) {
+      setSelectedGroup([]);
+      setSelectedStoreGroup([]);
+      setGroupModalOpen(false);
+      setStoreGroupModalOpen(false);
+      setSelectedItem(null);
+      setSelectedStore(group.items[0]);
+      return;
+    }
+
+    setSelectedItem(null);
+    setSelectedStore(null);
+    setSelectedGroup([]);
+    setGroupModalOpen(false);
+    setSelectedStoreGroup(group.items);
+    setStoreGroupModalOpen(true);
+  };
+
   const handleSearchChange = (value: string) => {
     const blockedKeyword = checkProhibitedContent(value);
 
     if (blockedKeyword) {
       setSearch('');
       setSelectedItem(null);
+      setSelectedStore(null);
       setSelectedGroup([]);
+      setSelectedStoreGroup([]);
       setGroupModalOpen(false);
+      setStoreGroupModalOpen(false);
       setSearchBlockedMessage(`"${blockedKeyword}" 관련 판매금지 물품은 검색할 수 없습니다.`);
       return;
     }
@@ -257,52 +374,99 @@ export default function MapTabScreen() {
 
     const bounds = new window.kakao.maps.LatLngBounds();
 
-    groupedMarkers.forEach((group) => {
-      const first = group.items[0];
-      const color = group.items.length === 1 ? getCategoryColor(first.category) : '#111827';
+    if (activeLayer === 'listings') {
+      groupedMarkers.forEach((group) => {
+        const first = group.items[0];
+        const color = group.items.length === 1 ? getCategoryColor(first.category) : '#111827';
 
-      const markerPosition = new window.kakao.maps.LatLng(group.latitude, group.longitude);
+        const markerPosition = new window.kakao.maps.LatLng(group.latitude, group.longitude);
 
-      const content = `
-        <div style="
-          min-width:44px;
-          height:44px;
-          padding:0 10px;
-          border-radius:22px;
-          background:${color};
-          border:2px solid #ffffff;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          color:#ffffff;
-          font-size:12px;
-          font-weight:800;
-          box-sizing:border-box;
-          box-shadow:0 2px 8px rgba(0,0,0,0.15);
-        ">
-          ${group.items.length === 1 ? getCategoryLabel(first.category) : group.items.length}
-        </div>
-      `;
+        const content = `
+          <div style="
+            min-width:44px;
+            height:44px;
+            padding:0 10px;
+            border-radius:22px;
+            background:${color};
+            border:2px solid #ffffff;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#ffffff;
+            font-size:12px;
+            font-weight:800;
+            box-sizing:border-box;
+            box-shadow:0 2px 8px rgba(0,0,0,0.15);
+          ">
+            ${group.items.length === 1 ? getCategoryLabel(first.category) : group.items.length}
+          </div>
+        `;
 
-      const marker = new window.kakao.maps.CustomOverlay({
-        position: markerPosition,
-        content,
-        yAnchor: 1,
+        const marker = new window.kakao.maps.CustomOverlay({
+          position: markerPosition,
+          content,
+          yAnchor: 1,
+        });
+
+        marker.setMap(map);
+
+        const el = marker.a;
+        if (el) {
+          el.style.cursor = 'pointer';
+          el.onclick = () => handleMarkerClick(group);
+        }
+
+        markersRef.current.push(marker);
+        bounds.extend(markerPosition);
       });
+    } else {
+      groupedStoreMarkers.forEach((group) => {
+        const markerPosition = new window.kakao.maps.LatLng(group.latitude, group.longitude);
 
-      marker.setMap(map);
+        const content = `
+          <div style="
+            min-width:44px;
+            height:44px;
+            padding:0 10px;
+            border-radius:22px;
+            background:#059669;
+            border:2px solid #ffffff;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#ffffff;
+            font-size:12px;
+            font-weight:800;
+            box-sizing:border-box;
+            box-shadow:0 2px 8px rgba(0,0,0,0.15);
+          ">
+            ${group.items.length === 1 ? '가게' : group.items.length}
+          </div>
+        `;
 
-      const el = marker.a;
-      if (el) {
-        el.style.cursor = 'pointer';
-        el.onclick = () => handleMarkerClick(group);
-      }
+        const marker = new window.kakao.maps.CustomOverlay({
+          position: markerPosition,
+          content,
+          yAnchor: 1,
+        });
 
-      markersRef.current.push(marker);
-      bounds.extend(markerPosition);
-    });
+        marker.setMap(map);
 
-    if (groupedMarkers.length > 0) {
+        const el = marker.a;
+        if (el) {
+          el.style.cursor = 'pointer';
+          el.onclick = () => handleStoreMarkerClick(group);
+        }
+
+        markersRef.current.push(marker);
+        bounds.extend(markerPosition);
+      });
+    }
+
+    if (
+      (activeLayer === 'listings' && groupedMarkers.length > 0) ||
+      (activeLayer === 'stores' && groupedStoreMarkers.length > 0)
+    ) {
       map.setBounds(bounds);
     }
   };
@@ -326,13 +490,41 @@ export default function MapTabScreen() {
       <View style={styles.searchBox}>
         <TextInput
           style={styles.searchInput}
-          placeholder="제목, 지역, 가격으로 검색"
+          placeholder={activeLayer === 'stores' ? '가게명, 주소로 검색' : '제목, 지역, 가격으로 검색'}
           value={search}
           onChangeText={handleSearchChange}
         />
         {searchBlockedMessage ? (
           <Text style={styles.searchBlockedText}>{searchBlockedMessage}</Text>
         ) : null}
+        <View style={styles.layerRow}>
+          <TouchableOpacity
+            style={[styles.layerBtn, activeLayer === 'listings' && styles.layerBtnActive]}
+            onPress={() => {
+              setActiveLayer('listings');
+              setSelectedStore(null);
+              setSelectedStoreGroup([]);
+              setStoreGroupModalOpen(false);
+            }}
+          >
+            <Text style={[styles.layerText, activeLayer === 'listings' && styles.layerTextActive]}>
+              게시글
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.layerBtn, activeLayer === 'stores' && styles.layerBtnActive]}
+            onPress={() => {
+              setActiveLayer('stores');
+              setSelectedItem(null);
+              setSelectedGroup([]);
+              setGroupModalOpen(false);
+            }}
+          >
+            <Text style={[styles.layerText, activeLayer === 'stores' && styles.layerTextActive]}>
+              가게
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {selectedItem ? (
@@ -376,6 +568,36 @@ export default function MapTabScreen() {
             onPress={() => router.push(`/(tabs)/home/post/${selectedItem.id}` as any)}
           >
             <Text style={styles.detailBtnText}>게시글 보기</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {selectedStore ? (
+        <View style={styles.bottomCard}>
+          <View style={styles.cardTopRow}>
+            <Text style={styles.storeBadge}>인증 가게</Text>
+            <TouchableOpacity onPress={() => setSelectedStore(null)}>
+              <Text style={styles.closeText}>닫기</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.itemTitle} numberOfLines={2}>
+            {selectedStore.display_name || '가게'}
+          </Text>
+          <Text style={styles.itemMeta} numberOfLines={1}>
+            {selectedStore.store_address || '주소 정보 없음'}
+          </Text>
+          {selectedStore.store_intro ? (
+            <Text style={styles.storeIntro} numberOfLines={2}>
+              {selectedStore.store_intro}
+            </Text>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.detailBtn}
+            onPress={() => router.push(`/store/${selectedStore.id}` as any)}
+          >
+            <Text style={styles.detailBtnText}>가게 보기</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -426,6 +648,52 @@ export default function MapTabScreen() {
                 <TouchableOpacity
                   style={styles.closeBtn}
                   onPress={() => setGroupModalOpen(false)}
+                >
+                  <Text style={styles.closeBtnText}>닫기</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      <Modal visible={storeGroupModalOpen} transparent animationType="fade">
+        <TouchableWithoutFeedback onPress={() => setStoreGroupModalOpen(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalBox}>
+                <Text style={styles.modalTitle}>이 위치의 가게</Text>
+
+                <ScrollView style={{ maxHeight: 320 }}>
+                  {selectedStoreGroup.map((store) => (
+                    <TouchableOpacity
+                      key={store.id}
+                      style={styles.groupItem}
+                      onPress={() => {
+                        setStoreGroupModalOpen(false);
+                        setSelectedStore(store);
+                      }}
+                    >
+                      <View style={styles.groupThumbWrap}>
+                        <Ionicons name="storefront-outline" size={24} color="#059669" />
+                      </View>
+
+                      <View style={styles.groupInfo}>
+                        <Text style={styles.storeGroupBadge}>인증 가게</Text>
+                        <Text style={styles.groupTitle} numberOfLines={1}>
+                          {store.display_name || '가게'}
+                        </Text>
+                        <Text style={styles.groupMeta} numberOfLines={1}>
+                          {store.store_address || '주소 정보 없음'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                <TouchableOpacity
+                  style={styles.closeBtn}
+                  onPress={() => setStoreGroupModalOpen(false)}
                 >
                   <Text style={styles.closeBtnText}>닫기</Text>
                 </TouchableOpacity>
@@ -492,6 +760,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 17,
   },
+  layerRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  layerBtn: {
+    flex: 1,
+    borderRadius: 999,
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  layerBtnActive: {
+    backgroundColor: '#111827',
+  },
+  layerText: {
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  layerTextActive: {
+    color: '#fff',
+  },
   bottomCard: {
     position: 'absolute',
     left: 16,
@@ -553,6 +844,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
+  storeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ecfdf5',
+    color: '#047857',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
   itemTitle: {
     fontSize: 17,
     fontWeight: '800',
@@ -568,6 +871,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: '#111827',
+  },
+  storeIntro: {
+    marginTop: 8,
+    color: '#374151',
+    lineHeight: 20,
   },
   detailBtn: {
     marginTop: 14,
@@ -613,6 +921,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     backgroundColor: '#f3f4f6',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   groupThumb: {
     width: '100%',
@@ -630,6 +940,18 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: '#eff6ff',
     color: '#2563eb',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  storeGroupBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ecfdf5',
+    color: '#047857',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,

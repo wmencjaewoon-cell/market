@@ -35,6 +35,8 @@ type FormMode = 'create' | 'edit';
 type Props = {
   mode: FormMode;
   listingId?: number | null;
+  createReturnTo?: string;
+  createRedirectTo?: string;
 };
 
 type ExistingImage = {
@@ -110,7 +112,12 @@ function showListingFormAlert(title: string, message = '') {
   Alert.alert(title, message);
 }
 
-export default function ListingForm({ mode, listingId }: Props) {
+export default function ListingForm({
+  mode,
+  listingId,
+  createReturnTo = '/(tabs)/home/create',
+  createRedirectTo = '/(tabs)/home',
+}: Props) {
   const params = useLocalSearchParams<{
     category?: string;
     lat?: string;
@@ -142,6 +149,14 @@ export default function ListingForm({ mode, listingId }: Props) {
   const [urgent, setUrgent] = useState(false);
   const [availableNow, setAvailableNow] = useState(false);
   const [availableToday, setAvailableToday] = useState(false);
+  const [currentProfile, setCurrentProfile] = useState<any | null>(null);
+  const [isStoreProduct, setIsStoreProduct] = useState(false);
+  const [pickupAvailable, setPickupAvailable] = useState(true);
+  const [deliveryAvailable, setDeliveryAvailable] = useState(false);
+  const [cardAvailable, setCardAvailable] = useState(false);
+  const [cashReceiptAvailable, setCashReceiptAvailable] = useState(false);
+  const [taxInvoiceAvailable, setTaxInvoiceAvailable] = useState(false);
+  const [vatIncluded, setVatIncluded] = useState(true);
   const [activeRegionName, setActiveRegionName] = useState('');
   const [activeRegionLat, setActiveRegionLat] = useState<number | null>(null);
   const [activeRegionLng, setActiveRegionLng] = useState<number | null>(null);
@@ -157,6 +172,8 @@ export default function ListingForm({ mode, listingId }: Props) {
   const isTrade = category === 'trade';
   const isShare = category === 'share';
   const isWant = category === 'want';
+  const isStoreSeller =
+    currentProfile?.user_type === 'store' && !!currentProfile?.business_verified;
   const categoryLabel = isTrade ? '판매' : isShare ? '나눔' : '구함';
   const quantityPlaceholder = isTrade ? '판매 수량' : isShare ? '나눔 수량' : '구하는 수량';
   const titlePlaceholder = isWant ? '구하는 자재명' : '제목';
@@ -233,6 +250,7 @@ export default function ListingForm({ mode, listingId }: Props) {
   }, [params.lat, params.lng]);
 
   const initCreateForm = async () => {
+    await loadCurrentProfile();
     const hasDraft = await loadDraft();
 
     if (!params.regionName) {
@@ -255,6 +273,7 @@ export default function ListingForm({ mode, listingId }: Props) {
 
     const { data: authData } = await supabase.auth.getUser();
     const currentUserId = authData.user?.id;
+    await loadCurrentProfile();
 
     const { data, error } = await supabase
       .from('listings')
@@ -304,6 +323,13 @@ export default function ListingForm({ mode, listingId }: Props) {
     setUrgent(!!data.urgent);
     setAvailableNow(!!data.available_now);
     setAvailableToday(!!data.available_today);
+    setIsStoreProduct(!!data.is_store_product);
+    setPickupAvailable(data.pickup_available !== false);
+    setDeliveryAvailable(!!data.delivery_available);
+    setCardAvailable(!!data.card_available);
+    setCashReceiptAvailable(!!data.cash_receipt_available);
+    setTaxInvoiceAvailable(!!data.tax_invoice_available);
+    setVatIncluded(data.vat_included !== false);
     setActiveRegionName(data.region || '');
     setLatitude(params.lat ? Number(params.lat) : data.latitude ?? null);
     setLongitude(params.lng ? Number(params.lng) : data.longitude ?? null);
@@ -316,6 +342,40 @@ export default function ListingForm({ mode, listingId }: Props) {
     }
 
     setLoading(false);
+  };
+
+  const loadCurrentProfile = async () => {
+    const { data: authData } = await supabase.auth.getUser();
+    const currentUserId = authData.user?.id;
+
+    if (!currentUserId) {
+      setCurrentProfile(null);
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', currentUserId)
+      .maybeSingle();
+
+    if (error) {
+      console.log('작성자 프로필 조회 실패:', error);
+      return null;
+    }
+
+    setCurrentProfile(data || null);
+
+    if (!isEdit && data?.user_type === 'store' && data?.business_verified) {
+      setIsStoreProduct(true);
+      setPickupAvailable(true);
+      setCardAvailable(!!data.store_card_available);
+      setCashReceiptAvailable(!!data.store_cash_receipt_available);
+      setTaxInvoiceAvailable(!!data.store_tax_invoice_available);
+      setAvailableToday(!!data.store_today_available);
+    }
+
+    return data || null;
   };
 
   const loadActiveRegion = async () => {
@@ -361,6 +421,13 @@ export default function ListingForm({ mode, listingId }: Props) {
         urgent,
         availableNow,
         availableToday,
+        isStoreProduct,
+        pickupAvailable,
+        deliveryAvailable,
+        cardAvailable,
+        cashReceiptAvailable,
+        taxInvoiceAvailable,
+        vatIncluded,
         activeRegionName,
         activeRegionLat,
         activeRegionLng,
@@ -391,6 +458,27 @@ export default function ListingForm({ mode, listingId }: Props) {
       setUrgent(!!draft.urgent);
       setAvailableNow(!!draft.availableNow);
       setAvailableToday(!!draft.availableToday);
+      if (typeof draft.isStoreProduct === 'boolean') {
+        setIsStoreProduct(draft.isStoreProduct);
+      }
+      if (typeof draft.pickupAvailable === 'boolean') {
+        setPickupAvailable(draft.pickupAvailable);
+      }
+      if (typeof draft.deliveryAvailable === 'boolean') {
+        setDeliveryAvailable(draft.deliveryAvailable);
+      }
+      if (typeof draft.cardAvailable === 'boolean') {
+        setCardAvailable(draft.cardAvailable);
+      }
+      if (typeof draft.cashReceiptAvailable === 'boolean') {
+        setCashReceiptAvailable(draft.cashReceiptAvailable);
+      }
+      if (typeof draft.taxInvoiceAvailable === 'boolean') {
+        setTaxInvoiceAvailable(draft.taxInvoiceAvailable);
+      }
+      if (typeof draft.vatIncluded === 'boolean') {
+        setVatIncluded(draft.vatIncluded);
+      }
       setActiveRegionName(draft.activeRegionName || '');
       setActiveRegionLat(draft.activeRegionLat ?? null);
       setActiveRegionLng(draft.activeRegionLng ?? null);
@@ -502,9 +590,7 @@ export default function ListingForm({ mode, listingId }: Props) {
       params: {
         lat: String(latitude ?? 37.5665),
         lng: String(longitude ?? 126.9780),
-        returnTo: isEdit
-          ? `/(tabs)/home/post/edit/${listingId}`
-          : '/(tabs)/home/create',
+        returnTo: isEdit ? `/(tabs)/home/post/edit/${listingId}` : createReturnTo,
         category,
       },
     } as any);
@@ -516,7 +602,7 @@ export default function ListingForm({ mode, listingId }: Props) {
     router.push({
       pathname: '/(tabs)/home/regions',
       params: {
-        returnTo: '/(tabs)/home/create',
+        returnTo: createReturnTo,
         mode: 'select',
         category,
       },
@@ -596,9 +682,15 @@ export default function ListingForm({ mode, listingId }: Props) {
     const finalPriceText = isShare
       ? '무료 나눔'
       : priceText.trim() || null;
+    const storeSeller =
+      isStoreSeller || post?.seller_type === 'store' || Boolean(post?.store_user_id);
+    const storeUserId = storeSeller ? authorId || post?.store_user_id || post?.author_id : null;
 
     return {
       ...(authorId ? { author_id: authorId } : {}),
+      seller_type: storeSeller ? 'store' : 'personal',
+      store_user_id: storeUserId,
+      is_store_product: storeSeller ? isStoreProduct : false,
       category,
       title: title.trim(),
       price_text: finalPriceText,
@@ -610,6 +702,12 @@ export default function ListingForm({ mode, listingId }: Props) {
       urgent: !isWant && urgent,
       available_now: !isWant && availableNow,
       available_today: !isWant && availableToday,
+      pickup_available: storeSeller ? pickupAvailable : false,
+      delivery_available: storeSeller ? deliveryAvailable : false,
+      card_available: storeSeller ? cardAvailable : false,
+      cash_receipt_available: storeSeller ? cashReceiptAvailable : false,
+      tax_invoice_available: storeSeller ? taxInvoiceAvailable : false,
+      vat_included: storeSeller ? vatIncluded : true,
       status: isEdit ? status : 'active',
       quantity_total: quantityTotal,
       quantity_remaining: quantityRemaining,
@@ -680,7 +778,7 @@ export default function ListingForm({ mode, listingId }: Props) {
 
       await AsyncStorage.removeItem(draftKey);
       setSuccessMessage(`${categoryLabel} 글이 등록되었습니다.`);
-      router.replace('/(tabs)/home' as any);
+      router.replace(createRedirectTo as any);
     } catch (e: any) {
       console.log('등록 실패:', e);
       setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
@@ -723,6 +821,13 @@ export default function ListingForm({ mode, listingId }: Props) {
         Number(post.quantity_total ?? 1) !== payload.quantity_total ||
         Number(post.quantity_remaining ?? 1) !== payload.quantity_remaining ||
         (post.quantity_unit || '개') !== payload.quantity_unit ||
+        post.is_store_product !== payload.is_store_product ||
+        post.pickup_available !== payload.pickup_available ||
+        post.delivery_available !== payload.delivery_available ||
+        post.card_available !== payload.card_available ||
+        post.cash_receipt_available !== payload.cash_receipt_available ||
+        post.tax_invoice_available !== payload.tax_invoice_available ||
+        post.vat_included !== payload.vat_included ||
         post.latitude !== payload.latitude ||
         post.longitude !== payload.longitude;
 
@@ -1068,7 +1173,71 @@ export default function ListingForm({ mode, listingId }: Props) {
           onChangeText={setDescription}
         />
 
-        {!isWant ? (
+        {!isWant && isStoreSeller ? (
+          <View style={styles.storeOptionsBox}>
+            <View>
+              <Text style={styles.storeOptionsTitle}>가게 상품 설정</Text>
+              <Text style={styles.storeOptionsDesc}>
+                가게 인증 상품으로 노출되고 상품 상세에 증빙 가능 여부가 표시됩니다.
+              </Text>
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>가게 상품 여부</Text>
+              <Switch value={isStoreProduct} onValueChange={setIsStoreProduct} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>방문수령 가능</Text>
+              <Switch value={pickupAvailable} onValueChange={setPickupAvailable} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>배송 가능</Text>
+              <Switch value={deliveryAvailable} onValueChange={setDeliveryAvailable} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>오늘 수령 가능</Text>
+              <Switch value={availableToday} onValueChange={setAvailableToday} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>카드 가능</Text>
+              <Switch value={cardAvailable} onValueChange={setCardAvailable} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>현금영수증 가능</Text>
+              <Switch value={cashReceiptAvailable} onValueChange={setCashReceiptAvailable} />
+            </View>
+
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>세금계산서 가능</Text>
+              <Switch value={taxInvoiceAvailable} onValueChange={setTaxInvoiceAvailable} />
+            </View>
+
+            <View style={styles.vatRow}>
+              <TouchableOpacity
+                style={[styles.vatBtn, vatIncluded && styles.vatBtnActive]}
+                onPress={() => setVatIncluded(true)}
+              >
+                <Text style={[styles.vatBtnText, vatIncluded && styles.vatBtnTextActive]}>
+                  부가세 포함
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.vatBtn, !vatIncluded && styles.vatBtnActive]}
+                onPress={() => setVatIncluded(false)}
+              >
+                <Text style={[styles.vatBtnText, !vatIncluded && styles.vatBtnTextActive]}>
+                  부가세 별도
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : !isWant ? (
           <>
             <View style={styles.row}>
               <Text style={styles.rowLabel}>긴급배송 가능</Text>
@@ -1362,6 +1531,26 @@ const styles = StyleSheet.create({
   quantityUnitChipTextActive: {
     color: '#fff',
   },
+  storeOptionsBox: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 14,
+    backgroundColor: '#eff6ff',
+    padding: 14,
+    gap: 10,
+  },
+  storeOptionsTitle: {
+    color: '#1d4ed8',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  storeOptionsDesc: {
+    marginTop: 4,
+    color: '#374151',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
   row: {
     minHeight: 48,
     flexDirection: 'row',
@@ -1372,6 +1561,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: '#111827',
+  },
+  vatRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  vatBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  vatBtnActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#2563eb',
+  },
+  vatBtnText: {
+    color: '#1d4ed8',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  vatBtnTextActive: {
+    color: '#fff',
   },
   sectionLabel: {
     fontSize: 15,

@@ -170,6 +170,8 @@ export default function ProfileEditScreen() {
 
   const [message, setMessage] = useState('');
   const hasStoreLocationParams = Boolean(params.lat && params.lng);
+  const isApprovedStoreProfile =
+    userType === 'store' && storeVerificationStatus === 'approved';
 
   useEffect(() => {
     if (!user) return;
@@ -298,6 +300,11 @@ export default function ProfileEditScreen() {
   };
 
   const pickProfileImage = async () => {
+    if (isApprovedStoreProfile) {
+      setMessage('가게 인증 완료 계정은 내 프로필에서 정보 확인만 가능합니다.');
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
@@ -498,6 +505,11 @@ export default function ProfileEditScreen() {
   };
 
   const openStoreLocationPicker = () => {
+    if (isApprovedStoreProfile) {
+      setMessage('가게 위치 변경은 내 가게 관리의 가게 프로필에서 진행해 주세요.');
+      return;
+    }
+
     router.push({
       pathname: '/map-picker',
       params: {
@@ -513,6 +525,11 @@ export default function ProfileEditScreen() {
 
   const handleSave = async () => {
     if (!user) return;
+
+    if (isApprovedStoreProfile) {
+      setMessage('가게 인증 완료 계정은 내 프로필에서 정보 확인만 가능합니다.');
+      return;
+    }
 
     if (!displayName.trim()) {
       setMessage(
@@ -761,7 +778,7 @@ export default function ProfileEditScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: '프로필수정' }} />
+      <Stack.Screen options={{ title: '내 프로필' }} />
       <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
         <View style={styles.avatarSection}>
           <TouchableOpacity style={styles.avatarButton} onPress={pickProfileImage}>
@@ -784,9 +801,19 @@ export default function ProfileEditScreen() {
         </View>
 
         <Text style={styles.label}>계정 유형</Text>
+        {isApprovedStoreProfile ? (
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readOnlyTitle}>확인 전용 프로필</Text>
+            <Text style={styles.readOnlyText}>
+              가게 인증 완료 계정은 이 화면에서 기본 정보를 확인만 할 수 있습니다.
+              가게 공지, 증빙 가능 여부, 오늘 가능 표시는 내 가게 관리에서 변경해 주세요.
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.row}>
           <TouchableOpacity
             style={[styles.typeBtn, userType === 'personal' && styles.typeBtnActive]}
+            disabled={isApprovedStoreProfile}
             onPress={() => {
               setUserType('personal');
               setBusinessVerified(false);
@@ -816,6 +843,7 @@ export default function ProfileEditScreen() {
 
           <TouchableOpacity
             style={[styles.typeBtn, userType === 'store' && styles.typeBtnActive]}
+            disabled={isApprovedStoreProfile}
             onPress={() => {
               setUserType('store');
               if (storeVerificationStatus !== 'approved') {
@@ -919,6 +947,7 @@ export default function ProfileEditScreen() {
               value={storeAddress}
               onChangeText={setStoreAddress}
               placeholder="예: 서울 중구 세종대로 110 1층"
+              editable={!isApprovedStoreProfile}
             />
 
             <TouchableOpacity
@@ -1056,12 +1085,17 @@ export default function ProfileEditScreen() {
           placeholder="email@example.com"
           keyboardType="email-address"
           autoCapitalize="none"
+          editable={!isApprovedStoreProfile}
         />
 
         {userType === 'store' && storeVerificationStatus === 'approved' && (
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>전화번호 공개</Text>
-            <Switch value={isPhonePublic} onValueChange={setIsPhonePublic} />
+            <Switch
+              value={isPhonePublic}
+              onValueChange={setIsPhonePublic}
+              disabled={isApprovedStoreProfile}
+            />
           </View>
         )}
 
@@ -1078,19 +1112,21 @@ export default function ProfileEditScreen() {
           </Text>
         ) : null}
 
-        <TouchableOpacity
-          style={styles.saveBtn}
-          onPress={handleSave}
-          disabled={loading}
-        >
-          <Text style={styles.saveBtnText}>
-            {loading
-              ? '저장 중...'
-              : userType === 'store' && storeVerificationStatus !== 'approved'
-                ? '가게 인증 신청'
-                : '저장하기'}
-          </Text>
-        </TouchableOpacity>
+        {isApprovedStoreProfile ? null : (
+          <TouchableOpacity
+            style={styles.saveBtn}
+            onPress={handleSave}
+            disabled={loading}
+          >
+            <Text style={styles.saveBtnText}>
+              {loading
+                ? '저장 중...'
+                : userType === 'store' && storeVerificationStatus !== 'approved'
+                  ? '가게 인증 신청'
+                  : '저장하기'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
     </>
   );
@@ -1168,6 +1204,28 @@ const styles = StyleSheet.create({
 
   typeText: { fontWeight: '700', color: '#374151' },
   typeTextActive: { color: '#fff' },
+
+  readOnlyBox: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 14,
+    backgroundColor: '#eff6ff',
+    padding: 14,
+    gap: 6,
+  },
+
+  readOnlyTitle: {
+    color: '#1d4ed8',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+
+  readOnlyText: {
+    color: '#374151',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
 
   input: {
     borderWidth: 1,

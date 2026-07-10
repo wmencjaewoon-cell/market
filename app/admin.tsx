@@ -19,6 +19,7 @@ type AdminTab = 'overview' | 'notices' | 'reports' | 'users' | 'listings' | 'sto
 
 type AdminViewMode = 'grid' | 'list';
 type DateFilter = 'all' | 'today' | '7days' | '30days';
+type RestrictionOption = '1' | '3' | '7' | '14' | '30' | '90' | '180' | '365' | 'permanent';
 
 type AdminViewModes = {
   reports: AdminViewMode;
@@ -57,6 +58,8 @@ type AdminUser = {
   reports_count: number | null;
   can_start_chat: boolean | null;
   can_create_listing: boolean | null;
+  restricted_until: string | null;
+  restriction_reason: string | null;
 };
 
 type AdminListing = {
@@ -115,6 +118,18 @@ type StoreVerificationRequest = {
       }[]
     | null;
 };
+
+const RESTRICTION_OPTIONS: { value: RestrictionOption; label: string }[] = [
+  { value: '1', label: '1일' },
+  { value: '3', label: '3일' },
+  { value: '7', label: '7일' },
+  { value: '14', label: '14일' },
+  { value: '30', label: '30일' },
+  { value: '90', label: '90일' },
+  { value: '180', label: '180일' },
+  { value: '365', label: '365일' },
+  { value: 'permanent', label: '영구정지' },
+];
 
 function showAdminAlert(title: string, message = '') {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -177,6 +192,18 @@ function getUserStatusLabel(item: AdminUser) {
   if (isDeletionPendingUser(item)) return '탈퇴 대기';
   if (isUserRestricted(item)) return '이용 제한';
   return '정상';
+}
+
+function getRestrictionOptionLabel(value: RestrictionOption) {
+  return RESTRICTION_OPTIONS.find((item) => item.value === value)?.label || '1일';
+}
+
+function getRestrictionUntilLabel(item: AdminUser) {
+  if (item.status === 'blocked') return '영구정지';
+  if (!item.restricted_until) return '제한 해제 시점 없음';
+
+  const untilText = formatAdminDate(item.restricted_until);
+  return untilText ? `${untilText}까지` : '제한 해제 시점 없음';
 }
 
 function formatAdminDate(value?: string | null) {
@@ -267,6 +294,8 @@ const [listingStatusFilter, setListingStatusFilter] = useState('all');
 const [listingKeyword, setListingKeyword] = useState('');
 const [storeRequestStatusFilter, setStoreRequestStatusFilter] = useState('pending');
 const [storeReviewNotes, setStoreReviewNotes] = useState<Record<number, string>>({});
+const [restrictionSelections, setRestrictionSelections] = useState<Record<string, RestrictionOption>>({});
+const [cleanupRunning, setCleanupRunning] = useState(false);
 
 const toggleViewMode = (tab: keyof AdminViewModes) => {
   setViewModes((prev) => ({
@@ -279,7 +308,56 @@ const goToListingDetail = (listingId: number) => {
   router.push(`/(tabs)/home/post/${listingId}` as any);
 };
 
+  const runExpiredListingCleanup = useCallback(async (showResult = false) => {
+    if (showResult) setCleanupRunning(true);
+
+    try {
+      const { data, error } = await supabase.rpc('admin_permanently_delete_expired_listings');
+
+      if (error) {
+        if (showResult) {
+          showAdminAlert(
+            '만료 삭제 정리 실패',
+            error.message.includes('function')
+              ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
+              : error.message
+          );
+        } else {
+          console.log('만료 삭제 정리 실패:', error.message);
+        }
+        return 0;
+      }
+
+      const deletedCount = Number(data || 0);
+
+      if (showResult) {
+        showAdminAlert(
+          '만료 삭제 정리',
+          deletedCount > 0
+            ? `${deletedCount}개 게시글을 영구 삭제했습니다.`
+            : '영구 삭제할 만료 게시글이 없습니다.'
+        );
+      }
+
+      return deletedCount;
+    } finally {
+      if (showResult) setCleanupRunning(false);
+    }
+  }, []);
+
+  const refreshExpiredUserRestrictions = useCallback(async () => {
+    const { error } = await supabase.rpc('admin_refresh_expired_user_restrictions');
+    if (error) {
+      console.log('만료 이용제한 정리 실패:', error.message);
+    }
+  }, []);
+
   const loadAdminData = useCallback(async () => {
+    await Promise.all([
+      runExpiredListingCleanup(false),
+      refreshExpiredUserRestrictions(),
+    ]);
+
     const [noticeResult, reportResult, userResult, listingResult, storeRequestResult] = await Promise.all([
       supabase
         .from('notices')
@@ -294,7 +372,7 @@ const goToListingDetail = (listingId: number) => {
       supabase
         .from('profiles')
         .select(
-          'id, email, display_name, user_type, business_number, business_verified, status, role, reports_count, can_start_chat, can_create_listing'
+          'id, email, display_name, user_type, business_number, business_verified, store_verification_status, status, role, reports_count, can_start_chat, can_create_listing, restricted_until, restriction_reason'
         )
         .order('reports_count', { ascending: false })
         .limit(80),
@@ -364,7 +442,7 @@ const goToListingDetail = (listingId: number) => {
         ? []
         : ((storeRequestResult.data || []) as StoreVerificationRequest[])
     );
-  }, []);
+  }, [refreshExpiredUserRestrictions, runExpiredListingCleanup]);
 
   const loadAdmin = useCallback(async () => {
     setLoading(true);
@@ -504,26 +582,36 @@ const goToListingDetail = (listingId: number) => {
     }
 
     const restricted = isUserRestricted(item);
-    const nextStatus = restricted ? 'active' : 'suspended';
-    const enabled = nextStatus === 'active';
+    const selectedRestriction = restrictionSelections[item.id] || '1';
+    const selectedRestrictionLabel = getRestrictionOptionLabel(selectedRestriction);
     const ok = await confirmAdminAction(
-      nextStatus === 'active' ? '이용제한 취소' : '사용자 이용 제한',
+      restricted ? '이용제한 취소' : '사용자 이용 제한',
       `${item.display_name || item.email || item.id} 계정을 ${
-        nextStatus === 'active' ? '정상 상태로 되돌릴까요?' : '이용 제한할까요?'
+        restricted ? '정상 상태로 되돌릴까요?' : `${selectedRestrictionLabel} 동안 이용 제한할까요?`
       }`
     );
 
     if (!ok) return;
 
-    const { error } = await supabase.rpc('admin_set_user_status', {
-      p_user_id: item.id,
-      p_status: nextStatus,
-      p_can_start_chat: enabled,
-      p_can_create_listing: enabled,
-    });
+    const rpcName = restricted ? 'admin_clear_user_restriction' : 'admin_set_user_restriction';
+    const rpcParams = restricted
+      ? { p_user_id: item.id }
+      : {
+          p_user_id: item.id,
+          p_days: selectedRestriction === 'permanent' ? null : Number(selectedRestriction),
+          p_permanent: selectedRestriction === 'permanent',
+          p_reason: 'admin',
+        };
+
+    const { error } = await supabase.rpc(rpcName, rpcParams as any);
 
     if (error) {
-      showAdminAlert('사용자 상태 변경 실패', error.message);
+      showAdminAlert(
+        '사용자 상태 변경 실패',
+        error.message.includes('function')
+          ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
+          : error.message
+      );
       return;
     }
 
@@ -636,6 +724,13 @@ const goToListingDetail = (listingId: number) => {
     }
 
     await loadAdminData();
+  };
+
+  const cleanupExpiredListingDeletes = async () => {
+    const deletedCount = await runExpiredListingCleanup(true);
+    if (deletedCount > 0) {
+      await loadAdminData();
+    }
   };
 
   const openStoreVerificationDocument = async (item: StoreVerificationRequest) => {
@@ -1170,6 +1265,47 @@ const filteredStoreRequests = useMemo(() => {
             <Text style={styles.metaText}>사업자번호: {item.business_number}</Text>
           ) : null}
 
+          {isUserRestricted(item) ? (
+            <>
+              <Text style={styles.metaText}>제한 만료: {getRestrictionUntilLabel(item)}</Text>
+              <Text style={styles.metaText}>제한 사유: {item.restriction_reason || '-'}</Text>
+            </>
+          ) : null}
+
+          {!isUserRestricted(item) && !isDeletionPendingUser(item) ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.restrictionRow}
+            >
+              {RESTRICTION_OPTIONS.map((option) => {
+                const selected = (restrictionSelections[item.id] || '1') === option.value;
+
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[styles.filterChip, selected && styles.filterChipActive]}
+                    onPress={() =>
+                      setRestrictionSelections((prev) => ({
+                        ...prev,
+                        [item.id]: option.value,
+                      }))
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        selected && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : null}
+
           <TouchableOpacity
             style={[
               isUserRestricted(item) || isDeletionPendingUser(item)
@@ -1228,6 +1364,16 @@ const filteredStoreRequests = useMemo(() => {
         value={listingKeyword}
         onChangeText={setListingKeyword}
       />
+
+      <TouchableOpacity
+        style={[styles.secondaryBtn, cleanupRunning && styles.disabledBtn]}
+        onPress={cleanupExpiredListingDeletes}
+        disabled={cleanupRunning}
+      >
+        <Text style={styles.secondaryText}>
+          {cleanupRunning ? '정리 중...' : '삭제 취소 만료 게시글 정리'}
+        </Text>
+      </TouchableOpacity>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
         {(['all', 'today', '7days', '30days'] as DateFilter[]).map((item) => (
@@ -1579,6 +1725,12 @@ searchInput: {
 filterRow: {
   gap: 8,
   paddingTop: 10,
+},
+
+restrictionRow: {
+  gap: 8,
+  paddingTop: 12,
+  paddingBottom: 2,
 },
 
 filterChip: {

@@ -161,7 +161,7 @@ export default function MyScreen() {
               style={styles.editBtn}
               onPress={() => router.push('/profile/edit' as any)}
             >
-              <Text style={styles.editText}>프로필 수정</Text>
+              <Text style={styles.editText}>내 프로필</Text>
             </TouchableOpacity>
 
             <Text style={styles.sub}>
@@ -182,6 +182,17 @@ export default function MyScreen() {
 
         {user ? (
           <>
+            {isVerifiedStore ? (
+              <Section title="내 가게 관리">
+                <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
+                <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
+                <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
+                <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
+              </Section>
+            ) : null}
+
             <Section title="나의 거래">
               <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
               <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />

@@ -366,6 +366,10 @@ export default function PostDetailScreen() {
           phone,
           is_phone_public,
           avatar_path,
+          store_address,
+          store_latitude,
+          store_longitude,
+          store_notice,
           trust_points,
           trust_level,
           seller_level_style,
@@ -461,8 +465,10 @@ export default function PostDetailScreen() {
     router.push(`/(tabs)/home/user/${item.author_id}` as any);
   };
 
-  const goToTradeMap = () => {
+  const goToTradeMap = async () => {
     if (item?.latitude == null || item?.longitude == null) return;
+
+    await logStoreInteraction('directions');
 
     router.push({
       pathname: '/trade-map',
@@ -586,12 +592,21 @@ export default function PostDetailScreen() {
   const sellerType = isVerifiedStore ? 'store' : 'personal';
   const sellerName = item?.profiles?.display_name ?? '알 수 없음';
   const publicPhone = sellerType === 'store' ? item?.profiles?.phone : null;
+  const isStoreProduct = sellerType === 'store' && item?.seller_type === 'store';
   const sellerLevel = getSellerLevel(item?.profiles);
   const sellerLevelStyle = getSellerLevelStyle(item?.profiles, sellerLevel);
   const showSellerLevel = item?.profiles?.show_level_on_posts !== false;
   const appChatDeepLink = item ? `interiormarket:///open-chat/${item.id}` : '';
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
   const isShareListing = item?.category === 'share';
+  const storeFeatureBadges = [
+    item?.pickup_available ? '방문수령 가능' : null,
+    item?.delivery_available ? '배송 가능' : null,
+    item?.available_today ? '오늘 수령 가능' : null,
+    item?.card_available ? '카드 가능' : null,
+    item?.cash_receipt_available ? '현금영수증 가능' : null,
+    item?.tax_invoice_available ? '세금계산서 가능' : null,
+  ].filter(Boolean);
 
 //   const viewerImages = useMemo(() => {
 //   return imageUrls.map((url: any) => ({
@@ -683,6 +698,7 @@ useEffect(() => {
       return;
     }
 
+    await logStoreInteraction('chat');
     router.push(`/chat/${roomId}` as any);
   } catch (e: any) {
     console.log('채팅하기 실패:', e);
@@ -705,10 +721,32 @@ useEffect(() => {
     if (!phone) return;
 
     try {
+      await logStoreInteraction('phone');
       await Linking.openURL(`tel:${phone}`);
     } catch (e) {
       console.log('전화 연결 실패:', e);
     }
+  };
+
+  const logStoreInteraction = async (interactionType: 'chat' | 'phone' | 'directions' | 'product_view') => {
+    if (!item || !isStoreProduct) return;
+
+    const storeUserId = item.store_user_id || item.author_id;
+    if (!storeUserId) return;
+
+    const { data: authData } = await supabase.auth.getUser();
+
+    await supabase.from('store_interactions').insert({
+      store_user_id: storeUserId,
+      listing_id: item.id,
+      actor_id: authData.user?.id || null,
+      interaction_type: interactionType,
+    });
+  };
+
+  const goToStoreDetail = () => {
+    if (!item?.author_id) return;
+    router.push(`/store/${item.author_id}` as any);
   };
 
   const handleShare = async () => {
@@ -1477,12 +1515,17 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
 ) : null}
 
 <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.price}>{item.price_text || '가격 문의'}</Text>
+        <Text style={styles.price}>
+          {item.price_text || '가격 문의'}
+          {isStoreProduct ? ` · VAT ${item.vat_included === false ? '별도' : '포함'}` : ''}
+        </Text>
         {quantityInfo.isMultiQuantity ? (
           <View style={styles.quantityBox}>
             <Ionicons name="cube-outline" size={16} color="#2563eb" />
             <Text style={styles.quantityText}>
-              남은 {quantityInfo.remaining}개 / 전체 {quantityInfo.total}개
+              남은 {quantityInfo.remaining}
+              {item.quantity_unit || '개'} / 전체 {quantityInfo.total}
+              {item.quantity_unit || '개'}
             </Text>
             {quantityInfo.sold > 0 ? (
               <Text style={styles.quantitySubText}>
@@ -1495,12 +1538,69 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           {[item.region, formatTimeAgo(item.created_at)].filter(Boolean).join(' · ')}
         </Text>
 
+        {isStoreProduct ? (
+          <View style={styles.storeProductBox}>
+            <View style={styles.storeProductHeader}>
+              <View style={styles.storeProductSellerLine}>
+                <Text style={styles.storeProductBadge}>가게 인증</Text>
+                <Text style={styles.storeProductTitle} numberOfLines={1}>
+                  {sellerName}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.storeFeatureWrap}>
+              {storeFeatureBadges.map((badge) => (
+                <Text key={badge} style={styles.storeFeatureBadge}>
+                  {badge}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.storeActionRow}>
+              <TouchableOpacity style={styles.storeActionBtn} onPress={handleChat}>
+                <Ionicons name="chatbubble-ellipses-outline" size={17} color="#111827" />
+                <Text style={styles.storeActionText}>채팅 문의</Text>
+              </TouchableOpacity>
+
+              {publicPhone ? (
+                <TouchableOpacity style={styles.storeActionBtn} onPress={handlePhone}>
+                  <Ionicons name="call-outline" size={17} color="#111827" />
+                  <Text style={styles.storeActionText}>전화하기</Text>
+                </TouchableOpacity>
+              ) : null}
+
+              <TouchableOpacity style={styles.storeActionBtn} onPress={goToTradeMap}>
+                <Ionicons name="navigate-outline" size={17} color="#111827" />
+                <Text style={styles.storeActionText}>길찾기</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity style={styles.otherStoreProductsBtn} onPress={goToStoreDetail}>
+              <Text style={styles.otherStoreProductsText}>가게 다른 상품 보기</Text>
+              <Ionicons name="chevron-forward" size={17} color="#2563eb" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>내용</Text>
           <Text style={styles.desc}>
             {item.description || '등록된 설명이 없습니다.'}
           </Text>
         </View>
+
+        {isStoreProduct ? (
+          <View style={styles.storeResponsibilityBox}>
+            <Text style={styles.storeResponsibilityTitle}>가게 상품 안내</Text>
+            <Text style={styles.storeResponsibilityText}>
+              이 상품은 인증 가게가 등록한 상품입니다.{'\n'}
+              상품 판매, 결제, 배송, 환불, 세금계산서 및 현금영수증 발급 책임은 판매
+              가게에 있습니다.{'\n'}
+              인테리어마켓은 거래 연결 서비스를 제공합니다.
+            </Text>
+          </View>
+        ) : null}
 
         {item.latitude != null && item.longitude != null ? (
           <View style={styles.section}>
@@ -2163,6 +2263,97 @@ emptyBuyerText: {
     paddingHorizontal: 16,
     paddingTop: 10,
   },
+  storeProductBox: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 14,
+    backgroundColor: '#eff6ff',
+    padding: 14,
+    gap: 12,
+  },
+  storeProductHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  storeProductSellerLine: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  storeProductTitle: {
+    flex: 1,
+    color: '#1d4ed8',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  storeProductBadge: {
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    color: '#1d4ed8',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  storeFeatureWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  storeFeatureBadge: {
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    color: '#111827',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  storeActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  storeActionBtn: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  storeActionText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  otherStoreProductsBtn: {
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  otherStoreProductsText: {
+    color: '#2563eb',
+    fontSize: 13,
+    fontWeight: '900',
+  },
   mainImageTouch: {
     width: SCREEN_WIDTH,
     height: '100%',
@@ -2289,6 +2480,27 @@ fullImageCount: {
     fontSize: 15,
     color: '#374151',
     lineHeight: 24,
+  },
+  storeResponsibilityBox: {
+    marginHorizontal: 16,
+    marginTop: 22,
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    padding: 14,
+    gap: 6,
+  },
+  storeResponsibilityTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  storeResponsibilityText: {
+    color: '#6b7280',
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
   },
 
   statsRow: {

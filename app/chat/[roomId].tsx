@@ -141,7 +141,8 @@ type ChatUserProfile = {
 
 type RoomInfo = {
   id: string;
-  listing_id: number;
+  listing_id: number | null;
+  store_user_id?: string | null;
   created_by: string;
   created_at: string;
   members?: {
@@ -1729,6 +1730,7 @@ export default function ChatRoomScreen() {
       .select(`
     id,
     listing_id,
+    store_user_id,
     created_by,
     created_at,
     chat_room_members (

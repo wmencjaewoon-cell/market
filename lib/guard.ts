@@ -30,13 +30,14 @@ function formatRestrictionUntil(value?: string | null) {
 
 function getRestrictionReason(profile: ProfileRestriction) {
   const status = profile.status ?? 'active';
+  const reasonPrefix = profile.restriction_reason === 'admin' ? '관리자 조치로' : '신고 누적으로';
 
   if (status === 'deletion_pending') {
     return '탈퇴 대기 중인 계정입니다. 탈퇴를 취소해야 이용할 수 있습니다.';
   }
 
   if (status === 'blocked') {
-    return '신고 누적으로 영구 이용제한된 계정입니다.';
+    return `${reasonPrefix} 영구 이용제한된 계정입니다.`;
   }
 
   if (status === 'suspended') {
@@ -51,16 +52,15 @@ function getRestrictionReason(profile: ProfileRestriction) {
     const untilText = formatRestrictionUntil(profile.restricted_until);
 
     return untilText
-      ? `신고 누적으로 ${untilText}까지 이용이 제한된 계정입니다.`
-      : '신고 누적으로 이용이 제한된 계정입니다.';
+      ? `${reasonPrefix} ${untilText}까지 이용이 제한된 계정입니다.`
+      : `${reasonPrefix} 이용이 제한된 계정입니다.`;
   }
 
   return null;
 }
 
-function isExpiredReportSuspension(profile: ProfileRestriction) {
+function isExpiredTimedSuspension(profile: ProfileRestriction) {
   if (profile.status !== 'suspended') return false;
-  if (profile.restriction_reason && profile.restriction_reason !== 'reports') return false;
   if (!profile.restricted_until) return false;
 
   const restrictedUntil = new Date(profile.restricted_until);
@@ -93,7 +93,7 @@ export async function canCreateListing(): Promise<GuardResult> {
     return { ok: false, reason: restrictionReason };
   }
 
-  if (!profile.can_create_listing && !isExpiredReportSuspension(profile)) {
+  if (!profile.can_create_listing && !isExpiredTimedSuspension(profile)) {
     return { ok: false, reason: '현재 게시글 등록이 제한되어 있습니다.' };
   }
 
@@ -113,7 +113,7 @@ export async function canStartChat(): Promise<GuardResult> {
     return { ok: false, reason: restrictionReason };
   }
 
-  if (!profile.can_start_chat && !isExpiredReportSuspension(profile)) {
+  if (!profile.can_start_chat && !isExpiredTimedSuspension(profile)) {
     return { ok: false, reason: '현재 채팅 시작이 제한되어 있습니다.' };
   }
 

@@ -26,7 +26,8 @@ type ChatFilterTab = (typeof tabs)[number];
 
 type ChatRoomListItem = {
   id: string;
-  listing_id: number;
+  listing_id: number | null;
+  store_user_id?: string | null;
   created_at: string;
   muted?: boolean;
   unread_count?: number;
@@ -185,6 +186,7 @@ export default function ChatScreen() {
         .select(`
           id,
           listing_id,
+          store_user_id,
           created_at,
           listings (
             id,
@@ -300,6 +302,7 @@ export default function ChatScreen() {
       return {
         id: room.id,
         listing_id: room.listing_id,
+        store_user_id: room.store_user_id,
         created_at: room.created_at,
         muted: muteMap.get(room.id) ?? false,
         listing: room.listings
@@ -687,7 +690,10 @@ const exitRoom = (room: ChatRoomListItem) => {
                     <View style={styles.topRow}>
                       <View style={styles.topLeft}>
                         <Text style={styles.roomTitle} numberOfLines={1}>
-                          {room.listing?.title || '삭제된 게시글'}
+                          {room.listing?.title ||
+                            (room.store_user_id
+                              ? `${room.target_name || '가게'} 문의`
+                              : '삭제된 게시글')}
                         </Text>
                         {room.listing?.category ? (
                           <Text style={styles.categoryBadge}>

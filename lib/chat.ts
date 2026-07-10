@@ -79,6 +79,63 @@ export async function getOrCreateRoom(
   return room.id;
 }
 
+export async function getOrCreateStoreRoom(
+  storeUserId: string,
+  currentUserId?: string
+) {
+  let me = currentUserId;
+
+  if (!me) {
+    const { data: authData } = await supabase.auth.getUser();
+    me = authData.user?.id;
+  }
+
+  if (!me) throw new Error('로그인이 필요합니다.');
+
+  if (me === storeUserId) {
+    throw new Error('내 가게에는 채팅할 수 없습니다.');
+  }
+
+  const guard = await canStartChat();
+
+  if (!guard.ok) {
+    throw new Error(guard.reason || '채팅 이용이 제한된 계정입니다.');
+  }
+
+  const { data: existingRoom, error: existingError } = await supabase
+    .from('chat_rooms')
+    .select('id')
+    .is('listing_id', null)
+    .eq('store_user_id', storeUserId)
+    .eq('created_by', me)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+
+  if (existingRoom?.id) {
+    ensureRoomMembers(existingRoom.id, me, storeUserId).catch((error) => {
+      console.log('가게 채팅방 멤버 복구 실패:', error);
+    });
+    return existingRoom.id;
+  }
+
+  const { data: room, error: roomError } = await supabase
+    .from('chat_rooms')
+    .insert({
+      listing_id: null,
+      store_user_id: storeUserId,
+      created_by: me,
+    })
+    .select('id')
+    .single();
+
+  if (roomError) throw roomError;
+
+  await ensureRoomMembers(room.id, me, storeUserId);
+
+  return room.id;
+}
+
 export async function sendMessage(
   roomId: string,
   message: string,

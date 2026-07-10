@@ -331,6 +331,34 @@ export default function HomeScreen() {
           ) : null}
         </View>
 
+        <View style={styles.quickRow}>
+          <TouchableOpacity
+            style={styles.quickCard}
+            onPress={() => router.push('/estimate/create' as any)}
+          >
+            <View style={styles.quickIconBox}>
+              <Ionicons name="construct-outline" size={20} color="#2563eb" />
+            </View>
+            <View style={styles.quickTextBox}>
+              <Text style={styles.quickTitle}>견적문의</Text>
+              <Text style={styles.quickDesc}>공사 상담 요청</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickCard}
+            onPress={() => router.push('/store' as any)}
+          >
+            <View style={styles.quickIconBox}>
+              <Ionicons name="storefront-outline" size={20} color="#2563eb" />
+            </View>
+            <View style={styles.quickTextBox}>
+              <Text style={styles.quickTitle}>가게 찾기</Text>
+              <Text style={styles.quickDesc}>인증 가게 보기</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
           {tabs.map((tab) => {
             const active = selectedTab === tab;
@@ -512,6 +540,46 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#111827',
     paddingVertical: 0,
+  },
+  quickRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  quickCard: {
+    flex: 1,
+    minHeight: 66,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  quickIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTextBox: {
+    flex: 1,
+    minWidth: 0,
+  },
+  quickTitle: {
+    color: '#111827',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  quickDesc: {
+    marginTop: 3,
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '700',
   },
   tabText: { fontWeight: '700', color: '#374151' },
   tabTextActive: { color: '#fff' },
