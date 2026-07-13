@@ -95,9 +95,10 @@ export default function StoreEstimatesScreen() {
     if (access.canManageStore) {
       const { data: staffData } = await supabase
         .from('store_staff_members')
-        .select('id, store_user_id, staff_user_id, display_name, phone, role, status')
+        .select('id, store_user_id, staff_user_id, display_name, phone, position, role, status')
         .eq('store_user_id', nextEffectiveStoreId)
         .eq('status', 'active')
+        .eq('role', 'staff')
         .order('display_name', { ascending: true });
 
       setStaffMembers(staffData || []);
@@ -480,6 +481,7 @@ export default function StoreEstimatesScreen() {
                                     ]}
                                   >
                                     {staff.display_name || '직원'}
+                                    {staff.position ? ` · ${staff.position}` : ''}
                                   </Text>
                                 </TouchableOpacity>
                               );

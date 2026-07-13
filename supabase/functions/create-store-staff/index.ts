@@ -92,6 +92,8 @@ serve(async (req) => {
     const displayName =
       typeof body.displayName === "string" ? body.displayName.trim() : "";
     const phone = normalizePhone(body.phone);
+    const position =
+      typeof body.position === "string" ? body.position.trim() || null : null;
     const role = body.role === "manager" ? "manager" : "staff";
     const requestedStoreUserId =
       typeof body.storeUserId === "string" ? body.storeUserId : null;
@@ -239,6 +241,7 @@ serve(async (req) => {
         status: "active",
         display_name: displayName,
         phone,
+        position,
         created_by: user.id,
       })
       .select("*")

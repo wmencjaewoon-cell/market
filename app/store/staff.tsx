@@ -47,11 +47,18 @@ export default function StoreStaffScreen() {
   const [staffRows, setStaffRows] = useState<any[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
+  const [position, setPosition] = useState('');
   const [role, setRole] = useState<'staff' | 'manager'>('staff');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editPosition, setEditPosition] = useState('');
+  const [editRole, setEditRole] = useState<'staff' | 'manager'>('staff');
   const [createdCredential, setCreatedCredential] =
     useState<CreatedStaffCredential | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
@@ -130,6 +137,7 @@ export default function StoreStaffScreen() {
         body: {
           displayName: displayName.trim(),
           phone: phone.trim() || null,
+          position: position.trim() || null,
           role,
           storeUserId: storeAccess?.storeUserId,
         },
@@ -156,6 +164,7 @@ export default function StoreStaffScreen() {
       });
       setDisplayName('');
       setPhone('');
+      setPosition('');
       setRole('staff');
       await loadStaff();
     } catch (error: any) {
@@ -163,6 +172,53 @@ export default function StoreStaffScreen() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const startEditStaff = (item: any) => {
+    setEditingId(item.id);
+    setEditDisplayName(item.display_name || '');
+    setEditPhone(item.phone || '');
+    setEditPosition(item.position || '');
+    setEditRole(item.role === 'manager' ? 'manager' : 'staff');
+    setMessage('');
+  };
+
+  const cancelEditStaff = () => {
+    setEditingId(null);
+    setEditDisplayName('');
+    setEditPhone('');
+    setEditPosition('');
+    setEditRole('staff');
+  };
+
+  const saveStaffEdit = async () => {
+    if (!editingId || updatingId) return;
+
+    if (!editDisplayName.trim()) {
+      setMessage('직원 이름을 입력해 주세요.');
+      return;
+    }
+
+    setUpdatingId(editingId);
+    setMessage('');
+
+    const { error } = await supabase.rpc('update_store_staff_member', {
+      p_staff_member_id: editingId,
+      p_display_name: editDisplayName.trim(),
+      p_phone: editPhone.trim() || null,
+      p_position: editPosition.trim() || null,
+      p_role: editRole,
+    });
+
+    setUpdatingId(null);
+
+    if (error) {
+      setMessage(error.message);
+      return;
+    }
+
+    cancelEditStaff();
+    await loadStaff();
   };
 
   const deactivateStaff = async (item: any) => {
@@ -226,27 +282,15 @@ export default function StoreStaffScreen() {
               placeholder="직원 전화번호"
               keyboardType="phone-pad"
             />
+            <TextInput
+              style={styles.input}
+              value={position}
+              onChangeText={setPosition}
+              placeholder="직책 예: 현장팀장, 상담실장, 배송담당"
+              maxLength={30}
+            />
 
-            <View style={styles.roleRow}>
-              {[
-                { key: 'staff' as const, label: '직원' },
-                { key: 'manager' as const, label: '매니저' },
-              ].map((item) => {
-                const active = role === item.key;
-
-                return (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={[styles.roleBtn, active && styles.roleBtnActive]}
-                    onPress={() => setRole(item.key)}
-                  >
-                    <Text style={[styles.roleText, active && styles.roleTextActive]}>
-                      {item.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <RoleSelector value={role} onChange={setRole} />
 
             <TouchableOpacity
               style={[styles.primaryBtn, creating && styles.disabledBtn]}
@@ -276,6 +320,19 @@ export default function StoreStaffScreen() {
             rows={activeStaff}
             loading={loading}
             deactivatingId={deactivatingId}
+            editingId={editingId}
+            editDisplayName={editDisplayName}
+            editPhone={editPhone}
+            editPosition={editPosition}
+            editRole={editRole}
+            updatingId={updatingId}
+            onStartEdit={startEditStaff}
+            onCancelEdit={cancelEditStaff}
+            onSaveEdit={saveStaffEdit}
+            setEditDisplayName={setEditDisplayName}
+            setEditPhone={setEditPhone}
+            setEditPosition={setEditPosition}
+            setEditRole={setEditRole}
             onDeactivate={deactivateStaff}
           />
 
@@ -297,6 +354,19 @@ function StaffSection({
   loading,
   readonly,
   deactivatingId,
+  editingId,
+  editDisplayName,
+  editPhone,
+  editPosition,
+  editRole,
+  updatingId,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  setEditDisplayName,
+  setEditPhone,
+  setEditPosition,
+  setEditRole,
   onDeactivate,
 }: {
   title: string;
@@ -304,6 +374,19 @@ function StaffSection({
   loading: boolean;
   readonly?: boolean;
   deactivatingId?: string | null;
+  editingId?: string | null;
+  editDisplayName?: string;
+  editPhone?: string;
+  editPosition?: string;
+  editRole?: 'staff' | 'manager';
+  updatingId?: string | null;
+  onStartEdit?: (item: any) => void;
+  onCancelEdit?: () => void;
+  onSaveEdit?: () => void;
+  setEditDisplayName?: (value: string) => void;
+  setEditPhone?: (value: string) => void;
+  setEditPosition?: (value: string) => void;
+  setEditRole?: (value: 'staff' | 'manager') => void;
   onDeactivate?: (item: any) => void;
 }) {
   return (
@@ -313,36 +396,132 @@ function StaffSection({
       {!loading && rows.length === 0 ? (
         <Text style={styles.emptyText}>표시할 직원이 없습니다.</Text>
       ) : null}
-      {rows.map((item) => (
-        <View key={item.id} style={styles.staffCard}>
-          <View style={styles.staffIcon}>
-            <Ionicons name="person-outline" size={20} color="#2563eb" />
-          </View>
-          <View style={styles.staffInfo}>
-            <Text style={styles.staffName}>{item.display_name || '직원'}</Text>
-            <Text style={styles.staffMeta}>{item.staff_login_id}</Text>
-            <Text style={styles.staffMeta}>
-              {item.role === 'manager' ? '매니저' : '직원'} · {item.phone || '전화번호 미등록'}
-            </Text>
-            {item.status === 'inactive' ? (
-              <Text style={styles.inactiveText}>
-                비활성화 {item.left_at ? new Date(item.left_at).toLocaleDateString() : ''}
+      {rows.map((item) => {
+        const isEditing = editingId === item.id && !readonly;
+
+        if (isEditing) {
+          return (
+            <View key={item.id} style={styles.editCard}>
+              <Text style={styles.editTitle}>직원 정보 수정</Text>
+              <TextInput
+                style={styles.input}
+                value={editDisplayName || ''}
+                onChangeText={setEditDisplayName}
+                placeholder="직원 이름 또는 닉네임"
+              />
+              <TextInput
+                style={styles.input}
+                value={editPhone || ''}
+                onChangeText={setEditPhone}
+                placeholder="직원 전화번호"
+                keyboardType="phone-pad"
+              />
+              <TextInput
+                style={styles.input}
+                value={editPosition || ''}
+                onChangeText={setEditPosition}
+                placeholder="직책 예: 현장팀장, 상담실장, 배송담당"
+                maxLength={30}
+              />
+              <RoleSelector value={editRole || 'staff'} onChange={setEditRole || (() => {})} />
+              <Text style={styles.roleHelp}>
+                매니저는 가게 관리 권한만 가지며, 고객이 견적문의나 문의 담당자로 직접 선택할 수 없습니다.
               </Text>
+              <View style={styles.editActionRow}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={onCancelEdit}>
+                  <Text style={styles.cancelText}>취소</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveEditBtn, updatingId === item.id && styles.disabledBtn]}
+                  onPress={onSaveEdit}
+                  disabled={updatingId === item.id}
+                >
+                  <Text style={styles.saveEditText}>
+                    {updatingId === item.id ? '저장 중' : '저장'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        }
+
+        return (
+          <View key={item.id} style={styles.staffCard}>
+            <View style={styles.staffIcon}>
+              <Ionicons name="person-outline" size={20} color="#2563eb" />
+            </View>
+            <View style={styles.staffInfo}>
+              <Text style={styles.staffName}>{item.display_name || '직원'}</Text>
+              <Text style={styles.staffMeta}>{item.staff_login_id}</Text>
+              <Text style={styles.staffMeta}>
+                {(item.position || (item.role === 'manager' ? '가게 관리' : '담당 직원'))}
+                {' · '}
+                {item.role === 'manager' ? '매니저' : '직원'}
+              </Text>
+              <Text style={styles.staffMeta}>{item.phone || '전화번호 미등록'}</Text>
+              {item.role === 'manager' && item.status === 'active' ? (
+                <Text style={styles.managerHelp}>직접 문의 배정 제외</Text>
+              ) : null}
+              {item.status === 'inactive' ? (
+                <Text style={styles.inactiveText}>
+                  비활성화 {item.left_at ? new Date(item.left_at).toLocaleDateString() : ''}
+                </Text>
+              ) : null}
+            </View>
+            {!readonly && onStartEdit ? (
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={() => onStartEdit(item)}
+                disabled={deactivatingId === item.id}
+              >
+                <Text style={styles.editText}>수정</Text>
+              </TouchableOpacity>
+            ) : null}
+            {!readonly && onDeactivate ? (
+              <TouchableOpacity
+                style={styles.deactivateBtn}
+                onPress={() => onDeactivate(item)}
+                disabled={deactivatingId === item.id}
+              >
+                <Text style={styles.deactivateText}>
+                  {deactivatingId === item.id ? '처리 중' : '퇴사'}
+                </Text>
+              </TouchableOpacity>
             ) : null}
           </View>
-          {!readonly && onDeactivate ? (
-            <TouchableOpacity
-              style={styles.deactivateBtn}
-              onPress={() => onDeactivate(item)}
-              disabled={deactivatingId === item.id}
-            >
-              <Text style={styles.deactivateText}>
-                {deactivatingId === item.id ? '처리 중' : '퇴사 처리'}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      ))}
+        );
+      })}
+    </View>
+  );
+}
+
+function RoleSelector({
+  value,
+  onChange,
+}: {
+  value: 'staff' | 'manager';
+  onChange: (value: 'staff' | 'manager') => void;
+}) {
+  return (
+    <View style={styles.roleRow}>
+      {[
+        { key: 'staff' as const, label: '직원' },
+        { key: 'manager' as const, label: '매니저' },
+      ].map((item) => {
+        const active = value === item.key;
+
+        return (
+          <TouchableOpacity
+            key={item.key}
+            style={[styles.roleBtn, active && styles.roleBtnActive]}
+            onPress={() => onChange(item.key)}
+          >
+            <Text style={[styles.roleText, active && styles.roleTextActive]}>
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
@@ -441,7 +620,26 @@ const styles = StyleSheet.create({
   staffInfo: { flex: 1, minWidth: 0 },
   staffName: { color: '#111827', fontSize: 15, fontWeight: '900' },
   staffMeta: { marginTop: 3, color: '#6b7280', fontSize: 12, fontWeight: '700' },
+  managerHelp: { marginTop: 4, color: '#2563eb', fontSize: 12, fontWeight: '900' },
   inactiveText: { marginTop: 4, color: '#b45309', fontSize: 12, fontWeight: '900' },
+  editCard: {
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    padding: 12,
+    gap: 10,
+  },
+  editTitle: { color: '#111827', fontSize: 15, fontWeight: '900' },
+  roleHelp: { color: '#6b7280', fontSize: 12, lineHeight: 18, fontWeight: '700' },
+  editActionRow: { flexDirection: 'row', gap: 8 },
+  editBtn: {
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  editText: { color: '#2563eb', fontSize: 12, fontWeight: '900' },
   deactivateBtn: {
     borderRadius: 999,
     backgroundColor: '#fee2e2',
@@ -449,4 +647,24 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   deactivateText: { color: '#dc2626', fontSize: 12, fontWeight: '900' },
+  cancelBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  cancelText: { color: '#374151', fontSize: 14, fontWeight: '900' },
+  saveEditBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveEditText: { color: '#fff', fontSize: 14, fontWeight: '900' },
 });

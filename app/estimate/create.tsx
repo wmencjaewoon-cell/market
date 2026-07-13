@@ -130,8 +130,9 @@ export default function EstimateCreateScreen() {
 
     const { data: staffData, error: staffError } = await supabase
       .from('store_staff_members')
-      .select('id, store_user_id, staff_user_id, display_name, phone, role, status')
+      .select('id, store_user_id, staff_user_id, display_name, phone, position, role, status')
       .eq('status', 'active')
+      .eq('role', 'staff')
       .in('store_user_id', storeIds)
       .order('display_name', { ascending: true });
 
@@ -435,7 +436,7 @@ export default function EstimateCreateScreen() {
           <View style={styles.staffSelectBox}>
             <Text style={styles.staffSelectTitle}>담당 직원 선택</Text>
             <Text style={styles.storeSelectHelp}>
-              직원을 선택하지 않으면 가게 자체 문의로 접수되고, 가게에서 담당자를 배정할 수 있습니다.
+              직원을 선택하지 않으면 가게 자체 문의로 접수되고, 가게에서 담당자를 배정할 수 있습니다. 매니저는 직접 문의 대상에서 제외됩니다.
             </Text>
             <TouchableOpacity
               style={[
@@ -471,7 +472,8 @@ export default function EstimateCreateScreen() {
                           active && styles.staffChipTextActive,
                         ]}
                       >
-                        {staff.display_name || '직원'} · {staff.role === 'manager' ? '매니저' : '직원'}
+                        {staff.display_name || '직원'}
+                        {staff.position ? ` · ${staff.position}` : ''}
                       </Text>
                     </TouchableOpacity>
                   );
