@@ -26,6 +26,7 @@ import {
   sendKeywordAlertsForListing,
 } from '../lib/listingNotifications';
 import { checkProhibitedContent } from '../lib/prohibited';
+import { getMyStoreAccessContext, type StoreAccessContext } from '../lib/storeStaff';
 import { supabase } from '../lib/supabase';
 
 type ListingCategory = 'trade' | 'share' | 'want';
@@ -150,6 +151,7 @@ export default function ListingForm({
   const [availableNow, setAvailableNow] = useState(false);
   const [availableToday, setAvailableToday] = useState(false);
   const [currentProfile, setCurrentProfile] = useState<any | null>(null);
+  const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [isStoreProduct, setIsStoreProduct] = useState(false);
   const [pickupAvailable, setPickupAvailable] = useState(true);
   const [deliveryAvailable, setDeliveryAvailable] = useState(false);
@@ -172,8 +174,15 @@ export default function ListingForm({
   const isTrade = category === 'trade';
   const isShare = category === 'share';
   const isWant = category === 'want';
+  const effectiveStoreProfile = storeAccess?.canManageStore
+    ? storeAccess.storeProfile
+    : currentProfile;
+  const managedStoreUserId = storeAccess?.canManageStore
+    ? storeAccess.storeUserId
+    : null;
   const isStoreSeller =
-    currentProfile?.user_type === 'store' && !!currentProfile?.business_verified;
+    effectiveStoreProfile?.user_type === 'store' &&
+    !!effectiveStoreProfile?.business_verified;
   const categoryLabel = isTrade ? '판매' : isShare ? '나눔' : '구함';
   const quantityPlaceholder = isTrade ? '판매 수량' : isShare ? '나눔 수량' : '구하는 수량';
   const titlePlaceholder = isWant ? '구하는 자재명' : '제목';
@@ -273,7 +282,7 @@ export default function ListingForm({
 
     const { data: authData } = await supabase.auth.getUser();
     const currentUserId = authData.user?.id;
-    await loadCurrentProfile();
+    const access = await loadCurrentProfile();
 
     const { data, error } = await supabase
       .from('listings')
@@ -294,7 +303,14 @@ export default function ListingForm({
       return;
     }
 
-    if (!currentUserId || data.author_id !== currentUserId) {
+    const canEditOwnPost = !!currentUserId && data.author_id === currentUserId;
+    const canEditManagedStorePost =
+      !!currentUserId &&
+      !!access?.canManageStore &&
+      data.seller_type === 'store' &&
+      data.store_user_id === access.storeUserId;
+
+    if (!canEditOwnPost && !canEditManagedStorePost) {
       showListingFormAlert('권한 없음', '본인 게시글만 수정할 수 있습니다.');
       router.back();
       return;
@@ -345,37 +361,24 @@ export default function ListingForm({
   };
 
   const loadCurrentProfile = async () => {
-    const { data: authData } = await supabase.auth.getUser();
-    const currentUserId = authData.user?.id;
+    const access = await getMyStoreAccessContext();
+    setStoreAccess(access);
+    setCurrentProfile(access.currentProfile);
 
-    if (!currentUserId) {
-      setCurrentProfile(null);
-      return null;
-    }
+    const profileForForm = access.canManageStore
+      ? access.storeProfile
+      : access.currentProfile;
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', currentUserId)
-      .maybeSingle();
-
-    if (error) {
-      console.log('작성자 프로필 조회 실패:', error);
-      return null;
-    }
-
-    setCurrentProfile(data || null);
-
-    if (!isEdit && data?.user_type === 'store' && data?.business_verified) {
+    if (!isEdit && profileForForm?.user_type === 'store' && profileForForm?.business_verified) {
       setIsStoreProduct(true);
       setPickupAvailable(true);
-      setCardAvailable(!!data.store_card_available);
-      setCashReceiptAvailable(!!data.store_cash_receipt_available);
-      setTaxInvoiceAvailable(!!data.store_tax_invoice_available);
-      setAvailableToday(!!data.store_today_available);
+      setCardAvailable(!!profileForForm.store_card_available);
+      setCashReceiptAvailable(!!profileForForm.store_cash_receipt_available);
+      setTaxInvoiceAvailable(!!profileForForm.store_tax_invoice_available);
+      setAvailableToday(!!profileForForm.store_today_available);
     }
 
-    return data || null;
+    return access;
   };
 
   const loadActiveRegion = async () => {
@@ -672,7 +675,7 @@ export default function ListingForm({
     return null;
   };
 
-  const buildListingPayload = (authorId?: string) => {
+  const buildListingPayload = (authorId?: string, forceStoreSeller = false) => {
     const quantityTotal = Number(quantityText);
     const rawQuantityRemaining = isEdit
       ? Number(quantityRemainingText)
@@ -683,8 +686,13 @@ export default function ListingForm({
       ? '무료 나눔'
       : priceText.trim() || null;
     const storeSeller =
-      isStoreSeller || post?.seller_type === 'store' || Boolean(post?.store_user_id);
-    const storeUserId = storeSeller ? authorId || post?.store_user_id || post?.author_id : null;
+      forceStoreSeller ||
+      isStoreSeller ||
+      post?.seller_type === 'store' ||
+      Boolean(post?.store_user_id);
+    const storeUserId = storeSeller
+      ? authorId || managedStoreUserId || post?.store_user_id || post?.author_id
+      : null;
 
     return {
       ...(authorId ? { author_id: authorId } : {}),
@@ -739,16 +747,26 @@ export default function ListingForm({
         return;
       }
 
-      const guard = await canCreateListing();
+      const activeStoreAccess = storeAccess || (await loadCurrentProfile());
+      const canCreateAsManagedStore =
+        !!activeStoreAccess?.canManageStore && !!activeStoreAccess.storeUserId;
+
+      const guard = canCreateAsManagedStore
+        ? await canUseApp()
+        : await canCreateListing();
 
       if (!guard.ok) {
         setErrorMessage(guard.reason || '게시글 등록이 제한되어 있습니다.');
         return;
       }
 
+      const authorId = canCreateAsManagedStore
+        ? activeStoreAccess.storeUserId!
+        : currentUser.id;
+
       const { data: inserted, error } = await supabase
         .from('listings')
-        .insert(buildListingPayload(currentUser.id))
+        .insert(buildListingPayload(authorId, canCreateAsManagedStore))
         .select()
         .single();
 
@@ -767,7 +785,7 @@ export default function ListingForm({
         title,
         content: description,
         region: activeRegionName,
-        authorId: currentUser.id,
+        authorId,
       });
 
       if (showImages && imageUris.length > 0) {

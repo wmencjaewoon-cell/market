@@ -3,6 +3,7 @@ import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getMyStoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreDashboardScreen() {
@@ -22,18 +23,25 @@ export default function StoreDashboardScreen() {
 
     setLoading(true);
 
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    const access = await getMyStoreAccessContext();
+    const storeUserId = access.storeUserId;
+    const profileData = access.storeProfile;
 
     setProfile(profileData || null);
+
+    if (!access.canManageStore || !storeUserId) {
+      setItems([]);
+      setChatCount(0);
+      setInteractionCounts({ phone: 0, directions: 0 });
+      setEstimateCount(0);
+      setLoading(false);
+      return;
+    }
 
     const { data: listingData } = await supabase
       .from('listings')
       .select('id, title, price_text, status, views_count, quantity_total, quantity_remaining, quantity_unit, created_at')
-      .eq('author_id', user.id)
+      .eq('store_user_id', storeUserId)
       .eq('seller_type', 'store')
       .order('created_at', { ascending: false });
 
@@ -58,7 +66,7 @@ export default function StoreDashboardScreen() {
     const { data: interactions } = await supabase
       .from('store_interactions')
       .select('interaction_type')
-      .eq('store_user_id', user.id)
+      .eq('store_user_id', storeUserId)
       .gte('created_at', todayStart.toISOString());
 
     setInteractionCounts({

@@ -12,11 +12,13 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { STORE_CATEGORY_SELECT_OPTIONS } from '../../lib/storeCategories';
+import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreProfileScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any | null>(null);
+  const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [storeCategory, setStoreCategory] = useState('');
   const [customStoreCategory, setCustomStoreCategory] = useState('');
   const [intro, setIntro] = useState('');
@@ -33,17 +35,15 @@ export default function StoreProfileScreen() {
   const loadProfile = useCallback(async () => {
     if (!user) return;
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    const access = await getMyStoreAccessContext();
+    setStoreAccess(access);
 
-    if (error) {
-      setMessage(error.message);
+    if (!access.canManageStore || !access.storeProfile) {
+      setProfile(null);
       return;
     }
 
+    const data = access.storeProfile;
     setProfile(data || null);
     const savedCategory = data?.store_category || '';
     if (savedCategory && !STORE_CATEGORY_SELECT_OPTIONS.includes(savedCategory)) {
@@ -68,7 +68,7 @@ export default function StoreProfileScreen() {
   }, [loadProfile]);
 
   const saveProfile = async () => {
-    if (!user) return;
+    if (!user || !storeAccess?.storeUserId) return;
 
     try {
       setSaving(true);
@@ -76,21 +76,18 @@ export default function StoreProfileScreen() {
       const finalStoreCategory =
         storeCategory === '기타' ? customStoreCategory.trim() : storeCategory.trim();
 
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          store_category: finalStoreCategory || null,
-          store_intro: intro.trim() || null,
-          store_notice: notice.trim() || null,
-          store_business_hours: businessHours.trim() || null,
-          store_accepts_inquiries: acceptsInquiries,
-          store_today_available: todayAvailable,
-          store_card_available: cardAvailable,
-          store_cash_receipt_available: cashReceiptAvailable,
-          store_tax_invoice_available: taxInvoiceAvailable,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id);
+      const { error } = await supabase.rpc('update_store_profile_settings', {
+        p_store_user_id: storeAccess.storeUserId,
+        p_store_category: finalStoreCategory || null,
+        p_store_intro: intro.trim() || null,
+        p_store_notice: notice.trim() || null,
+        p_store_business_hours: businessHours.trim() || null,
+        p_store_accepts_inquiries: acceptsInquiries,
+        p_store_today_available: todayAvailable,
+        p_store_card_available: cardAvailable,
+        p_store_cash_receipt_available: cashReceiptAvailable,
+        p_store_tax_invoice_available: taxInvoiceAvailable,
+      });
 
       if (error) {
         setMessage(error.message);
@@ -105,6 +102,7 @@ export default function StoreProfileScreen() {
   };
 
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const canManageStore = !!storeAccess?.canManageStore;
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -112,7 +110,7 @@ export default function StoreProfileScreen() {
 
       <Text style={styles.title}>가게 프로필</Text>
 
-      {!isVerifiedStore ? (
+      {!isVerifiedStore || !canManageStore ? (
         <View style={styles.noticeBox}>
           <Text style={styles.noticeTitle}>가게 인증이 필요합니다</Text>
           <Text style={styles.noticeDesc}>가게 프로필 관리는 가게 인증 완료 계정만 사용할 수 있습니다.</Text>

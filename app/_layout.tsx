@@ -114,10 +114,13 @@ function RootNavigator() {
           }}
         />
         <Stack.Screen name="profile/edit" options={{ title: '내 프로필' }} />
+        <Stack.Screen name="my/change-password" options={{ title: '비밀번호 변경' }} />
         <Stack.Screen name="admin" options={{ title: '관리자' }} />
         <Stack.Screen name="review/create" options={{ title: '리뷰 작성' }} />
         <Stack.Screen name="store/dashboard" options={{ title: '가게 대시보드' }} />
+        <Stack.Screen name="store/product-create" options={{ title: '상품 등록' }} />
         <Stack.Screen name="store/products" options={{ title: '상품 관리' }} />
+        <Stack.Screen name="store/estimates" options={{ title: '견적/고객관리' }} />
         <Stack.Screen name="store/profile" options={{ title: '가게 프로필' }} />
         <Stack.Screen name="store/staff" options={{ title: '직원 관리' }} />
         <Stack.Screen name="store/[id]" options={{ title: '가게 상세' }} />

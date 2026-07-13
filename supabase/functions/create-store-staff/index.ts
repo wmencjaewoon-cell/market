@@ -114,18 +114,45 @@ serve(async (req) => {
       );
     }
 
+    const callerStatus = callerProfile.status || "active";
     const isAdmin =
-      callerProfile.role === "admin" && callerProfile.status !== "blocked";
+      callerProfile.role === "admin" && callerStatus !== "blocked";
     const isVerifiedStore =
       callerProfile.user_type === "store" &&
       callerProfile.business_verified === true &&
-      (callerProfile.status || "active") === "active";
+      callerStatus === "active";
+
+    if (!isAdmin && callerStatus !== "active") {
+      return errorResponse("활성 계정만 직원 계정을 만들 수 있습니다.", 403, {
+        status: callerProfile.status,
+      });
+    }
+
+    let managerMembership: { store_user_id: string } | null = null;
+
+    if (!isAdmin && !isVerifiedStore) {
+      const { data: membershipData, error: membershipError } = await adminClient
+        .from("store_staff_members")
+        .select("store_user_id")
+        .eq("staff_user_id", user.id)
+        .eq("role", "manager")
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (membershipError) {
+        return errorResponse("매니저 권한을 확인하지 못했습니다.", 403, membershipError.message);
+      }
+
+      managerMembership = membershipData || null;
+    }
 
     const storeUserId = isAdmin && requestedStoreUserId
       ? requestedStoreUserId
-      : user.id;
+      : isVerifiedStore
+        ? user.id
+        : managerMembership?.store_user_id || user.id;
 
-    if (!isAdmin && !isVerifiedStore) {
+    if (!isAdmin && !isVerifiedStore && !managerMembership) {
       return errorResponse("직원 생성 권한이 없습니다.", 403, {
         userType: callerProfile.user_type,
         businessVerified: callerProfile.business_verified,
@@ -188,7 +215,7 @@ serve(async (req) => {
       phone,
       user_type: "staff",
       status: "active",
-      can_create_listing: false,
+      can_create_listing: role === "manager",
       can_start_chat: true,
       reports_count: 0,
       trust_points: 0,

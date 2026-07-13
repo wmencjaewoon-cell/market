@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 type ProductFilter = 'all' | 'active' | 'reserved' | 'done' | 'hidden';
@@ -34,6 +35,7 @@ function getStatusLabel(status?: string) {
 
 export default function StoreProductsScreen() {
   const { user } = useAuth();
+  const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [filter, setFilter] = useState<ProductFilter>('all');
   const [loading, setLoading] = useState(true);
@@ -42,6 +44,15 @@ export default function StoreProductsScreen() {
     if (!user) return;
 
     setLoading(true);
+
+    const access = await getMyStoreAccessContext();
+    setStoreAccess(access);
+
+    if (!access.canManageStore || !access.storeUserId) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('listings')
@@ -53,7 +64,7 @@ export default function StoreProductsScreen() {
           sort_order
         )
       `)
-      .eq('author_id', user.id)
+      .eq('store_user_id', access.storeUserId)
       .eq('seller_type', 'store')
       .order('created_at', { ascending: false });
 
@@ -85,7 +96,7 @@ export default function StoreProductsScreen() {
   }, [filter, items]);
 
   const updateStatus = async (item: any, status: 'active' | 'reserved' | 'done') => {
-    if (!user) return;
+    if (!user || !storeAccess?.storeUserId) return;
 
     const quantityTotal = Math.max(1, Number(item.quantity_total ?? 1));
     const nextValues = {
@@ -99,7 +110,7 @@ export default function StoreProductsScreen() {
       .from('listings')
       .update(nextValues)
       .eq('id', item.id)
-      .eq('author_id', user.id);
+      .eq('store_user_id', storeAccess.storeUserId);
 
     if (error) {
       Alert.alert('상태 변경 실패', error.message);
@@ -112,7 +123,7 @@ export default function StoreProductsScreen() {
   };
 
   const toggleHidden = async (item: any) => {
-    if (!user) return;
+    if (!user || !storeAccess?.storeUserId) return;
 
     const isHidden = item.status === 'hidden';
     const restoreStatus =
@@ -133,7 +144,7 @@ export default function StoreProductsScreen() {
       .from('listings')
       .update(nextValues)
       .eq('id', item.id)
-      .eq('author_id', user.id);
+      .eq('store_user_id', storeAccess.storeUserId);
 
     if (error) {
       Alert.alert('숨김 처리 실패', error.message);
@@ -146,7 +157,7 @@ export default function StoreProductsScreen() {
   };
 
   const duplicateProduct = async (item: any) => {
-    if (!user) return;
+    if (!user || !storeAccess?.storeUserId) return;
 
     const ok =
       Platform.OS === 'web'
@@ -167,7 +178,8 @@ export default function StoreProductsScreen() {
   };
 
   const runDuplicateProduct = async (item: any) => {
-    if (!user) return;
+    const storeUserId = storeAccess?.storeUserId;
+    if (!user || !storeUserId) return;
 
     const {
       id: _id,
@@ -181,8 +193,8 @@ export default function StoreProductsScreen() {
       .from('listings')
       .insert({
         ...copy,
-        author_id: user.id,
-        store_user_id: user.id,
+        author_id: storeUserId,
+        store_user_id: storeUserId,
         seller_type: 'store',
         status: 'active',
         title: `${item.title} 복사본`,
@@ -279,7 +291,9 @@ export default function StoreProductsScreen() {
         })}
       </View>
 
-      {loading ? (
+      {!loading && !storeAccess?.canManageStore ? (
+        <Text style={styles.emptyText}>가게 매니저 또는 가게 인증 완료 계정만 사용할 수 있습니다.</Text>
+      ) : loading ? (
         <View style={styles.center}>
           <ActivityIndicator />
         </View>

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 type CreatedStaffCredential = {
@@ -42,6 +43,7 @@ async function getEdgeFunctionErrorMessage(error: any) {
 export default function StoreStaffScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any | null>(null);
+  const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [staffRows, setStaffRows] = useState<any[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
@@ -58,18 +60,22 @@ export default function StoreStaffScreen() {
 
     setLoading(true);
 
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('id, display_name, user_type, business_verified, status')
-      .eq('id', user.id)
-      .maybeSingle();
+    const access = await getMyStoreAccessContext();
+    setStoreAccess(access);
+    const profileData = access.storeProfile;
 
     setProfile(profileData || null);
+
+    if (!access.canManageStore || !access.storeUserId) {
+      setStaffRows([]);
+      setLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('store_staff_members')
       .select('*')
-      .eq('store_user_id', user.id)
+      .eq('store_user_id', access.storeUserId)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -87,8 +93,11 @@ export default function StoreStaffScreen() {
     void loadStaff();
   }, [loadStaff]);
 
-  const isVerifiedStore =
-    profile?.user_type === 'store' && !!profile?.business_verified && profile?.status !== 'blocked';
+  const canManageStore =
+    !!storeAccess?.canManageStore &&
+    profile?.user_type === 'store' &&
+    !!profile?.business_verified &&
+    profile?.status !== 'blocked';
 
   const activeStaff = useMemo(
     () => staffRows.filter((item) => item.status === 'active'),
@@ -107,6 +116,11 @@ export default function StoreStaffScreen() {
       return;
     }
 
+    if (!storeAccess?.canManageStore || !storeAccess.storeUserId) {
+      setMessage('직원 생성 권한이 없습니다.');
+      return;
+    }
+
     try {
       setCreating(true);
       setMessage('');
@@ -117,6 +131,7 @@ export default function StoreStaffScreen() {
           displayName: displayName.trim(),
           phone: phone.trim() || null,
           role,
+          storeUserId: storeAccess?.storeUserId,
         },
       });
 
@@ -189,10 +204,10 @@ export default function StoreStaffScreen() {
         직원 계정은 비활성화되어도 견적, 상담, 채팅 이력이 삭제되지 않습니다.
       </Text>
 
-      {!isVerifiedStore ? (
+      {!canManageStore ? (
         <View style={styles.noticeBox}>
           <Text style={styles.noticeTitle}>가게 인증이 필요합니다</Text>
-          <Text style={styles.noticeText}>직원 관리는 가게 인증 완료 계정만 사용할 수 있습니다.</Text>
+          <Text style={styles.noticeText}>직원 관리는 가게 인증 완료 계정 또는 가게 매니저만 사용할 수 있습니다.</Text>
         </View>
       ) : (
         <>
@@ -249,7 +264,7 @@ export default function StoreStaffScreen() {
               <Text style={styles.credentialText}>임시 비밀번호: {createdCredential.password}</Text>
               <Text style={styles.credentialHelp}>
                 이 비밀번호는 다시 확인할 수 없습니다. 직원에게 전달한 뒤 첫 로그인 후
-                프로필에서 닉네임과 전화번호를 확인하게 해주세요.
+                내정보에서 비밀번호를 변경하고 프로필에서 닉네임과 전화번호를 확인하게 해주세요.
               </Text>
             </View>
           ) : null}

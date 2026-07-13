@@ -116,6 +116,8 @@ export default function MyScreen() {
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
   const isActiveStoreStaff = !!staffMembership;
+  const isStoreManager = staffMembership?.role === 'manager';
+  const canManageStore = isVerifiedStore || isStoreManager;
   const sellerLevel = getSellerLevel(profile);
   const sellerPoints = getSellerPoints(profile);
   const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
@@ -144,7 +146,7 @@ export default function MyScreen() {
 
             <Text style={styles.name}>{profile?.display_name || '이름 없음'}</Text>
             <Text style={styles.sub}>
-              {isVerifiedStore ? '가게' : '개인'}
+              {isVerifiedStore ? '가게' : isStoreManager ? '가게 매니저' : isActiveStoreStaff ? '가게 직원' : '개인'}
             </Text>
 
             <View style={styles.profileBadgeRow}>
@@ -195,7 +197,7 @@ export default function MyScreen() {
 
         {user ? (
           <>
-            {isVerifiedStore ? (
+            {canManageStore ? (
               <Section title="내 가게 관리">
                 <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
                 <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
@@ -207,7 +209,7 @@ export default function MyScreen() {
               </Section>
             ) : null}
 
-            {isActiveStoreStaff ? (
+            {isActiveStoreStaff && !isStoreManager ? (
               <Section title="직원 업무">
                 <MenuItem title="배정된 견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
               </Section>
@@ -237,6 +239,7 @@ export default function MyScreen() {
           <MenuItem title="운영정책" onPress={() => router.push('/my/operation-policy' as any)} />
           {user ? (
             <>
+              <MenuItem title="비밀번호 변경" onPress={() => router.push('/my/change-password' as any)} />
               <MenuItem title="차단한 사용자" onPress={() => router.push('/my/blocked-users' as any)} />
               <MenuItem title="회원탈퇴" onPress={() => router.push('/my/delete-account' as any)} />
             </>

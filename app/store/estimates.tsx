@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getMyStoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 type CustomerStatus =
@@ -55,6 +56,7 @@ export default function StoreEstimatesScreen() {
   const { user } = useAuth();
   const [effectiveStoreId, setEffectiveStoreId] = useState<string | null>(null);
   const [isStoreOwner, setIsStoreOwner] = useState(false);
+  const [canAssignStaff, setCanAssignStaff] = useState(false);
   const [activeStaffMembership, setActiveStaffMembership] = useState<any | null>(null);
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
@@ -70,32 +72,13 @@ export default function StoreEstimatesScreen() {
 
     setLoading(true);
 
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('id, user_type, business_verified, status')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const verifiedOwner =
-      profileData?.user_type === 'store' &&
-      !!profileData?.business_verified &&
-      profileData?.status !== 'blocked';
-    let nextEffectiveStoreId = verifiedOwner ? user.id : null;
-    let nextStaffMembership: any | null = null;
-
-    if (!verifiedOwner) {
-      const { data: staffData } = await supabase
-        .from('store_staff_members')
-        .select('*')
-        .eq('staff_user_id', user.id)
-        .eq('status', 'active')
-        .maybeSingle();
-
-      nextStaffMembership = staffData || null;
-      nextEffectiveStoreId = staffData?.store_user_id || null;
-    }
+    const access = await getMyStoreAccessContext();
+    const verifiedOwner = access.isStoreOwner;
+    const nextEffectiveStoreId = access.storeUserId;
+    const nextStaffMembership = access.membership;
 
     setIsStoreOwner(verifiedOwner);
+    setCanAssignStaff(access.canManageStore);
     setActiveStaffMembership(nextStaffMembership);
     setEffectiveStoreId(nextEffectiveStoreId);
 
@@ -109,7 +92,7 @@ export default function StoreEstimatesScreen() {
       return;
     }
 
-    if (verifiedOwner) {
+    if (access.canManageStore) {
       const { data: staffData } = await supabase
         .from('store_staff_members')
         .select('id, store_user_id, staff_user_id, display_name, phone, role, status')
@@ -342,7 +325,7 @@ export default function StoreEstimatesScreen() {
   };
 
   const assignStaff = async (requestId: number, staffUserId: string | null) => {
-    if (!isStoreOwner) return;
+    if (!canAssignStaff) return;
 
     setSavingId(requestId);
 
@@ -455,7 +438,7 @@ export default function StoreEstimatesScreen() {
                       {item.address ? <Text style={styles.addressText}>주소: {item.address}</Text> : null}
                       <Text style={styles.bodyText}>{item.description || '상세 내용 없음'}</Text>
 
-                      {isStoreOwner ? (
+                      {canAssignStaff ? (
                         <View style={styles.assignmentBox}>
                           <Text style={styles.assignmentTitle}>담당 직원 배정</Text>
                           <View style={styles.assignmentRow}>
