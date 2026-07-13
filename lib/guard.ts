@@ -36,6 +36,10 @@ function getRestrictionReason(profile: ProfileRestriction) {
     return '탈퇴 대기 중인 계정입니다. 탈퇴를 취소해야 이용할 수 있습니다.';
   }
 
+  if (status === 'staff_inactive') {
+    return '퇴사 처리된 직원 계정입니다. 가게 관리자에게 문의해 주세요.';
+  }
+
   if (status === 'blocked') {
     return `${reasonPrefix} 영구 이용제한된 계정입니다.`;
   }

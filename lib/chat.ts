@@ -6,19 +6,22 @@ type SendMessageOptions = {
   skipProhibitedCheck?: boolean;
 };
 
-async function ensureRoomMembers(roomId: string, me: string, sellerId: string) {
+async function ensureRoomMembers(roomId: string, me: string, sellerId: string, staffId?: string | null) {
+  const members = [
+    { room_id: roomId, user_id: me },
+    { room_id: roomId, user_id: sellerId },
+  ];
+
+  if (staffId && staffId !== me && staffId !== sellerId) {
+    members.push({ room_id: roomId, user_id: staffId });
+  }
+
   const { error } = await supabase
     .from('chat_room_members')
-    .upsert(
-      [
-        { room_id: roomId, user_id: me },
-        { room_id: roomId, user_id: sellerId },
-      ],
-      {
-        onConflict: 'room_id,user_id',
-        ignoreDuplicates: true,
-      }
-    );
+    .upsert(members, {
+      onConflict: 'room_id,user_id',
+      ignoreDuplicates: true,
+    });
 
   if (error) throw error;
 }
@@ -81,7 +84,8 @@ export async function getOrCreateRoom(
 
 export async function getOrCreateStoreRoom(
   storeUserId: string,
-  currentUserId?: string
+  currentUserId?: string,
+  assignedStaffUserId?: string | null
 ) {
   let me = currentUserId;
 
@@ -113,7 +117,17 @@ export async function getOrCreateStoreRoom(
   if (existingError) throw existingError;
 
   if (existingRoom?.id) {
-    ensureRoomMembers(existingRoom.id, me, storeUserId).catch((error) => {
+    if (assignedStaffUserId) {
+      supabase
+        .from('chat_rooms')
+        .update({ assigned_staff_user_id: assignedStaffUserId })
+        .eq('id', existingRoom.id)
+        .then(({ error }) => {
+          if (error) console.log('가게 채팅 담당자 배정 실패:', error);
+        });
+    }
+
+    ensureRoomMembers(existingRoom.id, me, storeUserId, assignedStaffUserId).catch((error) => {
       console.log('가게 채팅방 멤버 복구 실패:', error);
     });
     return existingRoom.id;
@@ -124,6 +138,7 @@ export async function getOrCreateStoreRoom(
     .insert({
       listing_id: null,
       store_user_id: storeUserId,
+      assigned_staff_user_id: assignedStaffUserId || null,
       created_by: me,
     })
     .select('id')
@@ -131,7 +146,7 @@ export async function getOrCreateStoreRoom(
 
   if (roomError) throw roomError;
 
-  await ensureRoomMembers(room.id, me, storeUserId);
+  await ensureRoomMembers(room.id, me, storeUserId, assignedStaffUserId);
 
   return room.id;
 }

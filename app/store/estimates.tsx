@@ -53,7 +53,10 @@ function formatAmount(value?: number | null) {
 
 export default function StoreEstimatesScreen() {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<any | null>(null);
+  const [effectiveStoreId, setEffectiveStoreId] = useState<string | null>(null);
+  const [isStoreOwner, setIsStoreOwner] = useState(false);
+  const [activeStaffMembership, setActiveStaffMembership] = useState<any | null>(null);
+  const [staffMembers, setStaffMembers] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [statusRows, setStatusRows] = useState<Record<number, any>>({});
   const [quoteRows, setQuoteRows] = useState<Record<number, any>>({});
@@ -69,11 +72,55 @@ export default function StoreEstimatesScreen() {
 
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, user_type, business_verified')
+      .select('id, user_type, business_verified, status')
       .eq('id', user.id)
       .maybeSingle();
 
-    setProfile(profileData || null);
+    const verifiedOwner =
+      profileData?.user_type === 'store' &&
+      !!profileData?.business_verified &&
+      profileData?.status !== 'blocked';
+    let nextEffectiveStoreId = verifiedOwner ? user.id : null;
+    let nextStaffMembership: any | null = null;
+
+    if (!verifiedOwner) {
+      const { data: staffData } = await supabase
+        .from('store_staff_members')
+        .select('*')
+        .eq('staff_user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      nextStaffMembership = staffData || null;
+      nextEffectiveStoreId = staffData?.store_user_id || null;
+    }
+
+    setIsStoreOwner(verifiedOwner);
+    setActiveStaffMembership(nextStaffMembership);
+    setEffectiveStoreId(nextEffectiveStoreId);
+
+    if (!nextEffectiveStoreId) {
+      setRequests([]);
+      setStatusRows({});
+      setQuoteRows({});
+      setQuoteDrafts({});
+      setStaffMembers([]);
+      setLoading(false);
+      return;
+    }
+
+    if (verifiedOwner) {
+      const { data: staffData } = await supabase
+        .from('store_staff_members')
+        .select('id, store_user_id, staff_user_id, display_name, phone, role, status')
+        .eq('store_user_id', nextEffectiveStoreId)
+        .eq('status', 'active')
+        .order('display_name', { ascending: true });
+
+      setStaffMembers(staffData || []);
+    } else {
+      setStaffMembers(nextStaffMembership ? [nextStaffMembership] : []);
+    }
 
     const { data: requestData, error } = await supabase
       .from('estimate_requests')
@@ -124,12 +171,12 @@ export default function StoreEstimatesScreen() {
       supabase
         .from('estimate_request_store_statuses')
         .select('*')
-        .eq('store_user_id', user.id)
+        .eq('store_user_id', nextEffectiveStoreId)
         .in('estimate_request_id', requestIds),
       supabase
         .from('estimate_quotes')
         .select('*')
-        .eq('store_user_id', user.id)
+        .eq('store_user_id', nextEffectiveStoreId)
         .in('estimate_request_id', requestIds),
     ]);
 
@@ -171,7 +218,8 @@ export default function StoreEstimatesScreen() {
     void loadEstimates();
   }, [loadEstimates]);
 
-  const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const canUseEstimates =
+    isStoreOwner || (!!activeStaffMembership && !!effectiveStoreId);
 
   const filteredRequests = useMemo(() => {
     if (filter === 'all') return requests;
@@ -192,7 +240,7 @@ export default function StoreEstimatesScreen() {
   }, [requests, statusRows]);
 
   const updateCustomerStatus = async (requestId: number, status: CustomerStatus) => {
-    if (!user) return;
+    if (!user || !effectiveStoreId) return;
 
     setSavingId(requestId);
 
@@ -203,7 +251,7 @@ export default function StoreEstimatesScreen() {
         {
           id: current?.id,
           estimate_request_id: requestId,
-          store_user_id: user.id,
+          store_user_id: effectiveStoreId,
           status,
           memo: current?.memo || null,
           last_contacted_at:
@@ -231,7 +279,7 @@ export default function StoreEstimatesScreen() {
   };
 
   const saveQuote = async (requestId: number) => {
-    if (!user) return;
+    if (!user || !effectiveStoreId) return;
 
     const draft = quoteDrafts[requestId] || {};
     const laborCost = parseAmount(draft.laborCost || '');
@@ -247,7 +295,7 @@ export default function StoreEstimatesScreen() {
         {
           id: quoteRows[requestId]?.id,
           estimate_request_id: requestId,
-          store_user_id: user.id,
+          store_user_id: effectiveStoreId,
           title: '견적서',
           status: 'draft',
           labor_cost: laborCost,
@@ -293,6 +341,29 @@ export default function StoreEstimatesScreen() {
     }));
   };
 
+  const assignStaff = async (requestId: number, staffUserId: string | null) => {
+    if (!isStoreOwner) return;
+
+    setSavingId(requestId);
+
+    const { error } = await supabase
+      .from('estimate_requests')
+      .update({
+        assigned_staff_user_id: staffUserId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', requestId);
+
+    setSavingId(null);
+
+    if (error) {
+      Alert.alert('담당자 배정 실패', error.message);
+      return;
+    }
+
+    await loadEstimates();
+  };
+
   const getEstimateImageUrl = (path?: string | null) => {
     if (!path) return null;
     return supabase.storage.from('estimate-images').getPublicUrl(path).data.publicUrl;
@@ -307,10 +378,12 @@ export default function StoreEstimatesScreen() {
         <Text style={styles.desc}>신규 문의부터 공사 완료까지 업체별로 상태를 관리합니다.</Text>
       </View>
 
-      {!isVerifiedStore ? (
+      {!canUseEstimates ? (
         <View style={styles.noticeBox}>
           <Text style={styles.noticeTitle}>가게 인증이 필요합니다</Text>
-          <Text style={styles.noticeText}>견적문의 열람과 고객관리는 가게 인증 완료 계정만 사용할 수 있습니다.</Text>
+          <Text style={styles.noticeText}>
+            견적문의 열람과 고객관리는 가게 인증 완료 계정 또는 활성 직원 계정만 사용할 수 있습니다.
+          </Text>
         </View>
       ) : (
         <>
@@ -381,6 +454,63 @@ export default function StoreEstimatesScreen() {
 
                       {item.address ? <Text style={styles.addressText}>주소: {item.address}</Text> : null}
                       <Text style={styles.bodyText}>{item.description || '상세 내용 없음'}</Text>
+
+                      {isStoreOwner ? (
+                        <View style={styles.assignmentBox}>
+                          <Text style={styles.assignmentTitle}>담당 직원 배정</Text>
+                          <View style={styles.assignmentRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.assignmentChip,
+                                !item.assigned_staff_user_id && styles.assignmentChipActive,
+                              ]}
+                              onPress={() => assignStaff(requestId, null)}
+                              disabled={savingId === requestId}
+                            >
+                              <Text
+                                style={[
+                                  styles.assignmentChipText,
+                                  !item.assigned_staff_user_id &&
+                                    styles.assignmentChipTextActive,
+                                ]}
+                              >
+                                가게 본계정
+                              </Text>
+                            </TouchableOpacity>
+                            {staffMembers.map((staff) => {
+                              const active = item.assigned_staff_user_id === staff.staff_user_id;
+
+                              return (
+                                <TouchableOpacity
+                                  key={staff.id}
+                                  style={[
+                                    styles.assignmentChip,
+                                    active && styles.assignmentChipActive,
+                                  ]}
+                                  onPress={() => assignStaff(requestId, staff.staff_user_id)}
+                                  disabled={savingId === requestId}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.assignmentChipText,
+                                      active && styles.assignmentChipTextActive,
+                                    ]}
+                                  >
+                                    {staff.display_name || '직원'}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      ) : activeStaffMembership ? (
+                        <View style={styles.assignmentBox}>
+                          <Text style={styles.assignmentTitle}>내 담당 문의</Text>
+                          <Text style={styles.metaText}>
+                            {activeStaffMembership.display_name || '직원'} 계정으로 배정된 문의입니다.
+                          </Text>
+                        </View>
+                      ) : null}
 
                       <View style={styles.statusActions}>
                         {STATUS_OPTIONS.filter((option) => option.key !== 'all').map((option) => (
@@ -605,6 +735,30 @@ const styles = StyleSheet.create({
   metaText: { marginTop: 4, color: '#6b7280', fontSize: 12, fontWeight: '700', lineHeight: 17 },
   addressText: { color: '#374151', fontSize: 13, fontWeight: '800', lineHeight: 19 },
   bodyText: { color: '#374151', fontSize: 14, lineHeight: 21 },
+  assignmentBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    padding: 12,
+    gap: 8,
+  },
+  assignmentTitle: { color: '#111827', fontSize: 13, fontWeight: '900' },
+  assignmentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  assignmentChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  assignmentChipActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  assignmentChipText: { color: '#374151', fontSize: 12, fontWeight: '900' },
+  assignmentChipTextActive: { color: '#1d4ed8' },
   statusActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   statusActionBtn: {
     borderRadius: 999,

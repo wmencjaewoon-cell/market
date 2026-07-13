@@ -119,6 +119,7 @@ function RootNavigator() {
         <Stack.Screen name="store/dashboard" options={{ title: '가게 대시보드' }} />
         <Stack.Screen name="store/products" options={{ title: '상품 관리' }} />
         <Stack.Screen name="store/profile" options={{ title: '가게 프로필' }} />
+        <Stack.Screen name="store/staff" options={{ title: '직원 관리' }} />
         <Stack.Screen name="store/[id]" options={{ title: '가게 상세' }} />
 
         <Stack.Screen name="open-chat/[id]" options={{ headerShown: false }} />

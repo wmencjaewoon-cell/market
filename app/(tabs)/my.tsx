@@ -29,6 +29,7 @@ const COMPANY_INFO_ROWS = [
 export default function MyScreen() {
   const { user, signOut } = useAuth();
   const [profile, setProfile] = useState<any>(null);
+  const [staffMembership, setStaffMembership] = useState<any | null>(null);
   const [companyInfoOpen, setCompanyInfoOpen] = useState(false);
 
   const fetchProfile = useCallback(async () => {
@@ -47,6 +48,15 @@ export default function MyScreen() {
 
     if (data) {
       setProfile(data);
+
+      const { data: staffData } = await supabase
+        .from('store_staff_members')
+        .select('*')
+        .eq('staff_user_id', user.id)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      setStaffMembership(staffData || null);
       return;
     }
 
@@ -73,11 +83,13 @@ export default function MyScreen() {
     }
 
     setProfile(created);
+    setStaffMembership(null);
   }, [user]);
 
   useEffect(() => {
     if (!user) {
       setProfile(null);
+      setStaffMembership(null);
       return;
     }
 
@@ -103,6 +115,7 @@ export default function MyScreen() {
 
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const isActiveStoreStaff = !!staffMembership;
   const sellerLevel = getSellerLevel(profile);
   const sellerPoints = getSellerPoints(profile);
   const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
@@ -186,10 +199,17 @@ export default function MyScreen() {
               <Section title="내 가게 관리">
                 <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
                 <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
                 <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
                 <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
                 <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
                 <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
+              </Section>
+            ) : null}
+
+            {isActiveStoreStaff ? (
+              <Section title="직원 업무">
+                <MenuItem title="배정된 견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
               </Section>
             ) : null}
 

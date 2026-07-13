@@ -133,6 +133,7 @@ export default function ProfileEditScreen() {
   const [loading, setLoading] = useState(false);
 
   const [userType, setUserType] = useState<'store' | 'personal'>('personal');
+  const [isStaffProfile, setIsStaffProfile] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -200,6 +201,7 @@ export default function ProfileEditScreen() {
       .single();
 
     if (!error && data) {
+      setIsStaffProfile(data.user_type === 'staff');
       setUserType(data.user_type === 'store' ? 'store' : 'personal');
       setDisplayName(data.display_name || oauthProfile.displayName || '');
       setPhone(data.phone || oauthProfile.phone || '');
@@ -221,6 +223,7 @@ export default function ProfileEditScreen() {
         setStoreLongitude(data.store_longitude ?? null);
       }
     } else if (!data) {
+      setIsStaffProfile(false);
       setDisplayName((current) => current || oauthProfile.displayName || '');
       setPhone((current) => current || oauthProfile.phone || '');
       setEmail((current) => current || oauthProfile.email || '');
@@ -727,7 +730,7 @@ export default function ProfileEditScreen() {
       const { error } = await supabase
         .from('profiles')
         .update({
-          user_type: 'personal',
+          user_type: isStaffProfile ? 'staff' : 'personal',
           display_name: displayName.trim(),
           email: email.trim() || null,
           phone: phone.trim() || null,
@@ -750,6 +753,21 @@ export default function ProfileEditScreen() {
       if (error) {
         setMessage(error.message);
         return;
+      }
+
+      if (isStaffProfile) {
+        const { error: staffUpdateError } = await supabase.rpc(
+          'update_my_store_staff_profile',
+          {
+            p_display_name: displayName.trim(),
+            p_phone: phone.trim() || null,
+          }
+        );
+
+        if (staffUpdateError) {
+          setMessage(staffUpdateError.message);
+          return;
+        }
       }
 
       setAvatarPath(nextAvatarPath);
@@ -810,10 +828,18 @@ export default function ProfileEditScreen() {
             </Text>
           </View>
         ) : null}
+        {isStaffProfile ? (
+          <View style={styles.readOnlyBox}>
+            <Text style={styles.readOnlyTitle}>직원 계정</Text>
+            <Text style={styles.readOnlyText}>
+              직원 계정은 닉네임, 전화번호, 이메일만 수정할 수 있습니다.
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.row}>
           <TouchableOpacity
             style={[styles.typeBtn, userType === 'personal' && styles.typeBtnActive]}
-            disabled={isApprovedStoreProfile}
+            disabled={isApprovedStoreProfile || isStaffProfile}
             onPress={() => {
               setUserType('personal');
               setBusinessVerified(false);
@@ -843,7 +869,7 @@ export default function ProfileEditScreen() {
 
           <TouchableOpacity
             style={[styles.typeBtn, userType === 'store' && styles.typeBtnActive]}
-            disabled={isApprovedStoreProfile}
+            disabled={isApprovedStoreProfile || isStaffProfile}
             onPress={() => {
               setUserType('store');
               if (storeVerificationStatus !== 'approved') {

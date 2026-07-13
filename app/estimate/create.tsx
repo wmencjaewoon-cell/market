@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getProfileImageUrl } from '../../lib/profileImage';
-import { fetchMyRegionSettings, fetchMyRegions } from '../../lib/region';
+import { fetchMyRegions, fetchMyRegionSettings } from '../../lib/region';
 import { getStoreCategoryLabel, STORE_CATEGORY_OPTIONS } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
 
@@ -67,8 +67,10 @@ export default function EstimateCreateScreen() {
   const [description, setDescription] = useState('');
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [stores, setStores] = useState<any[]>([]);
+  const [staffMembers, setStaffMembers] = useState<any[]>([]);
   const [selectedStoreCategory, setSelectedStoreCategory] = useState('전체');
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedStaffUserId, setSelectedStaffUserId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -117,7 +119,29 @@ export default function EstimateCreateScreen() {
       return;
     }
 
-    setStores(data || []);
+    const nextStores = data || [];
+    setStores(nextStores);
+
+    const storeIds = nextStores.map((store: any) => store.id).filter(Boolean);
+    if (storeIds.length === 0) {
+      setStaffMembers([]);
+      return;
+    }
+
+    const { data: staffData, error: staffError } = await supabase
+      .from('store_staff_members')
+      .select('id, store_user_id, staff_user_id, display_name, phone, role, status')
+      .eq('status', 'active')
+      .in('store_user_id', storeIds)
+      .order('display_name', { ascending: true });
+
+    if (staffError) {
+      console.log('견적문의 직원 목록 조회 실패:', staffError);
+      setStaffMembers([]);
+      return;
+    }
+
+    setStaffMembers(staffData || []);
   };
 
   const filteredStores = useMemo(() => {
@@ -130,6 +154,25 @@ export default function EstimateCreateScreen() {
       return categoryLabel === selectedStoreCategory;
     });
   }, [selectedStoreCategory, stores]);
+
+  const selectedStoreStaff = useMemo(() => {
+    if (!selectedStoreId) return [];
+    return staffMembers.filter((staff) => staff.store_user_id === selectedStoreId);
+  }, [selectedStoreId, staffMembers]);
+
+  useEffect(() => {
+    if (!selectedStoreId) {
+      setSelectedStaffUserId(null);
+      return;
+    }
+
+    if (
+      selectedStaffUserId &&
+      !selectedStoreStaff.some((staff) => staff.staff_user_id === selectedStaffUserId)
+    ) {
+      setSelectedStaffUserId(null);
+    }
+  }, [selectedStaffUserId, selectedStoreId, selectedStoreStaff]);
 
   const pickImages = async () => {
     const remain = 6 - imageUris.length;
@@ -231,6 +274,8 @@ export default function EstimateCreateScreen() {
           preferred_contact: preferredContact.trim() || null,
           preferred_store_user_id: selectedStoreId,
           assigned_store_user_id: selectedStoreId,
+          preferred_staff_user_id: selectedStaffUserId,
+          assigned_staff_user_id: selectedStaffUserId,
           routing_status: selectedStoreId ? 'store_selected' : 'admin_pending',
           fallback_destination: selectedStoreId ? 'selected_store' : 'designwish',
           title: trimmedTitle,
@@ -353,7 +398,10 @@ export default function EstimateCreateScreen() {
                 <TouchableOpacity
                   key={store.id}
                   style={[styles.storeCard, active && styles.storeCardActive]}
-                  onPress={() => setSelectedStoreId(active ? null : store.id)}
+                  onPress={() => {
+                    setSelectedStoreId(active ? null : store.id);
+                    setSelectedStaffUserId(null);
+                  }}
                 >
                   <View style={styles.storeAvatar}>
                     {avatarUrl ? (
@@ -382,6 +430,58 @@ export default function EstimateCreateScreen() {
             })}
           </ScrollView>
         )}
+
+        {selectedStoreId ? (
+          <View style={styles.staffSelectBox}>
+            <Text style={styles.staffSelectTitle}>담당 직원 선택</Text>
+            <Text style={styles.storeSelectHelp}>
+              직원을 선택하지 않으면 가게 자체 문의로 접수되고, 가게에서 담당자를 배정할 수 있습니다.
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.staffChip,
+                !selectedStaffUserId && styles.staffChipActive,
+              ]}
+              onPress={() => setSelectedStaffUserId(null)}
+            >
+              <Text
+                style={[
+                  styles.staffChipText,
+                  !selectedStaffUserId && styles.staffChipTextActive,
+                ]}
+              >
+                가게 자체로 문의
+              </Text>
+            </TouchableOpacity>
+
+            {selectedStoreStaff.length > 0 ? (
+              <View style={styles.staffWrap}>
+                {selectedStoreStaff.map((staff) => {
+                  const active = selectedStaffUserId === staff.staff_user_id;
+
+                  return (
+                    <TouchableOpacity
+                      key={staff.id}
+                      style={[styles.staffChip, active && styles.staffChipActive]}
+                      onPress={() => setSelectedStaffUserId(staff.staff_user_id)}
+                    >
+                      <Text
+                        style={[
+                          styles.staffChipText,
+                          active && styles.staffChipTextActive,
+                        ]}
+                      >
+                        {staff.display_name || '직원'} · {staff.role === 'manager' ? '매니저' : '직원'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.storeEmptyText}>등록된 활성 직원이 없습니다.</Text>
+            )}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.formSection}>
@@ -597,6 +697,41 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   selectedBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  staffSelectBox: {
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    padding: 12,
+    gap: 8,
+  },
+  staffSelectTitle: { color: '#111827', fontSize: 14, fontWeight: '900' },
+  staffWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  staffChip: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  staffChipActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  staffChipText: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  staffChipTextActive: {
+    color: '#1d4ed8',
+  },
   formSection: { gap: 10 },
   label: { color: '#111827', fontSize: 14, fontWeight: '900' },
   input: {

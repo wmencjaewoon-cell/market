@@ -127,6 +127,7 @@ export default function StoreDashboardScreen() {
             <ActionButton icon="add-circle-outline" label="상품 등록" onPress={() => router.push('/store/product-create' as any)} />
             <ActionButton icon="cube-outline" label="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
             <ActionButton icon="clipboard-outline" label="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+            <ActionButton icon="people-outline" label="직원 관리" onPress={() => router.push('/store/staff' as any)} />
             <ActionButton icon="storefront-outline" label="가게 정보 수정" onPress={() => router.push('/store/profile' as any)} />
             <ActionButton icon="flash-outline" label="오늘 가능 켜기" onPress={() => router.push('/store/profile' as any)} />
           </View>
