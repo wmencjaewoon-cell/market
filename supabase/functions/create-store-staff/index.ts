@@ -18,6 +18,16 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function errorResponse(message: string, status = 400, detail?: unknown) {
+  return jsonResponse(
+    {
+      error: message,
+      detail,
+    },
+    status
+  );
+}
+
 function randomString(length: number) {
   const alphabet =
     "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -39,7 +49,7 @@ serve(async (req) => {
     }
 
     if (req.method !== "POST") {
-      return jsonResponse({ error: "Method not allowed" }, 405);
+      return errorResponse("Method not allowed", 405);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -47,13 +57,17 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseUrl || !anonKey || !serviceRoleKey) {
-      return jsonResponse({ error: "Supabase 환경변수가 필요합니다." }, 500);
+      return errorResponse("Supabase 환경변수가 필요합니다.", 500, {
+        hasSupabaseUrl: Boolean(supabaseUrl),
+        hasAnonKey: Boolean(anonKey),
+        hasServiceRoleKey: Boolean(serviceRoleKey),
+      });
     }
 
     const authorization = req.headers.get("Authorization") || "";
 
     if (!authorization) {
-      return jsonResponse({ error: "로그인이 필요합니다." }, 401);
+      return errorResponse("로그인이 필요합니다.", 401);
     }
 
     const userClient = createClient(supabaseUrl, anonKey, {
@@ -67,7 +81,11 @@ serve(async (req) => {
     } = await userClient.auth.getUser();
 
     if (userError || !user) {
-      return jsonResponse({ error: "로그인 사용자를 확인하지 못했습니다." }, 401);
+      return errorResponse(
+        "로그인 사용자를 확인하지 못했습니다.",
+        401,
+        userError?.message
+      );
     }
 
     const body = await req.json().catch(() => ({}));
@@ -79,7 +97,7 @@ serve(async (req) => {
       typeof body.storeUserId === "string" ? body.storeUserId : null;
 
     if (!displayName) {
-      return jsonResponse({ error: "직원 이름을 입력해 주세요." }, 400);
+      return errorResponse("직원 이름을 입력해 주세요.", 400);
     }
 
     const { data: callerProfile, error: callerError } = await adminClient
@@ -89,7 +107,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (callerError || !callerProfile) {
-      return jsonResponse({ error: "호출자 프로필을 확인하지 못했습니다." }, 403);
+      return errorResponse(
+        "호출자 프로필을 확인하지 못했습니다.",
+        403,
+        callerError?.message
+      );
     }
 
     const isAdmin =
@@ -104,7 +126,11 @@ serve(async (req) => {
       : user.id;
 
     if (!isAdmin && !isVerifiedStore) {
-      return jsonResponse({ error: "직원 생성 권한이 없습니다." }, 403);
+      return errorResponse("직원 생성 권한이 없습니다.", 403, {
+        userType: callerProfile.user_type,
+        businessVerified: callerProfile.business_verified,
+        status: callerProfile.status,
+      });
     }
 
     const { data: storeProfile, error: storeError } = await adminClient
@@ -120,7 +146,13 @@ serve(async (req) => {
       storeProfile.business_verified !== true ||
       (storeProfile.status || "active") !== "active"
     ) {
-      return jsonResponse({ error: "인증 완료된 가게만 직원 계정을 만들 수 있습니다." }, 400);
+      return errorResponse("인증 완료된 가게만 직원 계정을 만들 수 있습니다.", 400, {
+        storeError: storeError?.message,
+        storeUserId,
+        userType: storeProfile?.user_type,
+        businessVerified: storeProfile?.business_verified,
+        status: storeProfile?.status,
+      });
     }
 
     const loginCode = `staff-${randomString(8).toLowerCase()}`;
@@ -141,8 +173,8 @@ serve(async (req) => {
       });
 
     if (createUserError || !createdUser.user) {
-      return jsonResponse(
-        { error: createUserError?.message || "직원 계정 생성에 실패했습니다." },
+      return errorResponse(
+        createUserError?.message || "직원 계정 생성에 실패했습니다.",
         400
       );
     }
@@ -167,7 +199,7 @@ serve(async (req) => {
 
     if (profileError) {
       await adminClient.auth.admin.deleteUser(staffUserId);
-      return jsonResponse({ error: profileError.message }, 400);
+      return errorResponse(profileError.message, 400, { step: "profiles.upsert" });
     }
 
     const { data: staffMember, error: staffError } = await adminClient
@@ -187,7 +219,7 @@ serve(async (req) => {
 
     if (staffError) {
       await adminClient.auth.admin.deleteUser(staffUserId);
-      return jsonResponse({ error: staffError.message }, 400);
+      return errorResponse(staffError.message, 400, { step: "store_staff_members.insert" });
     }
 
     return jsonResponse({
@@ -197,10 +229,8 @@ serve(async (req) => {
       message: "직원 계정이 생성되었습니다. 비밀번호는 다시 확인할 수 없습니다.",
     });
   } catch (error) {
-    return jsonResponse(
-      {
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
+    return errorResponse(
+      error instanceof Error ? error.message : "Unknown error",
       500
     );
   }

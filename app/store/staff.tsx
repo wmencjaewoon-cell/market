@@ -18,6 +18,27 @@ type CreatedStaffCredential = {
   password: string;
 };
 
+async function getEdgeFunctionErrorMessage(error: any) {
+  const fallback = error?.message || '직원 계정 생성 중 오류가 발생했습니다.';
+  const response = error?.context;
+
+  if (!response || typeof response.clone !== 'function') {
+    return fallback;
+  }
+
+  try {
+    const body = await response.clone().json();
+    return body?.error || body?.message || fallback;
+  } catch {
+    try {
+      const text = await response.clone().text();
+      return text || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
 export default function StoreStaffScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any | null>(null);
@@ -100,10 +121,11 @@ export default function StoreStaffScreen() {
       });
 
       if (error) {
+        const errorMessage = await getEdgeFunctionErrorMessage(error);
         setMessage(
-          error.message.includes('Function not found')
+          errorMessage.includes('Function not found')
             ? 'create-store-staff Edge Function을 먼저 배포해 주세요.'
-            : error.message
+            : errorMessage
         );
         return;
       }
