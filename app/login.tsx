@@ -617,6 +617,54 @@ export default function LoginScreen() {
     }
   };
 
+  const handlePasswordReset = async () => {
+    const emailOrLoginId = email.trim();
+
+    if (!emailOrLoginId) {
+      setMessage('비밀번호를 찾을 아이디 또는 이메일을 입력해 주세요.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage('');
+
+      const { data, error } = await supabase.functions.invoke('request-password-reset', {
+        body: {
+          emailOrLoginId,
+          redirectTo: getOAuthRedirectTo(),
+        },
+      });
+
+      if (error) {
+        const response = error.context;
+
+        if (response && typeof response.clone === 'function') {
+          try {
+            const body = await response.clone().json();
+            throw new Error(body?.error || body?.message || error.message);
+          } catch (parseError: any) {
+            if (parseError?.message && parseError.message !== error.message) {
+              throw parseError;
+            }
+          }
+        }
+
+        throw error;
+      }
+
+      setMessage(data?.message || '비밀번호 재설정 안내가 전송되었습니다.');
+    } catch (e: any) {
+      setMessage(
+        e?.message?.includes('Function not found')
+          ? 'request-password-reset Edge Function을 먼저 배포해 주세요.'
+          : e?.message || '비밀번호 찾기 요청 중 오류가 발생했습니다.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const cancelAccountDeletion = async () => {
     if (loading) return;
 
@@ -822,6 +870,12 @@ export default function LoginScreen() {
                 autoCapitalize="none"
               />
 
+              {authMode === 'login' ? (
+                <TouchableOpacity onPress={handlePasswordReset} disabled={loading}>
+                  <Text style={styles.findPasswordText}>비밀번호 찾기</Text>
+                </TouchableOpacity>
+              ) : null}
+
               <TouchableOpacity style={styles.darkBtn} onPress={handleEmailAuth} disabled={loading}>
                 <Text style={styles.darkBtnText}>
                   {loading
@@ -919,6 +973,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   darkBtnText: { color: '#fff', fontWeight: '800' },
+  findPasswordText: {
+    alignSelf: 'flex-end',
+    color: '#2563eb',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   disabledBtn: {
     opacity: 0.65,
   },

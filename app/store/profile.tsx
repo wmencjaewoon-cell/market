@@ -21,6 +21,9 @@ export default function StoreProfileScreen() {
   const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [storeCategory, setStoreCategory] = useState('');
   const [customStoreCategory, setCustomStoreCategory] = useState('');
+  const [representativeName, setRepresentativeName] = useState('');
+  const [storePhone, setStorePhone] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
   const [intro, setIntro] = useState('');
   const [notice, setNotice] = useState('');
   const [businessHours, setBusinessHours] = useState('');
@@ -56,6 +59,9 @@ export default function StoreProfileScreen() {
     setIntro(data?.store_intro || '');
     setNotice(data?.store_notice || '');
     setBusinessHours(data?.store_business_hours || '');
+    setRepresentativeName(data?.representative_name || '');
+    setStorePhone(data?.phone || '');
+    setStoreAddress(data?.store_address || '');
     setAcceptsInquiries(data?.store_accepts_inquiries !== false);
     setTodayAvailable(!!data?.store_today_available);
     setCardAvailable(!!data?.store_card_available);
@@ -79,6 +85,9 @@ export default function StoreProfileScreen() {
       const { error } = await supabase.rpc('update_store_profile_settings', {
         p_store_user_id: storeAccess.storeUserId,
         p_store_category: finalStoreCategory || null,
+        p_representative_name: representativeName.trim() || null,
+        p_phone: storePhone.trim() || null,
+        p_store_address: storeAddress.trim() || null,
         p_store_intro: intro.trim() || null,
         p_store_notice: notice.trim() || null,
         p_store_business_hours: businessHours.trim() || null,
@@ -127,6 +136,34 @@ export default function StoreProfileScreen() {
             <Text style={styles.storeMeta}>{profile?.store_address || '등록된 주소 없음'}</Text>
             <Text style={styles.storeMeta}>{profile?.phone || '등록된 전화번호 없음'}</Text>
           </View>
+
+          <Text style={styles.label}>대표자명</Text>
+          <TextInput
+            style={styles.input}
+            value={representativeName}
+            onChangeText={setRepresentativeName}
+            placeholder="대표자명을 입력해 주세요."
+            maxLength={40}
+          />
+
+          <Text style={styles.label}>가게 전화번호</Text>
+          <TextInput
+            style={styles.input}
+            value={storePhone}
+            onChangeText={setStorePhone}
+            placeholder="가게 전화번호를 입력해 주세요."
+            keyboardType="phone-pad"
+          />
+
+          <Text style={styles.label}>가게 주소</Text>
+          <TextInput
+            style={[styles.input, styles.addressInput]}
+            value={storeAddress}
+            onChangeText={setStoreAddress}
+            placeholder="가게 주소를 입력해 주세요."
+            multiline
+            textAlignVertical="top"
+          />
 
           <Text style={styles.label}>가게 종류</Text>
           <View style={styles.categoryWrap}>
@@ -300,6 +337,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   textarea: { minHeight: 104 },
+  addressInput: { minHeight: 74 },
   optionBox: {
     borderRadius: 14,
     backgroundColor: '#fff',

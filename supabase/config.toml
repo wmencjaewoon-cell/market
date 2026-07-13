@@ -70,3 +70,9 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/naver-userinfo/deno.json"
 entrypoint = "./functions/naver-userinfo/index.ts"
+
+[functions.request-password-reset]
+enabled = true
+verify_jwt = false
+import_map = "./functions/request-password-reset/deno.json"
+entrypoint = "./functions/request-password-reset/index.ts"

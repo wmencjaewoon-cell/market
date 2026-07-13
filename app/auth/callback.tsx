@@ -12,6 +12,21 @@ function getHashParam(url: string, key: string) {
   return hashParams.get(key);
 }
 
+function isPasswordRecoveryUrl(url?: string | null) {
+  if (!url) return false;
+
+  try {
+    const parsed = new URL(url);
+    const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+    return (
+      parsed.searchParams.get('type') === 'recovery' ||
+      hashParams.get('type') === 'recovery'
+    );
+  } catch {
+    return url.includes('type=recovery');
+  }
+}
+
 async function createSessionFromCallbackUrl(url: string) {
   const { params, errorCode } = QueryParams.getQueryParams(url);
 
@@ -40,7 +55,7 @@ async function createSessionFromCallbackUrl(url: string) {
   }
 }
 
-async function moveAfterLogin() {
+async function moveAfterLogin(options: { passwordRecovery?: boolean } = {}) {
   const { data: authData } = await supabase.auth.getUser();
   const user = authData.user;
 
@@ -57,6 +72,11 @@ async function moveAfterLogin() {
 
   if (profile?.status === 'deletion_pending') {
     router.replace('/account-deletion-pending' as any);
+    return;
+  }
+
+  if (options.passwordRecovery) {
+    router.replace('/my/change-password' as any);
     return;
   }
 
@@ -79,7 +99,7 @@ export default function AuthCallbackScreen() {
         await createSessionFromCallbackUrl(url);
       }
 
-      await moveAfterLogin();
+      await moveAfterLogin({ passwordRecovery: isPasswordRecoveryUrl(url) });
     } catch (e: any) {
       console.log('OAuth callback 처리 실패:', e);
       if (mounted) {
@@ -94,6 +114,7 @@ export default function AuthCallbackScreen() {
 
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
   const currentUrl = window.location.href;
+  const isRecovery = isPasswordRecoveryUrl(currentUrl);
 
   const finishWebPopup = async () => {
     try {
@@ -105,7 +126,7 @@ export default function AuthCallbackScreen() {
         throw new Error('로그인 세션을 저장하지 못했습니다.');
       }
 
-      if (window.opener && !window.opener.closed) {
+      if (!isRecovery && window.opener && !window.opener.closed) {
         window.opener.postMessage(
           {
             type: 'SUPABASE_OAUTH_CALLBACK_SUCCESS',
@@ -122,7 +143,7 @@ export default function AuthCallbackScreen() {
         return;
       }
 
-      await moveAfterLogin();
+      await moveAfterLogin({ passwordRecovery: isRecovery });
     } catch (e: any) {
       console.log('웹 OAuth callback 처리 실패:', e);
 
