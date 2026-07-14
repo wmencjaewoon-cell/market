@@ -1,9 +1,15 @@
+import {
+  DarkTheme,
+  DefaultTheme,
+  ThemeProvider,
+} from '@react-navigation/native';
 import { router, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { useAppTheme } from '../hooks/use-app-theme';
 import { supabase } from '../lib/supabase';
 
 // iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
@@ -83,10 +89,11 @@ function AccountStatusGate() {
 
 function RootNavigator() {
   const { isReady } = useAuth();
+  const theme = useAppTheme();
 
   if (!isReady) {
     return (
-      <SafeAreaView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator size="large" />
         </View>
@@ -95,11 +102,15 @@ function RootNavigator() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1 }} edges={['left', 'right']}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['left', 'right']}>
       <Stack
         screenOptions={{
           headerBackTitle: '',
           headerBackButtonDisplayMode: 'minimal',
+          headerStyle: { backgroundColor: theme.surface },
+          headerTintColor: theme.text,
+          headerTitleStyle: { color: theme.text },
+          contentStyle: { backgroundColor: theme.background },
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false, title: '' }} />
@@ -144,15 +155,35 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
-  return (
-    <SafeAreaProvider>
-      <StatusBar style="dark" backgroundColor="#ffffff" translucent={false} />
+  const theme = useAppTheme();
+  const navigationTheme = {
+    ...(theme.scheme === 'dark' ? DarkTheme : DefaultTheme),
+    colors: {
+      ...(theme.scheme === 'dark' ? DarkTheme.colors : DefaultTheme.colors),
+      primary: theme.primary,
+      background: theme.background,
+      card: theme.surface,
+      text: theme.text,
+      border: theme.border,
+      notification: theme.danger,
+    },
+  };
 
-      <AuthProvider>
-        <PushNotificationRegister />
-        <AccountStatusGate />
-        <RootNavigator />
-      </AuthProvider>
-    </SafeAreaProvider>
+  return (
+    <ThemeProvider value={navigationTheme}>
+      <SafeAreaProvider>
+        <StatusBar
+          style={theme.statusBarStyle}
+          backgroundColor={theme.background}
+          translucent={false}
+        />
+
+        <AuthProvider>
+          <PushNotificationRegister />
+          <AccountStatusGate />
+          <RootNavigator />
+        </AuthProvider>
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

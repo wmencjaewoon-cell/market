@@ -16,6 +16,8 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { fetchMyRegions, fetchMyRegionSettings } from '../../lib/region';
 import { getStoreCategoryLabel, STORE_CATEGORY_OPTIONS } from '../../lib/storeCategories';
@@ -38,6 +40,8 @@ const ESTIMATE_CATEGORIES = [
   '유지보수',
 ];
 
+const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+
 function showAlert(title: string, message = '') {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.alert(message ? `${title}\n${message}` : title);
@@ -55,13 +59,61 @@ function isValidDateText(value: string) {
   return !Number.isNaN(date.getTime());
 }
 
+function formatDateYmd(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseYmd(value: string) {
+  if (!isValidDateText(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function getMonthDays(monthDate: Date) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: { key: string; day: number | null; dateText: string | null }[] = [];
+
+  for (let i = 0; i < firstDay; i += 1) {
+    cells.push({ key: `empty-${i}`, day: null, dateText: null });
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push({
+      key: `${year}-${month}-${day}`,
+      day,
+      dateText: formatDateYmd(new Date(year, month, day)),
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ key: `tail-${cells.length}`, day: null, dateText: null });
+  }
+
+  return cells;
+}
+
 export default function EstimateCreateScreen() {
   const { user } = useAuth();
-  const [category, setCategory] = useState(ESTIMATE_CATEGORIES[0]);
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([
+    ESTIMATE_CATEGORIES[0],
+  ]);
   const [title, setTitle] = useState('');
   const [region, setRegion] = useState('');
   const [address, setAddress] = useState('');
   const [desiredDate, setDesiredDate] = useState('');
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
   const [budget, setBudget] = useState('');
   const [preferredContact, setPreferredContact] = useState('앱 채팅');
   const [description, setDescription] = useState('');
@@ -161,6 +213,17 @@ export default function EstimateCreateScreen() {
     return staffMembers.filter((staff) => staff.store_user_id === selectedStoreId);
   }, [selectedStoreId, staffMembers]);
 
+  const calendarDays = useMemo(() => getMonthDays(calendarMonth), [calendarMonth]);
+
+  const calendarTitle = useMemo(() => {
+    return calendarMonth.toLocaleDateString('ko-KR', {
+      year: 'numeric',
+      month: 'long',
+    });
+  }, [calendarMonth]);
+
+  const selectedCategoryText = selectedCategories.join(', ');
+
   useEffect(() => {
     if (!selectedStoreId) {
       setSelectedStaffUserId(null);
@@ -197,6 +260,31 @@ export default function EstimateCreateScreen() {
         ...result.assets.map((asset) => asset.uri),
       ].slice(0, 6));
     }
+  };
+
+  const toggleCategory = (item: string) => {
+    setSelectedCategories((prev) => {
+      if (prev.includes(item)) {
+        return prev.length === 1 ? prev : prev.filter((category) => category !== item);
+      }
+
+      return [...prev, item];
+    });
+  };
+
+  const moveCalendarMonth = (diff: number) => {
+    setCalendarMonth((current) => {
+      return new Date(current.getFullYear(), current.getMonth() + diff, 1);
+    });
+  };
+
+  const selectDesiredDate = (dateText: string) => {
+    setDesiredDate(dateText);
+    const parsed = parseYmd(dateText);
+    if (parsed) {
+      setCalendarMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+    }
+    setCalendarVisible(false);
   };
 
   const uploadEstimateImage = async (requestId: number, uri: string, sortOrder: number) => {
@@ -244,6 +332,11 @@ export default function EstimateCreateScreen() {
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
 
+    if (selectedCategories.length === 0) {
+      setMessage('필요한 공사 종류를 하나 이상 선택해 주세요.');
+      return;
+    }
+
     if (!trimmedTitle) {
       setMessage('문의 제목을 입력해 주세요.');
       return;
@@ -267,7 +360,7 @@ export default function EstimateCreateScreen() {
         .from('estimate_requests')
         .insert({
           user_id: user.id,
-          category,
+          category: selectedCategoryText,
           region: region.trim() || null,
           address: address.trim() || null,
           budget: budget.trim() || null,
@@ -324,21 +417,22 @@ export default function EstimateCreateScreen() {
 
       <View style={styles.categoryGrid}>
         {ESTIMATE_CATEGORIES.map((item) => {
-          const active = category === item;
+          const active = selectedCategories.includes(item);
 
           return (
             <TouchableOpacity
               key={item}
               style={[styles.categoryBtn, active && styles.categoryBtnActive]}
-              onPress={() => setCategory(item)}
+              onPress={() => toggleCategory(item)}
             >
               <Text style={[styles.categoryText, active && styles.categoryTextActive]}>
                 {item}
               </Text>
             </TouchableOpacity>
           );
-        })}
+          })}
       </View>
+      <Text style={styles.categoryHelp}>여러 공사를 함께 선택할 수 있습니다.</Text>
 
       <View style={styles.storeSelectSection}>
         <View style={styles.sectionHeader}>
@@ -512,13 +606,88 @@ export default function EstimateCreateScreen() {
         />
 
         <Text style={styles.label}>희망 일정</Text>
-        <TextInput
-          style={styles.input}
-          value={desiredDate}
-          onChangeText={setDesiredDate}
-          placeholder="YYYY-MM-DD"
-          keyboardType="numbers-and-punctuation"
-        />
+        <TouchableOpacity
+          style={styles.dateSelectBtn}
+          onPress={() => setCalendarVisible((visible) => !visible)}
+          activeOpacity={0.8}
+        >
+          <View>
+            <Text style={styles.dateSelectLabel}>
+              {desiredDate || '날짜를 선택해 주세요'}
+            </Text>
+            <Text style={styles.dateSelectHelp}>달력에서 희망 일정을 선택합니다.</Text>
+          </View>
+          <Ionicons name="calendar-outline" size={22} color={theme.primary} />
+        </TouchableOpacity>
+
+        {calendarVisible ? (
+          <View style={styles.calendarBox}>
+            <View style={styles.calendarHeader}>
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => moveCalendarMonth(-1)}
+              >
+                <Ionicons name="chevron-back" size={18} color={theme.text} />
+              </TouchableOpacity>
+              <Text style={styles.calendarTitle}>{calendarTitle}</Text>
+              <TouchableOpacity
+                style={styles.calendarNavBtn}
+                onPress={() => moveCalendarMonth(1)}
+              >
+                <Ionicons name="chevron-forward" size={18} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((day) => (
+                <Text key={day} style={styles.weekdayText}>{day}</Text>
+              ))}
+            </View>
+
+            <View style={styles.dayGrid}>
+              {calendarDays.map((cell) => {
+                const active = !!cell.dateText && cell.dateText === desiredDate;
+
+                return (
+                  <TouchableOpacity
+                    key={cell.key}
+                    style={[styles.dayCell, active && styles.dayCellActive]}
+                    disabled={!cell.dateText}
+                    onPress={() => cell.dateText && selectDesiredDate(cell.dateText)}
+                  >
+                    <Text style={[styles.dayText, active && styles.dayTextActive]}>
+                      {cell.day || ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.calendarQuickRow}>
+              <TouchableOpacity
+                style={styles.quickDateBtn}
+                onPress={() => selectDesiredDate(formatDateYmd(new Date()))}
+              >
+                <Text style={styles.quickDateText}>오늘</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickDateBtn}
+                onPress={() => selectDesiredDate(formatDateYmd(new Date(Date.now() + 86400000)))}
+              >
+                <Text style={styles.quickDateText}>내일</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickDateBtn}
+                onPress={() => {
+                  setDesiredDate('');
+                  setCalendarVisible(false);
+                }}
+              >
+                <Text style={styles.quickDateText}>미정</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         <Text style={styles.label}>예산</Text>
         <TextInput
@@ -588,10 +757,11 @@ export default function EstimateCreateScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 16, paddingBottom: 48, gap: 18 },
-  title: { color: '#111827', fontSize: 24, fontWeight: '900' },
+  title: { color: theme.text, fontSize: 24, fontWeight: '900' },
   categoryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -600,32 +770,34 @@ const styles = StyleSheet.create({
   categoryBtn: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
   categoryBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
-  categoryText: { color: '#374151', fontSize: 13, fontWeight: '800' },
-  categoryTextActive: { color: '#fff' },
+  categoryText: { color: theme.textMuted, fontSize: 13, fontWeight: '800' },
+  categoryTextActive: { color: theme.primaryText },
+  categoryHelp: { color: theme.textMuted, fontSize: 13, lineHeight: 19, fontWeight: '700' },
   storeSelectSection: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     padding: 14,
     gap: 10,
   },
   storeSelectHelp: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '600',
   },
   clearStoreText: {
-    color: '#2563eb',
+    color: theme.primary,
     fontSize: 13,
     fontWeight: '900',
   },
@@ -636,25 +808,25 @@ const styles = StyleSheet.create({
   storeCategoryChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   storeCategoryChipActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
   },
   storeCategoryText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '900',
   },
   storeCategoryTextActive: {
-    color: '#1d4ed8',
+    color: theme.primary,
   },
   storeEmptyText: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -666,48 +838,48 @@ const styles = StyleSheet.create({
     width: 172,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     padding: 12,
     gap: 6,
   },
   storeCardActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
   },
   storeAvatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   storeAvatarImage: { width: '100%', height: '100%' },
-  storeName: { color: '#111827', fontSize: 14, fontWeight: '900' },
-  storeCategoryLabel: { color: '#2563eb', fontSize: 12, fontWeight: '900' },
-  storeAddress: { color: '#6b7280', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  storeName: { color: theme.text, fontSize: 14, fontWeight: '900' },
+  storeCategoryLabel: { color: theme.primary, fontSize: 12, fontWeight: '900' },
+  storeAddress: { color: theme.textMuted, fontSize: 12, lineHeight: 17, fontWeight: '600' },
   selectedBadge: {
     alignSelf: 'flex-start',
     borderRadius: 999,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     paddingHorizontal: 8,
     paddingVertical: 4,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
   },
-  selectedBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  selectedBadgeText: { color: theme.primaryText, fontSize: 11, fontWeight: '900' },
   staffSelectBox: {
     borderRadius: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 12,
     gap: 8,
   },
-  staffSelectTitle: { color: '#111827', fontSize: 14, fontWeight: '900' },
+  staffSelectTitle: { color: theme.text, fontSize: 14, fontWeight: '900' },
   staffWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -717,41 +889,110 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingHorizontal: 11,
     paddingVertical: 8,
   },
   staffChipActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
   },
   staffChipText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '900',
   },
   staffChipTextActive: {
-    color: '#1d4ed8',
+    color: theme.primary,
   },
   formSection: { gap: 10 },
-  label: { color: '#111827', fontSize: 14, fontWeight: '900' },
+  label: { color: theme.text, fontSize: 14, fontWeight: '900' },
   input: {
     minHeight: 48,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    color: '#111827',
+    color: theme.text,
     fontSize: 15,
-    backgroundColor: '#fff',
+    backgroundColor: theme.input,
   },
   textarea: { minHeight: 140, lineHeight: 21 },
+  dateSelectBtn: {
+    minHeight: 58,
+    borderWidth: 1,
+    borderColor: theme.primarySoft,
+    borderRadius: 14,
+    backgroundColor: theme.primarySoft,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  dateSelectLabel: { color: theme.text, fontSize: 15, fontWeight: '900' },
+  dateSelectHelp: { marginTop: 3, color: theme.primary, fontSize: 12, fontWeight: '700' },
+  calendarBox: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
+    padding: 12,
+    gap: 10,
+  },
+  calendarHeader: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  calendarNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarTitle: { color: theme.text, fontSize: 16, fontWeight: '900' },
+  weekdayRow: { flexDirection: 'row' },
+  weekdayText: {
+    width: `${100 / 7}%`,
+    textAlign: 'center',
+    color: theme.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  dayGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayCell: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+  },
+  dayCellActive: { backgroundColor: theme.primary },
+  dayText: { color: theme.text, fontSize: 14, fontWeight: '800' },
+  dayTextActive: { color: theme.primaryText },
+  calendarQuickRow: { flexDirection: 'row', gap: 8 },
+  quickDateBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 12,
+    backgroundColor: theme.surfaceSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickDateText: { color: theme.text, fontSize: 13, fontWeight: '900' },
   imageSection: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     padding: 14,
     gap: 12,
   },
@@ -760,24 +1001,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionTitle: { color: '#111827', fontSize: 16, fontWeight: '900' },
+  sectionTitle: { color: theme.text, fontSize: 16, fontWeight: '900' },
   imageAddBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     paddingHorizontal: 11,
     paddingVertical: 7,
   },
-  imageAddText: { color: '#2563eb', fontSize: 13, fontWeight: '900' },
+  imageAddText: { color: theme.primary, fontSize: 13, fontWeight: '900' },
   imageRow: { gap: 10 },
   previewBox: {
     width: 92,
     height: 92,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
   previewImage: { width: '100%', height: '100%' },
   removeImageBtn: {
@@ -787,19 +1028,20 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: 'rgba(17,24,39,0.72)',
+    backgroundColor: theme.overlay,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  imageHelp: { color: '#6b7280', fontSize: 13, lineHeight: 19, fontWeight: '700' },
-  errorText: { color: '#dc2626', fontSize: 13, lineHeight: 19, fontWeight: '800' },
+  imageHelp: { color: theme.textMuted, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  errorText: { color: theme.danger, fontSize: 13, lineHeight: 19, fontWeight: '800' },
   submitBtn: {
     minHeight: 52,
     borderRadius: 16,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   submitBtnDisabled: { opacity: 0.6 },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  submitText: { color: theme.primaryText, fontSize: 16, fontWeight: '900' },
 });
+}

@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getUnreadChatCount } from '../../lib/chat';
 import { supabase } from '../../lib/supabase';
 import { emitTabRefresh, type RefreshableTab } from '../../lib/tabRefresh';
@@ -9,6 +10,7 @@ import { emitTabRefresh, type RefreshableTab } from '../../lib/tabRefresh';
 export default function TabsLayout() {
   const { user } = useAuth();
   const pathname = usePathname();
+  const theme = useAppTheme();
 
   const [chatBadge, setChatBadge] = useState(0);
 
@@ -79,7 +81,22 @@ channel.subscribe();
   };
 
   return (
-    <Tabs screenOptions={{ headerShown: false }}>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        sceneStyle: { backgroundColor: theme.background },
+        tabBarActiveTintColor: theme.primary,
+        tabBarInactiveTintColor: theme.textMuted,
+        tabBarStyle: {
+          backgroundColor: theme.surface,
+          borderTopColor: theme.border,
+        },
+        tabBarBadgeStyle: {
+          backgroundColor: theme.danger,
+          color: theme.primaryText,
+        },
+      }}
+    >
       <Tabs.Screen
         name="home"
         listeners={{

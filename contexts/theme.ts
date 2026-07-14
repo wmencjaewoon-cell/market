@@ -27,6 +27,59 @@ export const Colors = {
   },
 };
 
+export const AppPalettes = {
+  light: {
+    scheme: 'light',
+    background: '#ffffff',
+    canvas: '#f9fafb',
+    surface: '#ffffff',
+    surfaceMuted: '#f9fafb',
+    surfaceSoft: '#f3f4f6',
+    input: '#ffffff',
+    text: '#111827',
+    textMuted: '#6b7280',
+    textSubtle: '#9ca3af',
+    border: '#e5e7eb',
+    borderSoft: '#f3f4f6',
+    primary: '#2563eb',
+    primarySoft: '#eff6ff',
+    primaryText: '#ffffff',
+    danger: '#dc2626',
+    warningBg: '#fff7ed',
+    warningText: '#9a3412',
+    successBg: '#ecfdf5',
+    successText: '#047857',
+    overlay: 'rgba(17,24,39,0.72)',
+    statusBarStyle: 'dark' as const,
+  },
+  dark: {
+    scheme: 'dark',
+    background: '#0f1115',
+    canvas: '#0b0d11',
+    surface: '#171a21',
+    surfaceMuted: '#1f2430',
+    surfaceSoft: '#242a36',
+    input: '#151922',
+    text: '#f3f4f6',
+    textMuted: '#a7b0c0',
+    textSubtle: '#7b8494',
+    border: '#303747',
+    borderSoft: '#252b38',
+    primary: '#60a5fa',
+    primarySoft: 'rgba(96,165,250,0.16)',
+    primaryText: '#08111f',
+    danger: '#f87171',
+    warningBg: 'rgba(251,146,60,0.16)',
+    warningText: '#fdba74',
+    successBg: 'rgba(52,211,153,0.14)',
+    successText: '#6ee7b7',
+    overlay: 'rgba(0,0,0,0.72)',
+    statusBarStyle: 'light' as const,
+  },
+} as const;
+
+export type AppPalette = (typeof AppPalettes)[keyof typeof AppPalettes];
+
 export const Fonts = Platform.select({
   ios: {
     /** iOS `UIFontDescriptorSystemDesignDefault` */
