@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppTheme } from '../hooks/use-app-theme';
 
 export default function TradeMapScreen() {
   const params = useLocalSearchParams<{
@@ -16,6 +17,8 @@ export default function TradeMapScreen() {
     title?: string;
   }>();
   const insets = useSafeAreaInsets();
+  const theme = useAppTheme();
+  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
 
   const latitude = Number(params.lat);
   const longitude = Number(params.lng);
@@ -82,7 +85,7 @@ export default function TradeMapScreen() {
 
       <View style={[styles.header, { top: insets.top + 8 }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#111827" />
+          <Ionicons name="chevron-back" size={24} color={backIconColor} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{mapTitle}</Text>
         <View style={styles.headerSide} />

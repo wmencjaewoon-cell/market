@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import RadiusSlider from '../../../components/RadiusSlider';
+import { useAppTheme } from '../../../hooks/use-app-theme';
 import {
   addMyRegionByCandidate,
   deleteMyRegion,
@@ -22,6 +23,8 @@ import {
 
 
 export default function RegionsScreen() {
+  const theme = useAppTheme();
+  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
   const [regions, setRegions] = useState<any[]>([]);
   const [activeRegionId, setActiveRegionId] = useState<number | null>(null);
   const [radiusKm, setRadiusKm] = useState(5);
@@ -163,7 +166,7 @@ const handleSelectCandidate = async (candidate: any) => {
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#111827" />
+          <Ionicons name="chevron-back" size={24} color={backIconColor} />
         </TouchableOpacity>
         <Text style={styles.title}>동네 설정</Text>
         <View style={{ width: 24 }} />

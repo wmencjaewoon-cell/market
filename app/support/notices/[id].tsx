@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type AppPalette } from '../../../contexts/theme';
+import { useAppTheme } from '../../../hooks/use-app-theme';
 import { supabase } from '../../../lib/supabase';
 
 type NoticeDetail = {
@@ -46,6 +48,8 @@ function splitTrailingPunctuation(rawUrl: string) {
 
 export default function NoticeDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [notice, setNotice] = useState<NoticeDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -134,7 +138,7 @@ export default function NoticeDetailScreen() {
   if (loading) {
     return (
       <View style={styles.centerScreen}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
@@ -142,7 +146,7 @@ export default function NoticeDetailScreen() {
   if (notFound || !notice) {
     return (
       <View style={styles.centerScreen}>
-        <Ionicons name="document-text-outline" size={42} color="#d1d5db" />
+        <Ionicons name="document-text-outline" size={42} color={theme.textSubtle} />
         <Text style={styles.notFoundTitle}>공지사항을 찾을 수 없습니다.</Text>
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Text style={styles.backBtnText}>돌아가기</Text>
@@ -200,16 +204,17 @@ export default function NoticeDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f5f6f8',
+    backgroundColor: theme.background,
   },
   centerScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f5f6f8',
+    backgroundColor: theme.background,
     padding: 24,
   },
   content: {
@@ -217,7 +222,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   article: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     paddingHorizontal: 18,
     paddingTop: 20,
@@ -235,12 +240,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   privateLabel: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '800',
   },
   title: {
-    color: '#111827',
+    color: theme.text,
     fontSize: 22,
     fontWeight: '900',
     lineHeight: 30,
@@ -252,28 +257,28 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   dateText: {
-    color: '#9ca3af',
+    color: theme.textSubtle,
     fontSize: 13,
   },
   divider: {
     height: 1,
-    backgroundColor: '#f0f1f3',
+    backgroundColor: theme.borderSoft,
     marginTop: 18,
     marginBottom: 22,
   },
   bodyText: {
-    color: '#1f2937',
+    color: theme.text,
     fontSize: 16,
     lineHeight: 27,
   },
   bodyLink: {
-    color: '#2563eb',
+    color: theme.primary,
     fontWeight: '800',
     textDecorationLine: 'underline',
   },
   helpBox: {
     marginTop: 14,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 8,
     padding: 16,
     flexDirection: 'row',
@@ -285,19 +290,19 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff7ed',
+    backgroundColor: theme.warningBg,
   },
   helpContent: {
     flex: 1,
   },
   helpTitle: {
-    color: '#111827',
+    color: theme.text,
     fontSize: 15,
     fontWeight: '900',
   },
   helpDesc: {
     marginTop: 5,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     lineHeight: 19,
   },
@@ -318,31 +323,32 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   helpSecondaryBtn: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
     borderRadius: 8,
     paddingHorizontal: 13,
     paddingVertical: 9,
   },
   helpSecondaryText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '800',
   },
   notFoundTitle: {
     marginTop: 12,
-    color: '#111827',
+    color: theme.text,
     fontSize: 17,
     fontWeight: '800',
   },
   backBtn: {
     marginTop: 16,
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
   backBtnText: {
-    color: '#fff',
+    color: theme.background,
     fontWeight: '800',
   },
 });
+}

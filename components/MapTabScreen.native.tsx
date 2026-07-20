@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { type AppPalette } from '../contexts/theme';
+import { useAppTheme } from '../hooks/use-app-theme';
 import { checkProhibitedContent } from '../lib/prohibited';
 import { supabase } from '../lib/supabase';
 import { useTabRefresh } from '../lib/tabRefresh';
@@ -73,6 +75,8 @@ function roundCoord(value: number, precision = 3) {
 export default function MapTabScreen() {
   const mapRef = useRef<MapView | null>(null);
   const insets = useSafeAreaInsets();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [items, setItems] = useState<ListingMapItem[]>([]);
   const [stores, setStores] = useState<StoreMapItem[]>([]);
@@ -430,7 +434,7 @@ export default function MapTabScreen() {
                   <View
                     style={[
                       styles.markerWrap,
-                      { backgroundColor: single ? color : '#111827' },
+                      { backgroundColor: single ? color : theme.text },
                     ]}
                   >
                     <Text style={styles.markerText}>
@@ -471,7 +475,7 @@ export default function MapTabScreen() {
         <TextInput
           style={styles.searchInput}
           placeholder="제목, 지역, 물품, 가격으로 검색"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={theme.textSubtle}
           value={search}
           onChangeText={handleSearchChange}
         />
@@ -708,7 +712,8 @@ export default function MapTabScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   screen: { flex: 1 },
   map: { flex: 1 },
 
@@ -716,18 +721,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    backgroundColor: 'rgba(255,255,255,0.97)',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 13,
   },
   searchInput: {
     fontSize: 15,
-    color: '#111827',
+    color: theme.text,
   },
   searchBlockedText: {
     marginTop: 8,
-    color: '#dc2626',
+    color: theme.danger,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 17,
@@ -740,36 +745,36 @@ const styles = StyleSheet.create({
   layerBtn: {
     flex: 1,
     borderRadius: 999,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
     paddingVertical: 8,
     alignItems: 'center',
   },
   layerBtnActive: {
-    backgroundColor: '#111827',
+    backgroundColor: theme.primary,
   },
   layerText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '900',
   },
   layerTextActive: {
-    color: '#fff',
+    color: theme.primaryText,
   },
 
   myLocationBtn: {
     position: 'absolute',
     right: 16,
     bottom: 96,
-    backgroundColor: 'rgba(255,255,255,0.97)',
+    backgroundColor: theme.surface,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
   myLocationBtnText: {
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
     fontSize: 13,
   },
 
@@ -811,12 +816,12 @@ markerWrap: {
     left: 16,
     right: 16,
     bottom: 20,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 14,
   },
   bottomHintText: {
-    color: '#374151',
+    color: theme.textMuted,
     textAlign: 'center',
   },
 
@@ -825,7 +830,7 @@ markerWrap: {
     left: 16,
     right: 16,
     bottom: 20,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     padding: 16,
   },
@@ -843,7 +848,7 @@ markerWrap: {
     height: 86,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
   thumbnail: {
     width: '100%',
@@ -855,7 +860,7 @@ markerWrap: {
     justifyContent: 'center',
   },
   thumbnailPlaceholderText: {
-    color: '#9ca3af',
+    color: theme.textSubtle,
     fontSize: 12,
     fontWeight: '800',
   },
@@ -865,13 +870,13 @@ markerWrap: {
     alignItems: 'center',
   },
   closeText: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontWeight: '700',
   },
   itemBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: theme.primarySoft,
+    color: theme.primary,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -894,52 +899,52 @@ markerWrap: {
   },
   storeIntro: {
     marginTop: 8,
-    color: '#374151',
+    color: theme.textMuted,
     lineHeight: 20,
   },
   itemTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
     lineHeight: 24,
   },
   itemMeta: {
     marginTop: 6,
-    color: '#6b7280',
+    color: theme.textMuted,
   },
   itemPrice: {
     marginTop: 8,
     fontSize: 15,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
   detailBtn: {
     marginTop: 14,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 14,
     paddingVertical: 13,
     alignItems: 'center',
   },
   detailBtnText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontWeight: '800',
   },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: theme.overlay,
     justifyContent: 'flex-end',
     padding: 16,
   },
   modalBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     padding: 16,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
     marginBottom: 12,
   },
   groupItem: {
@@ -948,14 +953,14 @@ markerWrap: {
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: theme.borderSoft,
   },
   groupThumbWrap: {
     width: 58,
     height: 58,
     borderRadius: 10,
     overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -965,7 +970,7 @@ markerWrap: {
   },
   groupThumbPlaceholder: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
   groupInfo: {
     flex: 1,
@@ -973,8 +978,8 @@ markerWrap: {
   },
   groupBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: theme.primarySoft,
+    color: theme.primary,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -998,22 +1003,23 @@ markerWrap: {
   groupTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: theme.text,
   },
   groupMeta: {
     marginTop: 4,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
   },
   closeBtn: {
     marginTop: 14,
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     paddingVertical: 13,
     alignItems: 'center',
   },
   closeBtnText: {
-    color: '#fff',
+    color: theme.background,
     fontWeight: '800',
   },
 });
+}

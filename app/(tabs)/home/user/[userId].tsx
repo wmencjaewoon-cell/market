@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
 import {
   getSellerLevel,
@@ -56,6 +57,8 @@ async function confirmBlockUser(name: string) {
 export default function UserProfileScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
   const [menuOpen, setMenuOpen] = useState(false);
   const [reviewStats, setReviewStats] = useState({
   count: 0,
@@ -260,11 +263,11 @@ export default function UserProfileScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: theme.background }]} edges={['top']}>
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
   <TouchableOpacity onPress={() => router.back()}>
-    <Ionicons name="chevron-back" size={24} color="#111827" />
+    <Ionicons name="chevron-back" size={24} color={backIconColor} />
   </TouchableOpacity>
 
   <Text style={styles.headerTitle}>판매자 정보</Text>
@@ -272,13 +275,13 @@ export default function UserProfileScreen() {
   <View style={styles.headerActions}>
     {canCallStore ? (
       <TouchableOpacity style={styles.headerIconBtn} onPress={handleCall}>
-        <Ionicons name="call-outline" size={22} color="#2563eb" />
+        <Ionicons name="call-outline" size={22} color={theme.primary} />
       </TouchableOpacity>
     ) : null}
 
     {!isMyProfile ? (
       <TouchableOpacity style={styles.headerIconBtn} onPress={() => setMenuOpen(true)}>
-        <Ionicons name="ellipsis-vertical" size={22} color="#111827" />
+        <Ionicons name="ellipsis-vertical" size={22} color={backIconColor} />
       </TouchableOpacity>
     ) : (
       <View style={styles.headerSide} />
@@ -289,17 +292,22 @@ export default function UserProfileScreen() {
       <View
         style={[
           styles.profileCard,
-          showSellerLevel && {
-            borderColor: sellerLevelStyle.borderColor,
-            backgroundColor: sellerLevelStyle.backgroundColor,
+          {
+            borderColor: theme.border,
+            backgroundColor: theme.surface,
           },
+          showSellerLevel &&
+            theme.scheme !== 'dark' && {
+              borderColor: sellerLevelStyle.borderColor,
+              backgroundColor: sellerLevelStyle.backgroundColor,
+            },
         ]}
       >
         <View style={styles.avatar}>
           {profileImageUrl ? (
             <Image source={{ uri: profileImageUrl }} style={styles.avatarImage} />
           ) : (
-            <Ionicons name="person-outline" size={28} color="#6b7280" />
+            <Ionicons name="person-outline" size={28} color={theme.textMuted} />
           )}
         </View>
 
@@ -322,8 +330,18 @@ export default function UserProfileScreen() {
         ) : null}
 
         {showSellerLevel ? (
-          <View style={styles.levelBox}>
-            <Text style={[styles.levelText, { color: sellerLevelStyle.textColor }]}>
+          <View
+            style={[
+              styles.levelBox,
+              theme.scheme === 'dark' && { backgroundColor: theme.surfaceMuted },
+            ]}
+          >
+            <Text
+              style={[
+                styles.levelText,
+                { color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor },
+              ]}
+            >
               LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
             </Text>
             <Text style={styles.levelMeta}>
@@ -338,7 +356,7 @@ export default function UserProfileScreen() {
         {isVerifiedStore && (profile?.store_address || hasStoreLocation) ? (
           <View style={styles.storeLocationBox}>
             <View style={styles.storeLocationHeader}>
-              <Ionicons name="location-outline" size={17} color="#2563eb" />
+              <Ionicons name="location-outline" size={17} color={theme.primary} />
               <Text style={styles.storeLocationTitle}>가게 위치</Text>
             </View>
 
@@ -349,7 +367,7 @@ export default function UserProfileScreen() {
             {hasStoreLocation ? (
               <TouchableOpacity style={styles.mapBtn} onPress={openStoreMap}>
                 <Text style={styles.mapBtnText}>지도에서 위치 확인</Text>
-                <Ionicons name="chevron-forward" size={16} color="#2563eb" />
+                <Ionicons name="chevron-forward" size={16} color={theme.primary} />
               </TouchableOpacity>
             ) : null}
           </View>
@@ -357,7 +375,7 @@ export default function UserProfileScreen() {
 
         <View style={styles.statsRow}>
   <View style={styles.statBox}>
-    <Ionicons name="ribbon-outline" size={16} color="#2563eb" />
+    <Ionicons name="ribbon-outline" size={16} color={theme.primary} />
     <Text style={styles.statText}>
       후기 {reviewStats.count}개
     </Text>
@@ -478,7 +496,7 @@ export default function UserProfileScreen() {
                     <Image source={{ uri: imageUrl }} style={styles.thumb} />
                   ) : (
                     <View style={styles.thumbPlaceholder}>
-                      <Ionicons name="image-outline" size={22} color="#9ca3af" />
+                      <Ionicons name="image-outline" size={22} color={theme.textSubtle} />
                     </View>
                   )}
                 </View>

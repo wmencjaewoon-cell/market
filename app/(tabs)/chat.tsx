@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getUnreadCountByRoom } from '../../lib/chat';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
@@ -123,6 +125,8 @@ async function confirmBlockChatUser() {
 
 export default function ChatScreen() {
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const insets = useSafeAreaInsets();
   const [menuRoom, setMenuRoom] = useState<ChatRoomListItem | null>(null);
   const [selectedTab, setSelectedTab] = useState<ChatFilterTab>('전체');
@@ -591,7 +595,12 @@ const exitRoom = (room: ChatRoomListItem) => {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={fetchRooms} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={fetchRooms}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
         }
       >
         <ScrollView
@@ -630,7 +639,7 @@ const exitRoom = (room: ChatRoomListItem) => {
                   {menuRoom.muted ? '알림 켜기' : '알림 끄기'}
                 </Text>
                 {menuRoom.muted ? (
-                  <Ionicons name="notifications-off-outline" size={18} color="#6b7280" />
+                  <Ionicons name="notifications-off-outline" size={18} color={theme.textMuted} />
                 ) : null}
               </TouchableOpacity>
 
@@ -659,7 +668,7 @@ const exitRoom = (room: ChatRoomListItem) => {
 
         {filteredRooms.length === 0 ? (
           <View style={styles.emptyBox}>
-            <Ionicons name="chatbubble-ellipses-outline" size={34} color="#9ca3af" />
+            <Ionicons name="chatbubble-ellipses-outline" size={34} color={theme.textSubtle} />
             <Text style={styles.emptyTitle}>아직 채팅방이 없어요</Text>
             <Text style={styles.emptyDesc}>
               관심 있는 물건에 채팅을 보내면 여기에 표시됩니다.
@@ -681,7 +690,7 @@ const exitRoom = (room: ChatRoomListItem) => {
                       <Image source={{ uri: imageUrl }} style={styles.thumb} />
                     ) : (
                       <View style={styles.thumbPlaceholder}>
-                        <Ionicons name="image-outline" size={22} color="#9ca3af" />
+                        <Ionicons name="image-outline" size={22} color={theme.textSubtle} />
                       </View>
                     )}
                   </View>
@@ -704,7 +713,7 @@ const exitRoom = (room: ChatRoomListItem) => {
 
                       <View style={styles.roomRight}>
   {room.muted ? (
-    <Ionicons name="notifications-off-outline" size={16} color="#9ca3af" />
+    <Ionicons name="notifications-off-outline" size={16} color={theme.textSubtle} />
   ) : null}
 
   <Text style={styles.timeText}>
@@ -725,7 +734,7 @@ const exitRoom = (room: ChatRoomListItem) => {
       setMenuRoom(room);
     }}
   >
-    <Ionicons name="ellipsis-vertical" size={18} color="#6b7280" />
+    <Ionicons name="ellipsis-vertical" size={18} color={theme.textMuted} />
   </TouchableOpacity>
 </View>
                     </View>
@@ -758,22 +767,23 @@ const exitRoom = (room: ChatRoomListItem) => {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.background,
   },
 
   header: {
     paddingHorizontal: 16,
     paddingBottom: 10,
-    backgroundColor: '#fff',
+    backgroundColor: theme.background,
   },
 
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   content: {
@@ -791,8 +801,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
   },
 
   roomRight: {
@@ -810,13 +820,13 @@ moreBtn: {
 
 modalOverlay: {
   flex: 1,
-  backgroundColor: 'rgba(0,0,0,0.18)',
+  backgroundColor: theme.overlay,
   justifyContent: 'flex-end',
   padding: 16,
 },
 
 menuBox: {
-  backgroundColor: '#fff',
+  backgroundColor: theme.surface,
   borderRadius: 18,
   paddingVertical: 8,
 },
@@ -832,26 +842,26 @@ menuItem: {
 menuText: {
   fontSize: 15,
   fontWeight: '700',
-  color: '#111827',
+  color: theme.text,
 },
 
 warnText: {
-  color: '#dc2626',
+  color: theme.danger,
 },
 
   tabBtnActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
 
   tabText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#374151',
+    color: theme.textMuted,
   },
 
   tabTextActive: {
-    color: '#fff',
+    color: theme.primaryText,
   },
 
   roomList: {
@@ -864,21 +874,21 @@ warnText: {
     gap: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: theme.borderSoft,
   },
 
   unreadBadge: {
   minWidth: 22,
   height: 22,
   borderRadius: 11,
-  backgroundColor: '#ef4444',
+  backgroundColor: theme.danger,
   alignItems: 'center',
   justifyContent: 'center',
   paddingHorizontal: 6,
 },
 
 unreadBadgeText: {
-  color: '#fff',
+  color: theme.primaryText,
   fontSize: 11,
   fontWeight: '900',
 },
@@ -888,7 +898,7 @@ unreadBadgeText: {
     height: 72,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
 
   thumb: {
@@ -925,15 +935,15 @@ unreadBadgeText: {
   roomTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
     flexShrink: 1,
   },
 
   categoryBadge: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#2563eb',
-    backgroundColor: '#eff6ff',
+    color: theme.primary,
+    backgroundColor: theme.primarySoft,
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 999,
@@ -942,19 +952,19 @@ unreadBadgeText: {
 
   timeText: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: theme.textSubtle,
   },
 
   partnerText: {
     marginTop: 4,
     fontSize: 13,
-    color: '#6b7280',
+    color: theme.textMuted,
   },
 
   messageText: {
     marginTop: 6,
     fontSize: 14,
-    color: '#374151',
+    color: theme.textMuted,
   },
 
   bottomRow: {
@@ -966,14 +976,14 @@ unreadBadgeText: {
 
   regionText: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: theme.textSubtle,
     flex: 1,
   },
 
   priceText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#111827',
+    color: theme.text,
   },
 
   emptyBox: {
@@ -986,20 +996,20 @@ unreadBadgeText: {
     marginTop: 12,
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   emptyDesc: {
     marginTop: 8,
     fontSize: 14,
-    color: '#6b7280',
+    color: theme.textMuted,
     textAlign: 'center',
     lineHeight: 22,
   },
 
   emptyWrap: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.background,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
@@ -1007,14 +1017,15 @@ unreadBadgeText: {
 
   loginBtn: {
     marginTop: 18,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 14,
     paddingHorizontal: 18,
     paddingVertical: 13,
   },
 
   loginBtnText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontWeight: '800',
   },
 });
+}

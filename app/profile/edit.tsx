@@ -4,7 +4,7 @@ import type { DocumentPickerAsset } from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Image,
   Platform,
@@ -17,6 +17,8 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getOAuthProfileDefaults } from '../../lib/oauthProfile';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { supabase } from '../../lib/supabase';
@@ -129,6 +131,8 @@ export default function ProfileEditScreen() {
     lng?: string;
   }>();
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [loading, setLoading] = useState(false);
 
@@ -804,12 +808,16 @@ export default function ProfileEditScreen() {
               <Image source={{ uri: profileImageUrl }} style={styles.avatarImage} />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Ionicons name="person-outline" size={34} color="#9ca3af" />
+                <Ionicons name="person-outline" size={34} color={theme.textSubtle} />
               </View>
             )}
 
             <View style={styles.avatarEditBadge}>
-              <Ionicons name="camera" size={16} color="#fff" />
+              <Ionicons
+                name="camera"
+                size={16}
+                color={theme.scheme === 'dark' ? '#fff' : theme.primaryText}
+              />
             </View>
           </TouchableOpacity>
 
@@ -914,6 +922,7 @@ export default function ProfileEditScreen() {
                 setBusinessVerified(false);
               }}
               placeholder="123-45-67890"
+              placeholderTextColor={theme.textSubtle}
               keyboardType="number-pad"
               editable={storeVerificationStatus !== 'approved'}
             />
@@ -946,6 +955,7 @@ export default function ProfileEditScreen() {
               value={representativeName}
               onChangeText={setRepresentativeName}
               placeholder="예: 홍길동"
+              placeholderTextColor={theme.textSubtle}
               editable={storeVerificationStatus !== 'approved'}
             />
 
@@ -955,6 +965,7 @@ export default function ProfileEditScreen() {
               value={businessHours}
               onChangeText={setBusinessHours}
               placeholder="예: 평일 09:00~18:00 / 토요일 예약제"
+              placeholderTextColor={theme.textSubtle}
             />
 
             <Text style={styles.label}>가게 소개</Text>
@@ -963,6 +974,7 @@ export default function ProfileEditScreen() {
               value={storeIntro}
               onChangeText={setStoreIntro}
               placeholder="가게 소개, 취급 자재, 배송 가능 지역 등을 입력해 주세요."
+              placeholderTextColor={theme.textSubtle}
               multiline
               textAlignVertical="top"
             />
@@ -973,6 +985,7 @@ export default function ProfileEditScreen() {
               value={storeAddress}
               onChangeText={setStoreAddress}
               placeholder="예: 서울 중구 세종대로 110 1층"
+              placeholderTextColor={theme.textSubtle}
               editable={!isApprovedStoreProfile}
             />
 
@@ -980,7 +993,7 @@ export default function ProfileEditScreen() {
               style={styles.locationBtn}
               onPress={openStoreLocationPicker}
             >
-              <Ionicons name="map-outline" size={18} color="#111827" />
+              <Ionicons name="map-outline" size={18} color={theme.text} />
               <Text style={styles.locationBtnText}>지도에서 가게 위치 선택</Text>
             </TouchableOpacity>
 
@@ -997,7 +1010,7 @@ export default function ProfileEditScreen() {
                   style={styles.documentBtn}
                   onPress={pickBusinessDocument}
                 >
-                  <Ionicons name="document-attach-outline" size={18} color="#111827" />
+                  <Ionicons name="document-attach-outline" size={18} color={theme.text} />
                   <Text style={styles.documentBtnText}>
                     {businessDocumentPath || selectedBusinessDocumentAsset
                       ? '사업자등록증 다시 선택'
@@ -1012,7 +1025,7 @@ export default function ProfileEditScreen() {
                   />
                 ) : selectedBusinessDocumentAsset ? (
                   <View style={styles.documentFileBox}>
-                    <Ionicons name="document-text-outline" size={22} color="#2563eb" />
+                    <Ionicons name="document-text-outline" size={22} color={theme.primary} />
                     <Text style={styles.documentFileText} numberOfLines={2}>
                       {businessDocumentName || '선택한 사업자등록증 파일'}
                     </Text>
@@ -1038,7 +1051,7 @@ export default function ProfileEditScreen() {
                     <Ionicons
                       name={sellerTaxPolicyAgreed ? 'checkbox' : 'square-outline'}
                       size={22}
-                      color={sellerTaxPolicyAgreed ? '#2563eb' : '#9ca3af'}
+                      color={sellerTaxPolicyAgreed ? theme.primary : theme.textSubtle}
                     />
                     <Text style={styles.agreementText}>
                       사업자 판매자로서 관련 법령, 세금 신고, 현금영수증/세금계산서 발급 등 의무를 직접 이행해야 함을 확인했습니다.
@@ -1053,7 +1066,7 @@ export default function ProfileEditScreen() {
                     <Ionicons
                       name={businessIdentityPolicyAgreed ? 'checkbox' : 'square-outline'}
                       size={22}
-                      color={businessIdentityPolicyAgreed ? '#2563eb' : '#9ca3af'}
+                      color={businessIdentityPolicyAgreed ? theme.primary : theme.textSubtle}
                     />
                     <Text style={styles.agreementText}>
                       타인의 사업자등록번호 또는 사업자등록증을 무단으로 사용할 경우 가게 인증 취소 및 이용 제한될 수 있음을 확인했습니다.
@@ -1068,7 +1081,7 @@ export default function ProfileEditScreen() {
                     <Ionicons
                       name={storeRestrictionPolicyAgreed ? 'checkbox' : 'square-outline'}
                       size={22}
-                      color={storeRestrictionPolicyAgreed ? '#2563eb' : '#9ca3af'}
+                      color={storeRestrictionPolicyAgreed ? theme.primary : theme.textSubtle}
                     />
                     <Text style={styles.agreementText}>
                       회사는 허위 등록, 도용, 신고 누적, 불법 거래 의심 시 가게 인증을 취소하거나 판매를 제한할 수 있음을 확인했습니다.
@@ -1088,6 +1101,7 @@ export default function ProfileEditScreen() {
           placeholder={
             userType === 'store' ? '상호명을 입력하세요' : '닉네임을 입력하세요'
           }
+          placeholderTextColor={theme.textSubtle}
           editable={!(userType === 'store' && storeVerificationStatus === 'approved')}
         />
 
@@ -1099,6 +1113,7 @@ export default function ProfileEditScreen() {
           value={phone}
           onChangeText={setPhone}
           placeholder="01012345678"
+          placeholderTextColor={theme.textSubtle}
           keyboardType="phone-pad"
           editable={!(userType === 'store' && storeVerificationStatus === 'approved')}
         />
@@ -1109,6 +1124,7 @@ export default function ProfileEditScreen() {
           value={email}
           onChangeText={setEmail}
           placeholder="email@example.com"
+          placeholderTextColor={theme.textSubtle}
           keyboardType="email-address"
           autoCapitalize="none"
           editable={!isApprovedStoreProfile}
@@ -1158,8 +1174,9 @@ export default function ProfileEditScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 16, gap: 12 },
 
   avatarSection: {
@@ -1178,14 +1195,14 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 46,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.surfaceSoft,
   },
 
   avatarPlaceholder: {
     width: '100%',
     height: '100%',
     borderRadius: 46,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1197,57 +1214,58 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: theme.surface,
   },
 
   avatarText: {
-    color: '#2563eb',
+    color: theme.primary,
     fontWeight: '800',
   },
 
-  label: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  label: { fontSize: 15, fontWeight: '700', color: theme.text },
 
   row: { flexDirection: 'row', gap: 10 },
 
   typeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
+    backgroundColor: theme.surface,
   },
 
   typeBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
 
 
-  typeText: { fontWeight: '700', color: '#374151' },
-  typeTextActive: { color: '#fff' },
+  typeText: { fontWeight: '700', color: theme.textMuted },
+  typeTextActive: { color: theme.scheme === 'dark' ? '#fff' : theme.primaryText },
 
   readOnlyBox: {
     borderWidth: 1,
-    borderColor: '#dbeafe',
+    borderColor: theme.border,
     borderRadius: 14,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     padding: 14,
     gap: 6,
   },
 
   readOnlyTitle: {
-    color: '#1d4ed8',
+    color: theme.primary,
     fontSize: 15,
     fontWeight: '900',
   },
 
   readOnlyText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '600',
@@ -1255,9 +1273,11 @@ const styles = StyleSheet.create({
 
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
+    backgroundColor: theme.input,
+    color: theme.text,
   },
 
   textArea: {
@@ -1274,18 +1294,18 @@ const styles = StyleSheet.create({
   switchLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
+    color: theme.text,
   },
 
   verifyBtn: {
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
   },
 
   verifyBtnText: {
-    color: '#fff',
+    color: theme.background,
     fontWeight: '800',
   },
 
@@ -1295,22 +1315,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
   },
 
   locationBtnText: {
-    color: '#111827',
+    color: theme.text,
     fontWeight: '800',
   },
 
   agreementBox: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surface,
     padding: 14,
     gap: 12,
   },
@@ -1318,7 +1338,7 @@ const styles = StyleSheet.create({
   agreementTitle: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
 
   agreementRow: {
@@ -1331,15 +1351,15 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
-    color: '#374151',
+    color: theme.textMuted,
     fontWeight: '600',
   },
 
   statusBox: {
     borderWidth: 1,
-    borderColor: '#dbeafe',
+    borderColor: theme.border,
     borderRadius: 14,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     padding: 14,
     gap: 6,
   },
@@ -1347,20 +1367,20 @@ const styles = StyleSheet.create({
   statusBoxTitle: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#1d4ed8',
+    color: theme.primary,
   },
 
   statusBoxText: {
     fontSize: 13,
     lineHeight: 18,
-    color: '#374151',
+    color: theme.textMuted,
   },
 
   statusBoxNote: {
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '700',
-    color: '#b45309',
+    color: theme.warningText,
   },
 
   documentBtn: {
@@ -1369,14 +1389,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
   },
 
   documentBtnText: {
-    color: '#111827',
+    color: theme.text,
     fontWeight: '800',
   },
 
@@ -1384,7 +1404,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 190,
     borderRadius: 14,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
 
   documentFileBox: {
@@ -1392,9 +1412,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     borderWidth: 1,
-    borderColor: '#dbeafe',
+    borderColor: theme.border,
     borderRadius: 14,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     padding: 14,
   },
 
@@ -1403,24 +1423,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
     fontWeight: '700',
-    color: '#1f2937',
+    color: theme.text,
   },
 
   statusText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: theme.textMuted,
   },
 
   saveBtn: {
     marginTop: 16,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
   },
 
   saveBtnText: {
-    color: '#fff',
+    color: theme.scheme === 'dark' ? '#fff' : theme.primaryText,
     fontWeight: '800',
     fontSize: 16,
   },
@@ -1433,10 +1453,11 @@ const styles = StyleSheet.create({
   },
 
   successText: {
-    color: '#16a34a',
+    color: theme.successText,
   },
 
   errorText: {
-    color: '#dc2626',
+    color: theme.danger,
   },
 });
+}

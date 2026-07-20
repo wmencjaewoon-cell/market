@@ -15,6 +15,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FloatingCreateButton from '../../../components/FloatingCreateButton';
 import MaterialCard from '../../../components/MaterialCard';
 import RadiusSlider from '../../../components/RadiusSlider';
+import { type AppPalette } from '../../../contexts/theme';
+import { useAppTheme } from '../../../hooks/use-app-theme';
 import { getUnreadNotificationCount } from '../../../lib/notificationsData';
 import {
   deleteMyRegion,
@@ -42,6 +44,8 @@ function getShortRegionName(regionName?: string | null) {
 }
 
 export default function HomeScreen() {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [selectedTab, setSelectedTab] = useState<FilterTab>('전체');
   const [items, setItems] = useState<Listing[]>([]);
@@ -268,8 +272,8 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#2563eb"
-            colors={['#2563eb']}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
           />
         }
       >
@@ -284,7 +288,7 @@ export default function HomeScreen() {
             <Text style={styles.regionText}>
               {getShortRegionName(activeRegion?.region_name) || '내 동네 설정'}
             </Text>
-            <Ionicons name="chevron-down" size={16} color="#111827" />
+            <Ionicons name="chevron-down" size={16} color={theme.text} />
           </TouchableOpacity>
 
           <View style={styles.topRight}>
@@ -295,7 +299,7 @@ export default function HomeScreen() {
               <Ionicons
                 name="notifications-outline"
                 size={24}
-                color="#111827"
+                color={theme.text}
               />
 
               {unreadNotificationCount > 0 ? (
@@ -313,20 +317,20 @@ export default function HomeScreen() {
           </View>
         </View>
         <View style={styles.homeSearchBox}>
-          <Ionicons name="search-outline" size={20} color="#9ca3af" />
+          <Ionicons name="search-outline" size={20} color={theme.textSubtle} />
 
           <TextInput
             style={styles.homeSearchInput}
             value={searchKeyword}
             onChangeText={setSearchKeyword}
             placeholder="상품명, 가게명을 검색해보세요"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textSubtle}
             returnKeyType="search"
           />
 
           {searchKeyword.length > 0 ? (
             <TouchableOpacity onPress={() => setSearchKeyword('')}>
-              <Ionicons name="close-circle" size={20} color="#9ca3af" />
+              <Ionicons name="close-circle" size={20} color={theme.textSubtle} />
             </TouchableOpacity>
           ) : null}
         </View>
@@ -337,7 +341,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/estimate/create' as any)}
           >
             <View style={styles.quickIconBox}>
-              <Ionicons name="construct-outline" size={20} color="#2563eb" />
+              <Ionicons name="construct-outline" size={20} color={theme.primary} />
             </View>
             <View style={styles.quickTextBox}>
               <Text style={styles.quickTitle}>견적문의</Text>
@@ -350,7 +354,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/store' as any)}
           >
             <View style={styles.quickIconBox}>
-              <Ionicons name="storefront-outline" size={20} color="#2563eb" />
+              <Ionicons name="storefront-outline" size={20} color={theme.primary} />
             </View>
             <View style={styles.quickTextBox}>
               <Text style={styles.quickTitle}>가게 찾기</Text>
@@ -383,7 +387,7 @@ export default function HomeScreen() {
             ))
           ) : (
             <View style={styles.emptyBox}>
-              <Ionicons name="search-outline" size={36} color="#d1d5db" />
+              <Ionicons name="search-outline" size={36} color={theme.textSubtle} />
               <Text style={styles.emptyTitle}>검색 결과가 없어요</Text>
               <Text style={styles.emptyDesc}>
                 다른 검색어를 입력하거나 동네 범위를 넓혀보세요.
@@ -400,7 +404,7 @@ export default function HomeScreen() {
               <Text style={styles.modalTitle}>내 동네 설정</Text>
 
               <TouchableOpacity onPress={() => setRegionModalOpen(false)}>
-                <Ionicons name="close" size={24} color="#111827" />
+                <Ionicons name="close" size={24} color={theme.text} />
               </TouchableOpacity>
             </View>
 
@@ -447,10 +451,10 @@ export default function HomeScreen() {
                   </TouchableOpacity>
 
                   {active ? (
-                    <Ionicons name="checkmark-circle" size={22} color="#2563eb" />
+                    <Ionicons name="checkmark-circle" size={22} color={theme.primary} />
                   ) : (
                     <TouchableOpacity onPress={() => handleDeleteRegion(region.id)}>
-                      <Ionicons name="trash-outline" size={20} color="#9ca3af" />
+                      <Ionicons name="trash-outline" size={20} color={theme.textSubtle} />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -464,7 +468,7 @@ export default function HomeScreen() {
                 router.push('/(tabs)/home/region-search' as any);
               }}
             >
-              <Ionicons name="add" size={20} color="#2563eb" />
+              <Ionicons name="add" size={20} color={theme.primary} />
               <Text style={styles.addRegionText}>동네 추가</Text>
             </TouchableOpacity>
 
@@ -478,8 +482,9 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 16, paddingBottom: 120 },
   topRow: {
     flexDirection: 'row',
@@ -494,11 +499,11 @@ const styles = StyleSheet.create({
   regionText: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
   radiusBadge: {
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: theme.primarySoft,
+    color: theme.primary,
     fontWeight: '800',
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -510,16 +515,16 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   tabBtn: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 999,
   },
   tabBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
 
   homeSearchBox: {
@@ -527,9 +532,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.input,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -538,7 +543,7 @@ const styles = StyleSheet.create({
   homeSearchInput: {
     flex: 1,
     fontSize: 15,
-    color: '#111827',
+    color: theme.text,
     paddingVertical: 0,
   },
   quickRow: {
@@ -551,8 +556,8 @@ const styles = StyleSheet.create({
     minHeight: 66,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -562,7 +567,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -571,28 +576,28 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   quickTitle: {
-    color: '#111827',
+    color: theme.text,
     fontSize: 14,
     fontWeight: '900',
   },
   quickDesc: {
     marginTop: 3,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '700',
   },
-  tabText: { fontWeight: '700', color: '#374151' },
-  tabTextActive: { color: '#fff' },
+  tabText: { fontWeight: '700', color: theme.textMuted },
+  tabTextActive: { color: theme.primaryText },
   list: { gap: 14 },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: theme.overlay,
     justifyContent: 'flex-end',
     padding: 16,
   },
 
   regionModalBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 22,
     padding: 16,
     maxHeight: '85%',
@@ -601,11 +606,11 @@ const styles = StyleSheet.create({
 
   radiusBox: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
     gap: 8,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
   },
   emptyBox: {
     alignItems: 'center',
@@ -617,12 +622,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#374151',
+    color: theme.textMuted,
   },
 
   emptyDesc: {
     fontSize: 14,
-    color: '#9ca3af',
+    color: theme.textSubtle,
     textAlign: 'center',
   },
 
@@ -635,13 +640,13 @@ const styles = StyleSheet.create({
   radiusTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   radiusValue: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#2563eb',
+    color: theme.primary,
   },
 
   topRight: {
@@ -665,21 +670,21 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ef4444',
+    backgroundColor: theme.danger,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
 
   notificationBadgeText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontSize: 10,
     fontWeight: '800',
   },
 
   radiusHelp: {
     fontSize: 13,
-    color: '#6b7280',
+    color: theme.textMuted,
     lineHeight: 19,
   },
 
@@ -692,11 +697,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   modalDesc: {
-    color: '#6b7280',
+    color: theme.textMuted,
     lineHeight: 20,
   },
 
@@ -704,7 +709,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
     gap: 10,
@@ -713,16 +718,16 @@ const styles = StyleSheet.create({
   modalRegionName: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   modalRegionActive: {
-    color: '#2563eb',
+    color: theme.primary,
   },
 
   modalRegionSub: {
     marginTop: 4,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
   },
 
@@ -732,14 +737,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#bfdbfe',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
     borderRadius: 14,
     padding: 14,
   },
 
   addRegionText: {
-    color: '#2563eb',
+    color: theme.primary,
     fontWeight: '800',
   },
 
@@ -751,7 +756,7 @@ const styles = StyleSheet.create({
 
   backMiniText: {
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   searchRow: {
@@ -762,14 +767,14 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
 
   searchBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
@@ -777,7 +782,7 @@ const styles = StyleSheet.create({
   },
 
   searchBtnText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontWeight: '800',
   },
 
@@ -786,31 +791,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     padding: 14,
   },
 
   locationSearchText: {
-    color: '#fff',
+    color: theme.background,
     fontWeight: '800',
   },
 
   candidateItem: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     padding: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
   },
 
   candidateText: {
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   regionMessage: {
-    color: '#dc2626',
+    color: theme.danger,
     fontWeight: '700',
   },
 });
+}

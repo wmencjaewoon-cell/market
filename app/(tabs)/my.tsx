@@ -1,8 +1,10 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import {
   getSellerLevel,
@@ -28,6 +30,8 @@ const COMPANY_INFO_ROWS = [
 
 export default function MyScreen() {
   const { user, signOut } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<any>(null);
   const [staffMembership, setStaffMembership] = useState<any | null>(null);
   const [companyInfoOpen, setCompanyInfoOpen] = useState(false);
@@ -159,8 +163,9 @@ export default function MyScreen() {
                   styles.levelBadge,
                   {
                     borderColor: sellerLevelStyle.borderColor,
-                    backgroundColor: sellerLevelStyle.backgroundColor,
-                    color: sellerLevelStyle.textColor,
+                    backgroundColor:
+                      theme.scheme === 'dark' ? theme.surface : sellerLevelStyle.backgroundColor,
+                    color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
                   },
                 ]}
               >
@@ -299,6 +304,9 @@ export default function MyScreen() {
 }
 
 function Section({ title, children }: any) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -308,6 +316,9 @@ function Section({ title, children }: any) {
 }
 
 function MenuItem({ title, onPress }: any) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <Text style={styles.menuText}>{title}</Text>
@@ -316,31 +327,32 @@ function MenuItem({ title, onPress }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   
-  title: { fontSize: 26, fontWeight: '800', marginBottom: 16 },
+  title: { color: theme.text, fontSize: 26, fontWeight: '800', marginBottom: 16 },
 
   profileBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
     alignItems: 'center',
   },
   loginBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 20,
   },
   loginTitle: {
-    color: '#111827',
+    color: theme.text,
     fontSize: 18,
     fontWeight: '900',
   },
   loginDesc: {
     marginTop: 6,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -348,7 +360,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
@@ -361,10 +373,10 @@ const styles = StyleSheet.create({
   avatarInitial: {
     fontSize: 26,
     fontWeight: '900',
-    color: '#6b7280',
+    color: theme.textMuted,
   },
-  name: { fontSize: 20, fontWeight: '800' },
-  sub: { color: '#6b7280', marginTop: 4 },
+  name: { color: theme.text, fontSize: 20, fontWeight: '800' },
+  sub: { color: theme.textMuted, marginTop: 4 },
   profileBadgeRow: {
     marginTop: 8,
     flexDirection: 'row',
@@ -374,12 +386,12 @@ const styles = StyleSheet.create({
   },
   verifiedText: {
     borderWidth: 1,
-    borderColor: '#2563eb',
+    borderColor: theme.primary,
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    color: '#1d4ed8',
+    color: theme.primary,
     fontSize: 13,
     fontWeight: '900',
     overflow: 'hidden',
@@ -395,15 +407,15 @@ const styles = StyleSheet.create({
   },
   levelSub: {
     marginTop: 6,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '800',
   },
   editBtn: { marginTop: 10 },
-  editText: { color: '#2563eb', fontWeight: '700' },
+  editText: { color: theme.primary, fontWeight: '700' },
   safe: {
   flex: 1,
-  backgroundColor: '#f9fafb',
+  backgroundColor: theme.background,
 },
 
 container: {
@@ -412,35 +424,35 @@ container: {
 },
 
   section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 14, color: '#6b7280', marginBottom: 6 },
-  sectionBox: { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
+  sectionTitle: { fontSize: 14, color: theme.textMuted, marginBottom: 6 },
+  sectionBox: { backgroundColor: theme.surface, borderRadius: 16, overflow: 'hidden' },
 
   menuItem: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: theme.borderSoft,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  menuText: { fontSize: 15, fontWeight: '600' },
-  arrow: { color: '#9ca3af' },
+  menuText: { color: theme.text, fontSize: 15, fontWeight: '600' },
+  arrow: { color: theme.textSubtle },
 
   logoutBtn: {
     marginTop: 20,
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
   },
-  logoutText: { color: '#fff', fontWeight: '800' },
+  logoutText: { color: theme.background, fontWeight: '800' },
 
   companyBox: {
     marginTop: 18,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: theme.borderSoft,
   },
   companyHeader: {
     padding: 16,
@@ -449,12 +461,12 @@ container: {
     justifyContent: 'space-between',
   },
   companyTitle: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 14,
     fontWeight: '800',
   },
   companyArrow: {
-    color: '#9ca3af',
+    color: theme.textSubtle,
     fontSize: 16,
     fontWeight: '900',
   },
@@ -465,7 +477,7 @@ container: {
     paddingHorizontal: 16,
     paddingBottom: 16,
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
+    borderTopColor: theme.borderSoft,
     gap: 8,
   },
   companyRow: {
@@ -476,14 +488,14 @@ container: {
   },
   companyLabel: {
     width: 110,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
   },
   companyValue: {
     flex: 1,
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,
@@ -494,10 +506,10 @@ container: {
     paddingTop: 12,
     paddingBottom: 16,
     borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
+    borderTopColor: theme.borderSoft,
   },
   companyNotice: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '600',
@@ -505,10 +517,11 @@ container: {
 
   btn: {
     marginTop: 20,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
   },
-  btnText: { color: '#fff', fontWeight: '800' },
+  btnText: { color: theme.primaryText, fontWeight: '800' },
 });
+}

@@ -3,7 +3,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Platform,
   ScrollView,
@@ -13,6 +13,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type AppPalette } from '../contexts/theme';
+import { useAppTheme } from '../hooks/use-app-theme';
 import { getOAuthProfileDefaults } from '../lib/oauthProfile';
 import { supabase } from '../lib/supabase';
 
@@ -49,6 +51,8 @@ function formatDeletionDate(value?: string | null) {
 
 export default function LoginScreen() {
   const { redirect } = useLocalSearchParams<{ redirect?: string }>();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [authMode, setAuthMode] = useState<AuthMode>('login');
   const [userType, setUserType] = useState<UserType>('personal');
@@ -895,50 +899,53 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 20, gap: 14 },
-  title: { fontSize: 28, fontWeight: '800' },
+  title: { color: theme.text, fontSize: 28, fontWeight: '800' },
 
   modeRow: { flexDirection: 'row', gap: 10 },
   modeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: 'center',
   },
   modeBtnActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: theme.text,
+    borderColor: theme.text,
   },
-  modeText: { fontWeight: '700', color: '#374151' },
-  modeTextActive: { color: '#fff' },
+  modeText: { fontWeight: '700', color: theme.textMuted },
+  modeTextActive: { color: theme.background },
 
   row: { flexDirection: 'row', gap: 10 },
   typeBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
   },
   typeBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
-  typeBtnText: { fontWeight: '700', color: '#374151' },
-  typeBtnTextActive: { color: '#fff' },
+  typeBtnText: { fontWeight: '700', color: theme.textMuted },
+  typeBtnTextActive: { color: theme.primaryText },
 
-  checkText: { color: '#374151', lineHeight: 22 },
+  checkText: { color: theme.textMuted, lineHeight: 22 },
 
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
+    backgroundColor: theme.input,
+    color: theme.text,
   },
 
   kakaoBtn: {
@@ -962,20 +969,20 @@ const styles = StyleSheet.create({
 
   divider: {
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: theme.border,
     marginVertical: 6,
   },
 
   darkBtn: {
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     padding: 15,
     alignItems: 'center',
   },
-  darkBtnText: { color: '#fff', fontWeight: '800' },
+  darkBtnText: { color: theme.background, fontWeight: '800' },
   findPasswordText: {
     alignSelf: 'flex-end',
-    color: '#2563eb',
+    color: theme.primary,
     fontSize: 13,
     fontWeight: '800',
   },
@@ -987,13 +994,13 @@ const styles = StyleSheet.create({
   },
   outlineBtn: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 15,
     alignItems: 'center',
   },
   outlineBtnText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontWeight: '800',
   },
   pendingBox: {
@@ -1001,7 +1008,7 @@ const styles = StyleSheet.create({
     borderColor: '#fecaca',
     borderRadius: 16,
     padding: 16,
-    backgroundColor: '#fff7f7',
+    backgroundColor: theme.dangerSoft,
     gap: 12,
   },
   pendingTitle: {
@@ -1015,14 +1022,15 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   pendingDate: {
-    color: '#111827',
+    color: theme.text,
     fontSize: 14,
     fontWeight: '800',
   },
 
   message: {
-    color: '#dc2626',
+    color: theme.danger,
     fontWeight: '600',
     lineHeight: 20,
   },
 });
+}

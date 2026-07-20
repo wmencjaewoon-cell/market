@@ -39,6 +39,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
 import { canStartChat, canUseApp } from '../../lib/guard';
 import {
@@ -725,6 +726,8 @@ export default function ChatRoomScreen() {
   }>();
 
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
   const initialReportWarningRunningRef = useRef(false);
@@ -3807,7 +3810,7 @@ export default function ChatRoomScreen() {
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#111827" />
+          <Ionicons name="chevron-back" size={24} color={backIconColor} />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.headerCenter} onPress={goToChatTargetProfile}>

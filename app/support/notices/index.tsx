@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { type AppPalette } from '../../../contexts/theme';
+import { useAppTheme } from '../../../hooks/use-app-theme';
 import { supabase } from '../../../lib/supabase';
 
 type NoticeItem = {
@@ -35,6 +37,8 @@ function getNoticePreview(content: string) {
 }
 
 export default function NoticesScreen() {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [items, setItems] = useState<NoticeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,7 +86,7 @@ export default function NoticesScreen() {
   if (loading) {
     return (
       <View style={styles.centerScreen}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator size="large" color={theme.primary} />
       </View>
     );
   }
@@ -93,7 +97,14 @@ export default function NoticesScreen() {
       contentContainerStyle={styles.content}
       data={items}
       keyExtractor={(item) => String(item.id)}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.primary}
+          colors={[theme.primary]}
+        />
+      }
       ListHeaderComponent={
         <View style={styles.headerBox}>
           <Text style={styles.headerTitle}>공지사항</Text>
@@ -129,23 +140,24 @@ export default function NoticesScreen() {
             </Text>
           </View>
 
-          <Ionicons name="chevron-forward" size={18} color="#c4c4c4" />
+          <Ionicons name="chevron-forward" size={18} color={theme.textSubtle} />
         </TouchableOpacity>
       )}
     />
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f5f6f8',
+    backgroundColor: theme.background,
   },
   centerScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f5f6f8',
+    backgroundColor: theme.background,
   },
   content: {
     paddingBottom: 32,
@@ -158,18 +170,18 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   headerDesc: {
     marginTop: 7,
     fontSize: 14,
-    color: '#6b7280',
+    color: theme.textMuted,
     lineHeight: 20,
   },
   empty: {
     marginTop: 60,
     textAlign: 'center',
-    color: '#9ca3af',
+    color: theme.textSubtle,
     fontSize: 14,
   },
   noticeRow: {
@@ -178,9 +190,9 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 18,
     paddingVertical: 17,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f1f3',
+    borderBottomColor: theme.borderSoft,
   },
   noticeIcon: {
     width: 38,
@@ -188,7 +200,7 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff7ed',
+    backgroundColor: theme.warningBg,
   },
   noticeBody: {
     flex: 1,
@@ -206,23 +218,24 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   privateLabel: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '800',
   },
   noticeDate: {
-    color: '#9ca3af',
+    color: theme.textSubtle,
     fontSize: 12,
   },
   noticeTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
   noticePreview: {
     marginTop: 6,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 14,
     lineHeight: 20,
   },
 });
+}

@@ -10,7 +10,10 @@ import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../hooks/use-app-theme';
+import { installAdaptiveStyleSheetColors } from '../lib/adaptiveStyleSheetColors';
 import { supabase } from '../lib/supabase';
+
+installAdaptiveStyleSheetColors();
 
 // iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
 // 알림 테스트를 다시 할 때 true로 바꾸면 됩니다.

@@ -35,6 +35,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContactQrModal from '../../../../components/ContactQrModal';
 import InlineMap from '../../../../components/InlineMap';
 import { useAuth } from '../../../../contexts/AuthContext';
+import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getOrCreateRoom } from '../../../../lib/chat';
 import { canChatToListing } from '../../../../lib/chat_guard';
 import { canUseApp } from '../../../../lib/guard';
@@ -314,6 +315,8 @@ function ZoomableImage({
 export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
   const insets = useSafeAreaInsets();
 
 
@@ -1237,7 +1240,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             activeOpacity={0.85}
             onPress={handleEdit}
           >
-            <Ionicons name="create-outline" size={22} color="#111827" />
+            <Ionicons name="create-outline" size={22} color={backIconColor} />
           </TouchableOpacity>
         ) : null}
 
@@ -1247,7 +1250,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           activeOpacity={0.85}
           onPress={handleShare}
         >
-          <Ionicons name="share-social-outline" size={22} color="#111827" />
+          <Ionicons name="share-social-outline" size={22} color={backIconColor} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1256,7 +1259,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           activeOpacity={0.85}
           onPress={() => setMenuOpen(true)}
         >
-          <Ionicons name="ellipsis-horizontal" size={22} color="#111827" />
+          <Ionicons name="ellipsis-horizontal" size={22} color={backIconColor} />
         </TouchableOpacity>
       </View>
     );
@@ -1277,7 +1280,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           activeOpacity={0.85}
           onPress={() => router.back()}
         >
-          <Ionicons name="chevron-back" size={24} color="#111827" />
+          <Ionicons name="chevron-back" size={24} color={backIconColor} />
         </TouchableOpacity>
 
         {renderHeaderRight()}
@@ -1286,7 +1289,13 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   };
 
   const renderActionBar = (style?: any) => (
-    <View style={[styles.bottomBar, style]}>
+    <View
+      style={[
+        styles.bottomBar,
+        theme.scheme === 'dark' && { backgroundColor: theme.surface, borderTopColor: theme.border },
+        style,
+      ]}
+    >
       <TouchableOpacity style={styles.heartBtn} onPress={handleToggleLike}>
         <Ionicons
           name={liked ? 'heart' : 'heart-outline'}
@@ -1336,7 +1345,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: theme.background }]}>
       <Stack.Screen
         options={{
           title: '',
@@ -1403,7 +1412,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           activeOpacity={0.85}
           onPress={() => goToMainImage(selectedImageIndex - 1)}
         >
-          <Ionicons name="chevron-back" size={28} color="#111827" />
+          <Ionicons name="chevron-back" size={28} color={backIconColor} />
         </TouchableOpacity>
       ) : null}
 
@@ -1415,13 +1424,13 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           activeOpacity={0.85}
           onPress={() => goToMainImage(selectedImageIndex + 1)}
         >
-          <Ionicons name="chevron-forward" size={28} color="#111827" />
+          <Ionicons name="chevron-forward" size={28} color={backIconColor} />
         </TouchableOpacity>
       ) : null}
     </>
   ) : (
     <View style={styles.imagePlaceholder}>
-      <Ionicons name="image-outline" size={54} color="#9ca3af" />
+      <Ionicons name="image-outline" size={54} color={theme.textSubtle} />
     </View>
   )}
 </View>
@@ -1429,8 +1438,14 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         <TouchableOpacity
           style={[
             styles.sellerCard,
-            showSellerLevel && {
-              borderColor: sellerLevelStyle.borderColor,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              borderBottomColor: theme.border,
+            },
+            showSellerLevel && theme.scheme !== 'dark' && {
+              borderTopColor: sellerLevelStyle.borderColor,
+              borderBottomColor: sellerLevelStyle.borderColor,
               backgroundColor: sellerLevelStyle.backgroundColor,
             },
           ]}
@@ -1445,7 +1460,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   style={styles.sellerAvatarImage}
 />
     ) : (
-      <Ionicons name="person-outline" size={20} color="#6b7280" />
+      <Ionicons name="person-outline" size={20} color={theme.textMuted} />
     )}
   </View>
 
@@ -1464,7 +1479,8 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             styles.sellerLevelBadge,
             {
               borderColor: sellerLevelStyle.borderColor,
-              color: sellerLevelStyle.textColor,
+              backgroundColor: theme.scheme === 'dark' ? theme.surface : '#fff',
+              color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
             },
           ]}
         >
@@ -1474,7 +1490,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     </View>
   </View>
 
-  <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+  <Ionicons name="chevron-forward" size={18} color={theme.textSubtle} />
 </TouchableOpacity>
 
         <View style={styles.badgesRow}>
@@ -1521,7 +1537,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         </Text>
         {quantityInfo.isMultiQuantity ? (
           <View style={styles.quantityBox}>
-            <Ionicons name="cube-outline" size={16} color="#2563eb" />
+            <Ionicons name="cube-outline" size={16} color={theme.primary} />
             <Text style={styles.quantityText}>
               남은 {quantityInfo.remaining}
               {item.quantity_unit || '개'} / 전체 {quantityInfo.total}
@@ -1559,26 +1575,26 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
 
             <View style={styles.storeActionRow}>
               <TouchableOpacity style={styles.storeActionBtn} onPress={handleChat}>
-                <Ionicons name="chatbubble-ellipses-outline" size={17} color="#111827" />
+                <Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.text} />
                 <Text style={styles.storeActionText}>채팅 문의</Text>
               </TouchableOpacity>
 
               {publicPhone ? (
                 <TouchableOpacity style={styles.storeActionBtn} onPress={handlePhone}>
-                  <Ionicons name="call-outline" size={17} color="#111827" />
+                  <Ionicons name="call-outline" size={17} color={theme.text} />
                   <Text style={styles.storeActionText}>전화하기</Text>
                 </TouchableOpacity>
               ) : null}
 
               <TouchableOpacity style={styles.storeActionBtn} onPress={goToTradeMap}>
-                <Ionicons name="navigate-outline" size={17} color="#111827" />
+                <Ionicons name="navigate-outline" size={17} color={theme.text} />
                 <Text style={styles.storeActionText}>길찾기</Text>
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity style={styles.otherStoreProductsBtn} onPress={goToStoreDetail}>
               <Text style={styles.otherStoreProductsText}>가게 다른 상품 보기</Text>
-              <Ionicons name="chevron-forward" size={17} color="#2563eb" />
+              <Ionicons name="chevron-forward" size={17} color={theme.primary} />
             </TouchableOpacity>
           </View>
         ) : null}
@@ -1619,12 +1635,12 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           <Text style={styles.sectionTitle}>활동 정보</Text>
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
-              <Ionicons name="heart-outline" size={18} color="#6b7280" />
+              <Ionicons name="heart-outline" size={18} color={theme.textMuted} />
               <Text style={styles.statText}>관심 {favoriteCount}</Text>
             </View>
 
             <View style={styles.statItem}>
-              <Ionicons name="eye-outline" size={18} color="#6b7280" />
+              <Ionicons name="eye-outline" size={18} color={theme.textMuted} />
               <Text style={styles.statText}>조회 {item.views_count ?? 0}</Text>
             </View>
 
@@ -1632,7 +1648,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
               <Ionicons
                 name="chatbubble-ellipses-outline"
                 size={18}
-                color="#6b7280"
+                color={theme.textMuted}
               />
               <Text style={styles.statText}>채팅 {chatCount}</Text>
             </View>
@@ -1664,7 +1680,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                           <Image source={{ uri: similarImageUrl }} style={styles.similarImage} />
                         ) : (
                           <View style={styles.similarPlaceholder}>
-                            <Ionicons name="image-outline" size={22} color="#9ca3af" />
+                            <Ionicons name="image-outline" size={22} color={theme.textSubtle} />
                           </View>
                         )}
                       </View>

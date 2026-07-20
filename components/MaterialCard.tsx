@@ -18,6 +18,8 @@ import {
   getSellerLevelStyle,
   getSellerLevelTitle,
 } from '../lib/sellerLevel';
+import { type AppPalette } from '../contexts/theme';
+import { useAppTheme } from '../hooks/use-app-theme';
 import { supabase } from '../lib/supabase';
 
 type Props = {
@@ -137,6 +139,8 @@ export default function MaterialCard({
   showMenu = true,
 }: Props) {
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const isVerifiedStore =
     item.profiles?.user_type === 'store' && !!item.profiles?.business_verified;
   const isOwner = !!user?.id && item.author_id === user.id;
@@ -369,7 +373,8 @@ export default function MaterialCard({
           styles.card,
           showSellerLevel && {
             borderColor: sellerLevelStyle.borderColor,
-            backgroundColor: sellerLevelStyle.backgroundColor,
+            backgroundColor:
+              theme.scheme === 'dark' ? theme.surface : sellerLevelStyle.backgroundColor,
           },
           shouldCompactBadges && styles.compactCard,
         ]}
@@ -383,7 +388,7 @@ export default function MaterialCard({
               <Image source={{ uri: imageUrl }} style={styles.image} />
             ) : (
               <View style={styles.imagePlaceholder}>
-                <Ionicons name="image-outline" size={34} color="#9ca3af" />
+                <Ionicons name="image-outline" size={34} color={theme.textSubtle} />
               </View>
             )}
           </View>
@@ -412,8 +417,8 @@ export default function MaterialCard({
                     styles.badge,
                     shouldCompactBadges && styles.compactBadge,
                     {
-                      backgroundColor: '#fff',
-                      color: sellerLevelStyle.textColor,
+                      backgroundColor: theme.surface,
+                      color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
                     },
                   ]}
                 >
@@ -469,7 +474,7 @@ export default function MaterialCard({
 
               {showMenu ? (
                 <TouchableOpacity onPress={() => setMenuOpen(true)} style={styles.moreBtn}>
-                  <Ionicons name="ellipsis-horizontal" size={18} color="#6b7280" />
+                  <Ionicons name="ellipsis-horizontal" size={18} color={theme.textMuted} />
                 </TouchableOpacity>
               ) : null}
             </View>
@@ -496,7 +501,12 @@ export default function MaterialCard({
                 {item.profiles?.display_name || '이름 없음'}
               </Text>
               {showSellerLevel ? (
-                <Text style={[styles.sellerLevelText, { color: sellerLevelStyle.textColor }]}>
+                <Text
+                  style={[
+                    styles.sellerLevelText,
+                    { color: theme.scheme === 'dark' ? theme.textMuted : sellerLevelStyle.textColor },
+                  ]}
+                >
                   {getSellerLevelTitle(sellerLevel)}
                 </Text>
               ) : null}
@@ -505,7 +515,7 @@ export default function MaterialCard({
             {/* 하단 수치 */}
             <View style={styles.bottomRow}>
               <View style={styles.countRow}>
-                <Ionicons name="heart-outline" size={14} color="#6b7280" />
+                <Ionicons name="heart-outline" size={14} color={theme.textMuted} />
                 <Text style={styles.countText}>{item.favorites_count ?? 0}</Text>
               </View>
 
@@ -513,7 +523,7 @@ export default function MaterialCard({
                 <Ionicons
                   name="chatbubble-ellipses-outline"
                   size={14}
-                  color="#6b7280"
+                  color={theme.textMuted}
                 />
                 <Text style={styles.countText}>{item.chats_count ?? 0}</Text>
               </View>
@@ -569,12 +579,13 @@ export default function MaterialCard({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 14,
   },
 
@@ -596,7 +607,7 @@ const styles = StyleSheet.create({
     height: 122,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
 
   compactImageWrap: {
@@ -614,7 +625,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
 
   infoWrap: {
@@ -663,7 +674,7 @@ const styles = StyleSheet.create({
 
   urgentBadge: {
     backgroundColor: '#fee2e2',
-    color: '#dc2626',
+    color: theme.danger,
   },
 
   todayBadge: {
@@ -686,7 +697,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 17,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
     lineHeight: 23,
   },
 
@@ -697,21 +708,21 @@ const styles = StyleSheet.create({
   meta: {
     marginTop: 4,
     fontSize: 13,
-    color: '#6b7280',
+    color: theme.textMuted,
   },
 
   price: {
     marginTop: 8,
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
 
   stockText: {
     marginTop: 3,
     fontSize: 12,
     fontWeight: '800',
-    color: '#2563eb',
+    color: theme.primary,
   },
 
   sellerRow: {
@@ -720,7 +731,7 @@ const styles = StyleSheet.create({
 
   sellerName: {
     fontSize: 13,
-    color: '#4b5563',
+    color: theme.textMuted,
   },
 
   sellerLevelText: {
@@ -743,20 +754,20 @@ const styles = StyleSheet.create({
   },
 
   countText: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '600',
   },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: theme.overlay,
     justifyContent: 'flex-end',
     padding: 16,
   },
 
   menuBox: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 18,
     paddingVertical: 8,
   },
@@ -769,10 +780,11 @@ const styles = StyleSheet.create({
   menuText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: theme.text,
   },
 
   reportText: {
-    color: '#dc2626',
+    color: theme.danger,
   },
 });
+}

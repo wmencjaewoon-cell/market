@@ -1,24 +1,33 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
+import { useAppTheme } from '../../../hooks/use-app-theme';
 
 function BackButton() {
+  const theme = useAppTheme();
+
   return (
     <TouchableOpacity
       onPress={() => router.back()}
       style={{ paddingHorizontal: 12 }}
     >
-      <Ionicons name="chevron-back" size={24} color="#111827" />
+      <Ionicons name="chevron-back" size={24} color={theme.text} />
     </TouchableOpacity>
   );
 }
 
 export default function HomeStackLayout() {
+  const theme = useAppTheme();
+
   return (
     <Stack
       screenOptions={{
         headerBackTitle: '',
         headerBackButtonDisplayMode: 'minimal',
+        headerStyle: { backgroundColor: theme.surface },
+        headerTintColor: theme.text,
+        headerTitleStyle: { color: theme.text },
+        contentStyle: { backgroundColor: theme.background },
       }}
     >
       <Stack.Screen

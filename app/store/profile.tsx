@@ -1,5 +1,5 @@
 import { Stack } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   ScrollView,
@@ -11,12 +11,16 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { STORE_CATEGORY_SELECT_OPTIONS } from '../../lib/storeCategories';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreProfileScreen() {
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<any | null>(null);
   const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
   const [storeCategory, setStoreCategory] = useState('');
@@ -259,6 +263,9 @@ function OptionRow({
   value: boolean;
   onValueChange: (value: boolean) => void;
 }) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
     <View style={styles.optionRow}>
       <Text style={styles.optionLabel}>{label}</Text>
@@ -267,42 +274,43 @@ function OptionRow({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#fff' },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 16, paddingBottom: 48, gap: 12 },
-  title: { color: '#111827', fontSize: 24, fontWeight: '900' },
+  title: { color: theme.text, fontSize: 24, fontWeight: '900' },
   noticeBox: {
     borderRadius: 14,
-    backgroundColor: '#fff7ed',
+    backgroundColor: theme.warningBg,
     borderWidth: 1,
     borderColor: '#fed7aa',
     padding: 14,
     gap: 6,
   },
-  noticeTitle: { color: '#9a3412', fontSize: 16, fontWeight: '900' },
-  noticeDesc: { color: '#7c2d12', fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  noticeTitle: { color: theme.warningText, fontSize: 16, fontWeight: '900' },
+  noticeDesc: { color: theme.warningText, fontSize: 13, lineHeight: 19, fontWeight: '600' },
   storeSummary: {
     borderRadius: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     padding: 14,
     gap: 4,
   },
-  storeName: { color: '#111827', fontSize: 18, fontWeight: '900' },
+  storeName: { color: theme.text, fontSize: 18, fontWeight: '900' },
   storeCategory: {
     alignSelf: 'flex-start',
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
-    color: '#1d4ed8',
+    backgroundColor: theme.primarySoft,
+    color: theme.primary,
     overflow: 'hidden',
     paddingHorizontal: 9,
     paddingVertical: 4,
     fontSize: 12,
     fontWeight: '900',
   },
-  storeMeta: { color: '#6b7280', fontSize: 13, fontWeight: '700', lineHeight: 19 },
-  label: { color: '#111827', fontSize: 15, fontWeight: '900' },
+  storeMeta: { color: theme.textMuted, fontSize: 13, fontWeight: '700', lineHeight: 19 },
+  label: { color: theme.text, fontSize: 15, fontWeight: '900' },
   categoryWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -311,60 +319,62 @@ const styles = StyleSheet.create({
   categoryChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: theme.border,
+    backgroundColor: theme.surface,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
   categoryChipActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
   },
   categoryChipText: {
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '900',
   },
   categoryChipTextActive: {
-    color: '#1d4ed8',
+    color: theme.primary,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
-    color: '#111827',
+    backgroundColor: theme.input,
+    color: theme.text,
     fontSize: 15,
   },
   textarea: { minHeight: 104 },
   addressInput: { minHeight: 74 },
   optionBox: {
     borderRadius: 14,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     paddingHorizontal: 14,
   },
   optionRow: {
     minHeight: 52,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: theme.borderSoft,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
   },
-  optionLabel: { flex: 1, color: '#111827', fontSize: 15, fontWeight: '800' },
+  optionLabel: { flex: 1, color: theme.text, fontSize: 15, fontWeight: '800' },
   message: { fontSize: 13, fontWeight: '800', lineHeight: 18 },
   success: { color: '#047857' },
-  error: { color: '#dc2626' },
+  error: { color: theme.danger },
   saveBtn: {
     marginTop: 8,
     height: 50,
     borderRadius: 14,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveText: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  saveText: { color: theme.primaryText, fontSize: 15, fontWeight: '900' },
 });
+}

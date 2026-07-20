@@ -25,6 +25,8 @@ import {
   sendFavoriteListingUpdate,
   sendKeywordAlertsForListing,
 } from '../lib/listingNotifications';
+import { type AppPalette } from '../contexts/theme';
+import { useAppTheme } from '../hooks/use-app-theme';
 import { checkProhibitedContent } from '../lib/prohibited';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../lib/storeStaff';
 import { supabase } from '../lib/supabase';
@@ -119,6 +121,8 @@ export default function ListingForm({
   createReturnTo = '/(tabs)/home/create',
   createRedirectTo = '/(tabs)/home',
 }: Props) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const params = useLocalSearchParams<{
     category?: string;
     lat?: string;
@@ -982,7 +986,7 @@ export default function ListingForm({
         {showImages ? (
           <>
             <TouchableOpacity style={styles.imagePicker} onPress={pickImages}>
-              <Ionicons name="camera-outline" size={24} color="#6b7280" />
+              <Ionicons name="camera-outline" size={24} color={theme.textMuted} />
               <Text style={styles.imagePickerText}>
                 사진 올리기{' '}
                 {existingImageUrls.length + imageUris.length > 0
@@ -1055,7 +1059,7 @@ export default function ListingForm({
         <TextInput
           style={styles.input}
           placeholder="자세한 위치 예: 정문 앞, 1층 로비, ○○마트 앞"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={theme.textSubtle}
           value={detailLocation}
           onChangeText={setDetailLocation}
         />
@@ -1078,7 +1082,7 @@ export default function ListingForm({
         <TextInput
           style={styles.input}
           placeholder={titlePlaceholder}
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={theme.textSubtle}
           value={title}
           onChangeText={setTitle}
         />
@@ -1087,7 +1091,7 @@ export default function ListingForm({
           <TextInput
             style={styles.input}
             placeholder="가격"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textSubtle}
             keyboardType="numeric"
             value={priceText}
             onChangeText={(value) => setPriceText(formatTradePrice(value))}
@@ -1098,7 +1102,7 @@ export default function ListingForm({
           <TextInput
             style={styles.input}
             placeholder="예산 또는 협의"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textSubtle}
             value={priceText}
             onChangeText={setPriceText}
           />
@@ -1109,7 +1113,7 @@ export default function ListingForm({
             <TextInput
               style={styles.quantityInput}
               placeholder={quantityPlaceholder}
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSubtle}
               keyboardType="number-pad"
               value={quantityText}
               onChangeText={(value) => setQuantityText(value.replace(/[^0-9]/g, ''))}
@@ -1161,7 +1165,7 @@ export default function ListingForm({
             <TextInput
               style={styles.input}
               placeholder="단위 직접 입력 예: 마대, 롤, 판"
-              placeholderTextColor="#9ca3af"
+              placeholderTextColor={theme.textSubtle}
               value={customQuantityUnit}
               maxLength={10}
               onChangeText={setCustomQuantityUnit}
@@ -1173,7 +1177,7 @@ export default function ListingForm({
           <TextInput
             style={styles.input}
             placeholder="남은 수량"
-            placeholderTextColor="#9ca3af"
+            placeholderTextColor={theme.textSubtle}
             keyboardType="number-pad"
             value={quantityRemainingText}
             onChangeText={(value) =>
@@ -1185,7 +1189,7 @@ export default function ListingForm({
         <TextInput
           style={[styles.input, styles.textarea]}
           placeholder="설명"
-          placeholderTextColor="#9ca3af"
+          placeholderTextColor={theme.textSubtle}
           multiline
           value={description}
           onChangeText={setDescription}
@@ -1331,13 +1335,14 @@ export default function ListingForm({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   keyboardWrap: {
     flex: 1,
   },
   screen: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: theme.background,
   },
   content: {
     padding: 16,
@@ -1348,16 +1353,16 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.background,
   },
   loadingText: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontWeight: '700',
   },
   title: {
     fontSize: 24,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   categoryRow: {
     flexDirection: 'row',
@@ -1368,48 +1373,48 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     paddingHorizontal: 10,
     paddingVertical: 10,
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
   },
   categoryBtnActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
   },
   categoryText: {
-    color: '#111827',
+    color: theme.text,
     fontWeight: '900',
     fontSize: 15,
     textAlign: 'center',
   },
   categoryTextActive: {
-    color: '#1d4ed8',
+    color: theme.primary,
   },
   categoryDesc: {
     marginTop: 4,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 11,
     fontWeight: '700',
     lineHeight: 15,
     textAlign: 'center',
   },
   categoryDescActive: {
-    color: '#2563eb',
+    color: theme.primary,
   },
   imagePicker: {
     height: 150,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
     gap: 8,
   },
   imagePickerText: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontWeight: '800',
   },
   thumbnailRow: {
@@ -1422,7 +1427,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: '#f3f4f6',
+    backgroundColor: theme.surfaceSoft,
   },
   thumbnailImage: {
     width: '100%',
@@ -1447,44 +1452,44 @@ const styles = StyleSheet.create({
   },
   infoBox: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.surfaceMuted,
     gap: 6,
   },
   infoLabel: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#6b7280',
+    color: theme.textMuted,
   },
   infoValue: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   infoDesc: {
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 13,
     lineHeight: 19,
   },
   mapBtn: {
-    backgroundColor: '#111827',
+    backgroundColor: theme.text,
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
   },
   mapBtnText: {
-    color: '#fff',
+    color: theme.background,
     fontWeight: '900',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
-    backgroundColor: '#fff',
-    color: '#111827',
+    backgroundColor: theme.input,
+    color: theme.text,
     fontSize: 15,
   },
   textarea: {
@@ -1502,11 +1507,11 @@ const styles = StyleSheet.create({
   quantityInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
-    backgroundColor: '#fff',
-    color: '#111827',
+    backgroundColor: theme.input,
+    color: theme.text,
     fontSize: 15,
   },
   quantityUnitPreview: {
@@ -1514,8 +1519,8 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
@@ -1523,7 +1528,7 @@ const styles = StyleSheet.create({
   quantityUnitPreviewText: {
     fontSize: 14,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   quantityUnitOptions: {
     gap: 8,
@@ -1531,40 +1536,40 @@ const styles = StyleSheet.create({
   },
   quantityUnitChip: {
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 999,
     paddingHorizontal: 13,
     paddingVertical: 9,
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
   },
   quantityUnitChipActive: {
-    backgroundColor: '#111827',
-    borderColor: '#111827',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
   quantityUnitChipText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#374151',
+    color: theme.textMuted,
   },
   quantityUnitChipTextActive: {
-    color: '#fff',
+    color: theme.primaryText,
   },
   storeOptionsBox: {
     borderWidth: 1,
-    borderColor: '#dbeafe',
+    borderColor: theme.primarySoft,
     borderRadius: 14,
-    backgroundColor: '#eff6ff',
+    backgroundColor: theme.primarySoft,
     padding: 14,
     gap: 10,
   },
   storeOptionsTitle: {
-    color: '#1d4ed8',
+    color: theme.primary,
     fontSize: 16,
     fontWeight: '900',
   },
   storeOptionsDesc: {
     marginTop: 4,
-    color: '#374151',
+    color: theme.textMuted,
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '600',
@@ -1578,7 +1583,7 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 15,
     fontWeight: '800',
-    color: '#111827',
+    color: theme.text,
   },
   vatRow: {
     flexDirection: 'row',
@@ -1587,28 +1592,28 @@ const styles = StyleSheet.create({
   vatBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#bfdbfe',
+    borderColor: theme.primarySoft,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
   },
   vatBtnActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#2563eb',
+    borderColor: theme.primary,
+    backgroundColor: theme.primary,
   },
   vatBtnText: {
-    color: '#1d4ed8',
+    color: theme.primary,
     fontSize: 13,
     fontWeight: '900',
   },
   vatBtnTextActive: {
-    color: '#fff',
+    color: theme.primaryText,
   },
   sectionLabel: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
     marginTop: 4,
   },
   statusRow: {
@@ -1618,28 +1623,28 @@ const styles = StyleSheet.create({
   statusBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
   statusBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: theme.primary,
+    borderColor: theme.primary,
   },
   statusText: {
     fontWeight: '900',
-    color: '#374151',
+    color: theme.textMuted,
   },
   statusTextActive: {
-    color: '#fff',
+    color: theme.primaryText,
   },
   warningBox: {
     borderWidth: 1,
     borderColor: '#f59e0b',
     borderRadius: 14,
     padding: 14,
-    backgroundColor: '#fffbeb',
+    backgroundColor: theme.warningBg,
     gap: 8,
   },
   warningTitle: {
@@ -1659,16 +1664,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   changeRegionBtnText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontWeight: '900',
   },
   noticeText: {
     fontSize: 13,
-    color: '#6b7280',
+    color: theme.textMuted,
     lineHeight: 20,
   },
   errorText: {
-    color: '#dc2626',
+    color: theme.danger,
     fontWeight: '800',
     lineHeight: 20,
   },
@@ -1679,7 +1684,7 @@ const styles = StyleSheet.create({
   },
   btn: {
     marginTop: 8,
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 14,
     paddingVertical: 15,
     alignItems: 'center',
@@ -1688,8 +1693,9 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   btnText: {
-    color: '#fff',
+    color: theme.primaryText,
     fontWeight: '900',
     fontSize: 16,
   },
 });
+}

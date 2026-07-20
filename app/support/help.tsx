@@ -1,6 +1,12 @@
+import { useMemo } from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 
 export default function HelpScreen() {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const handleEmail = () => {
     Linking.openURL('mailto:wmenc.jaewoon@gmail.com');
   };
@@ -40,25 +46,27 @@ export default function HelpScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb', padding: 16 },
-  title: { fontSize: 26, fontWeight: '800', marginBottom: 8 },
-  desc: { color: '#6b7280', marginBottom: 20, lineHeight: 22 },
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.background, padding: 16 },
+  title: { fontSize: 26, fontWeight: '800', marginBottom: 8, color: theme.text },
+  desc: { color: theme.textMuted, marginBottom: 20, lineHeight: 22 },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.surface,
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: theme.border,
   },
-  label: { fontSize: 14, color: '#6b7280', marginBottom: 6 },
-  value: { fontSize: 17, fontWeight: '800', marginBottom: 12 },
+  label: { fontSize: 14, color: theme.textMuted, marginBottom: 6 },
+  value: { fontSize: 17, fontWeight: '800', marginBottom: 12, color: theme.text },
   btn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: theme.primary,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  btnText: { color: '#fff', fontWeight: '800' },
+  btnText: { color: theme.scheme === 'dark' ? '#fff' : theme.primaryText, fontWeight: '800' },
 });
+}
