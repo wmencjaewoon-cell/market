@@ -745,7 +745,7 @@ export default function LoginScreen() {
               onPress={() => setAuthMode('login')}
             >
               <Text style={[styles.modeText, authMode === 'login' && styles.modeTextActive]}>
-                이메일 로그인
+                로그인
               </Text>
             </TouchableOpacity>
 
@@ -754,7 +754,7 @@ export default function LoginScreen() {
               onPress={() => setAuthMode('signup')}
             >
               <Text style={[styles.modeText, authMode === 'signup' && styles.modeTextActive]}>
-                이메일 회원가입
+                회원가입
               </Text>
             </TouchableOpacity>
           </View>
@@ -915,11 +915,11 @@ function createStyles(theme: AppPalette) {
     alignItems: 'center',
   },
   modeBtnActive: {
-    backgroundColor: theme.text,
-    borderColor: theme.text,
+    backgroundColor: theme.scheme === 'dark' ? theme.surfaceSoft : theme.text,
+    borderColor: theme.scheme === 'dark' ? theme.surfaceSoft : theme.text,
   },
   modeText: { fontWeight: '700', color: theme.textMuted },
-  modeTextActive: { color: theme.background },
+  modeTextActive: { color: theme.scheme === 'dark' ? '#fff' : theme.background },
 
   row: { flexDirection: 'row', gap: 10 },
   typeBtn: {
@@ -931,11 +931,11 @@ function createStyles(theme: AppPalette) {
     alignItems: 'center',
   },
   typeBtnActive: {
-    backgroundColor: theme.primary,
-    borderColor: theme.primary,
+    backgroundColor: theme.scheme === 'dark' ? theme.surfaceSoft : theme.primary,
+    borderColor: theme.scheme === 'dark' ? theme.surfaceSoft : theme.primary,
   },
   typeBtnText: { fontWeight: '700', color: theme.textMuted },
-  typeBtnTextActive: { color: theme.primaryText },
+  typeBtnTextActive: { color: theme.scheme === 'dark' ? '#fff' : theme.primaryText },
 
   checkText: { color: theme.textMuted, lineHeight: 22 },
 
@@ -974,12 +974,12 @@ function createStyles(theme: AppPalette) {
   },
 
   darkBtn: {
-    backgroundColor: theme.text,
+    backgroundColor: theme.scheme === 'dark' ? theme.surfaceSoft : theme.text,
     borderRadius: 14,
     padding: 15,
     alignItems: 'center',
   },
-  darkBtnText: { color: theme.background, fontWeight: '800' },
+  darkBtnText: { color: theme.scheme === 'dark' ? '#fff' : theme.background, fontWeight: '800' },
   findPasswordText: {
     alignSelf: 'flex-end',
     color: theme.primary,

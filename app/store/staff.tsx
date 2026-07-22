@@ -448,7 +448,7 @@ function StaffSection({
         return (
           <View key={item.id} style={styles.staffCard}>
             <View style={styles.staffIcon}>
-              <Ionicons name="person-outline" size={20} color="#2563eb" />
+              <Ionicons name="person-outline" size={20} color="#166534" />
             </View>
             <View style={styles.staffInfo}>
               <Text style={styles.staffName}>{item.display_name || '직원'}</Text>
@@ -570,15 +570,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   roleBtnActive: {
-    backgroundColor: '#eff6ff',
-    borderColor: '#2563eb',
+    backgroundColor: '#ecfdf5',
+    borderColor: '#166534',
   },
   roleText: { color: '#374151', fontSize: 14, fontWeight: '900' },
-  roleTextActive: { color: '#1d4ed8' },
+  roleTextActive: { color: '#14532d' },
   primaryBtn: {
     minHeight: 48,
     borderRadius: 12,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -613,14 +613,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#ecfdf5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   staffInfo: { flex: 1, minWidth: 0 },
   staffName: { color: '#111827', fontSize: 15, fontWeight: '900' },
   staffMeta: { marginTop: 3, color: '#6b7280', fontSize: 12, fontWeight: '700' },
-  managerHelp: { marginTop: 4, color: '#2563eb', fontSize: 12, fontWeight: '900' },
+  managerHelp: { marginTop: 4, color: '#166534', fontSize: 12, fontWeight: '900' },
   inactiveText: { marginTop: 4, color: '#b45309', fontSize: 12, fontWeight: '900' },
   editCard: {
     borderRadius: 14,
@@ -635,11 +635,11 @@ const styles = StyleSheet.create({
   editActionRow: { flexDirection: 'row', gap: 8 },
   editBtn: {
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
+    backgroundColor: '#ecfdf5',
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  editText: { color: '#2563eb', fontSize: 12, fontWeight: '900' },
+  editText: { color: '#166534', fontSize: 12, fontWeight: '900' },
   deactivateBtn: {
     borderRadius: 999,
     backgroundColor: '#fee2e2',
@@ -662,7 +662,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderRadius: 12,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     alignItems: 'center',
     justifyContent: 'center',
   },

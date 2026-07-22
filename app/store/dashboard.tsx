@@ -3,11 +3,13 @@ import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import { getMyStoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreDashboardScreen() {
   const { user } = useAuth();
+  const theme = useAppTheme();
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [chatCount, setChatCount] = useState(0);
@@ -132,12 +134,12 @@ export default function StoreDashboardScreen() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>빠른 작업</Text>
-            <ActionButton icon="add-circle-outline" label="상품 등록" onPress={() => router.push('/store/product-create' as any)} />
-            <ActionButton icon="cube-outline" label="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
-            <ActionButton icon="clipboard-outline" label="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
-            <ActionButton icon="people-outline" label="직원 관리" onPress={() => router.push('/store/staff' as any)} />
-            <ActionButton icon="storefront-outline" label="가게 정보 수정" onPress={() => router.push('/store/profile' as any)} />
-            <ActionButton icon="flash-outline" label="오늘 가능 켜기" onPress={() => router.push('/store/profile' as any)} />
+            <ActionButton icon="add-circle-outline" label="상품 등록" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/product-create' as any)} />
+            <ActionButton icon="cube-outline" label="상품 상태관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/products' as any)} />
+            <ActionButton icon="clipboard-outline" label="견적/고객관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/estimates' as any)} />
+            <ActionButton icon="people-outline" label="직원 관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/staff' as any)} />
+            <ActionButton icon="storefront-outline" label="가게 정보 수정" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />
+            <ActionButton icon="flash-outline" label="오늘 가능 켜기" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />
           </View>
 
           <View style={styles.section}>
@@ -155,7 +157,7 @@ export default function StoreDashboardScreen() {
                     <Text style={styles.popularTitle} numberOfLines={1}>{item.title}</Text>
                     <Text style={styles.popularMeta}>조회 {Number(item.views_count || 0).toLocaleString()}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+                  <Ionicons name="chevron-forward" size={18} color={theme.textSubtle} />
                 </TouchableOpacity>
               ))
             )}
@@ -178,17 +180,21 @@ function StatCard({ label, value }: { label: string; value: string }) {
 function ActionButton({
   icon,
   label,
+  iconColor,
+  chevronColor,
   onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
+  iconColor: string;
+  chevronColor: string;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity style={styles.actionBtn} onPress={onPress}>
-      <Ionicons name={icon} size={19} color="#111827" />
+      <Ionicons name={icon} size={19} color={iconColor} />
       <Text style={styles.actionText}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
+      <Ionicons name="chevron-forward" size={18} color={chevronColor} />
     </TouchableOpacity>
   );
 }

@@ -515,7 +515,7 @@ export default function MaterialCard({
             {/* 하단 수치 */}
             <View style={styles.bottomRow}>
               <View style={styles.countRow}>
-                <Ionicons name="heart-outline" size={14} color={theme.textMuted} />
+                <Ionicons name="heart-outline" size={14} color={theme.text} />
                 <Text style={styles.countText}>{item.favorites_count ?? 0}</Text>
               </View>
 
@@ -523,9 +523,11 @@ export default function MaterialCard({
                 <Ionicons
                   name="chatbubble-ellipses-outline"
                   size={14}
-                  color={theme.textMuted}
+                  color={theme.text}
                 />
-                <Text style={styles.countText}>{item.chats_count ?? 0}</Text>
+                <Text style={[styles.countText, styles.chatCountText]}>
+                  {item.chats_count ?? 0}
+                </Text>
               </View>
             </View>
           </View>
@@ -663,7 +665,7 @@ function createStyles(theme: AppPalette) {
   },
 
   storeBadge: {
-    backgroundColor: '#1d4ed8',
+    backgroundColor: '#166534',
     color: '#fff',
   },
 
@@ -722,7 +724,7 @@ function createStyles(theme: AppPalette) {
     marginTop: 3,
     fontSize: 12,
     fontWeight: '800',
-    color: theme.primary,
+    color: theme.text,
   },
 
   sellerRow: {
@@ -754,9 +756,14 @@ function createStyles(theme: AppPalette) {
   },
 
   countText: {
-    color: theme.textMuted,
+    color: theme.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+
+  chatCountText: {
+    color: theme.text,
+    fontWeight: '800',
   },
 
   modalOverlay: {

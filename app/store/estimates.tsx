@@ -667,8 +667,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   filterBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: '#166534',
+    borderColor: '#166534',
   },
   filterText: { color: '#374151', fontSize: 12, fontWeight: '900' },
   filterTextActive: { color: '#fff' },
@@ -698,8 +698,8 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   categoryBadge: {
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: '#ecfdf5',
+    color: '#166534',
     overflow: 'hidden',
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -739,11 +739,11 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   assignmentChipActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: '#166534',
+    backgroundColor: '#ecfdf5',
   },
   assignmentChipText: { color: '#374151', fontSize: 12, fontWeight: '900' },
-  assignmentChipTextActive: { color: '#1d4ed8' },
+  assignmentChipTextActive: { color: '#14532d' },
   statusActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   statusActionBtn: {
     borderRadius: 999,
@@ -804,7 +804,7 @@ const styles = StyleSheet.create({
   saveBtn: {
     minHeight: 46,
     borderRadius: 12,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     alignItems: 'center',
     justifyContent: 'center',
   },

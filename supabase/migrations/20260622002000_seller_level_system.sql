@@ -39,7 +39,7 @@ create table if not exists public.seller_level_events (
   created_at timestamptz not null default now()
 );
 
-create index if not exists seller_level_events_user_created_idx
+create index if not exists seller_level_events3_user_created_idx
 on public.seller_level_events (user_id, created_at desc);
 
 create index if not exists seller_level_events_type_idx

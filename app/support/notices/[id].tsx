@@ -181,7 +181,7 @@ export default function NoticeDetailScreen() {
 
       <View style={styles.helpBox}>
         <View style={styles.helpIcon}>
-          <Ionicons name="help-buoy-outline" size={22} color="#f97316" />
+          <Ionicons name="help-buoy-outline" size={22} color="#166534" />
         </View>
 
         <View style={styles.helpContent}>
@@ -235,7 +235,7 @@ function createStyles(theme: AppPalette) {
     marginBottom: 9,
   },
   noticeLabel: {
-    color: '#f97316',
+    color: '#166534',
     fontSize: 13,
     fontWeight: '900',
   },
@@ -312,7 +312,7 @@ function createStyles(theme: AppPalette) {
     marginTop: 12,
   },
   helpPrimaryBtn: {
-    backgroundColor: '#f97316',
+    backgroundColor: '#166534',
     borderRadius: 8,
     paddingHorizontal: 13,
     paddingVertical: 9,

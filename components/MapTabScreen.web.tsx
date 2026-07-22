@@ -301,7 +301,7 @@ export default function MapTabScreen() {
   };
 
   const getCategoryColor = (category: ListingMapItem['category']) => {
-    if (category === 'trade') return '#2563eb';
+    if (category === 'trade') return '#166534';
     if (category === 'share') return '#16a34a';
     return '#d97706';
   };
@@ -846,8 +846,8 @@ const styles = StyleSheet.create({
   },
   storeBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#ecfdf5',
-    color: '#047857',
+    backgroundColor: '#166534',
+    color: '#fff',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
@@ -950,8 +950,8 @@ const styles = StyleSheet.create({
   },
   storeGroupBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#ecfdf5',
-    color: '#047857',
+    backgroundColor: '#166534',
+    color: '#fff',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,

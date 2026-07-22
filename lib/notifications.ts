@@ -67,7 +67,7 @@ export async function setupAndroidNotificationChannels() {
     name: '채팅 알림',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#2563eb',
+    lightColor: '#166534',
     sound: 'default',
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
@@ -76,7 +76,7 @@ export async function setupAndroidNotificationChannels() {
     name: '채팅 알림',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#2563eb',
+    lightColor: '#166534',
     sound: 'default',
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });

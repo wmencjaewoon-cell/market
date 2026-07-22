@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
   name: { flex: 1, color: '#111827', fontSize: 16, fontWeight: '900' },
   verifiedBadge: {
     borderRadius: 999,
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: '#166534',
+    color: '#fff',
     overflow: 'hidden',
     paddingHorizontal: 7,
     paddingVertical: 3,

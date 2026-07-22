@@ -58,7 +58,7 @@ export default function TradeMapScreenWeb() {
         <Text style={styles.placeAddress}>{pinAddress}</Text>
         {canCopyAddress ? (
           <TouchableOpacity style={styles.copyAddressBtn} onPress={handleCopyAddress}>
-            <Ionicons name="copy-outline" size={16} color="#2563eb" />
+            <Ionicons name="copy-outline" size={16} color="#166534" />
             <Text style={styles.copyAddressText}>주소 복사하기</Text>
           </TouchableOpacity>
         ) : null}

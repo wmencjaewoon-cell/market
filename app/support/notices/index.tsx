@@ -119,7 +119,7 @@ export default function NoticesScreen() {
           onPress={() => router.push(`/support/notices/${item.id}` as any)}
         >
           <View style={styles.noticeIcon}>
-            <Ionicons name="megaphone-outline" size={19} color="#f97316" />
+            <Ionicons name="megaphone-outline" size={19} color="#166534" />
           </View>
 
           <View style={styles.noticeBody}>
@@ -213,7 +213,7 @@ function createStyles(theme: AppPalette) {
     marginBottom: 5,
   },
   noticeLabel: {
-    color: '#f97316',
+    color: '#166534',
     fontSize: 12,
     fontWeight: '900',
   },

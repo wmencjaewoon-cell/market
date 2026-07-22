@@ -85,15 +85,15 @@ channel.subscribe();
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: theme.background },
-        tabBarActiveTintColor: theme.primary,
+        tabBarActiveTintColor: theme.text,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarStyle: {
           backgroundColor: theme.surface,
           borderTopColor: theme.border,
         },
         tabBarBadgeStyle: {
-          backgroundColor: theme.danger,
-          color: theme.primaryText,
+          backgroundColor: '#166534',
+          color: '#fff',
         },
       }}
     >

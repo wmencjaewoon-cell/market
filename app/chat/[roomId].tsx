@@ -3728,7 +3728,7 @@ export default function ChatRoomScreen() {
                 <Ionicons
                   name="location"
                   size={18}
-                  color={isMine ? '#bfdbfe' : '#2563eb'}
+                  color={isMine ? '#bbf7d0' : '#166534'}
                 />
                 <Text style={[styles.placeMessageTitle, isMine && styles.myPlaceMessageTitle]}>
                   약속장소
@@ -3893,7 +3893,7 @@ export default function ChatRoomScreen() {
                   <Ionicons
                     name={myReciprocalReview ? 'chatbubbles-outline' : 'lock-closed-outline'}
                     size={16}
-                    color={myReciprocalReview ? '#2563eb' : '#6b7280'}
+                    color={myReciprocalReview ? '#166534' : '#6b7280'}
                   />
                   <Text style={styles.reviewPreviewTitle}>상대가 남긴 후기</Text>
                 </View>
@@ -4022,7 +4022,7 @@ export default function ChatRoomScreen() {
                     }}
                   >
                     <View style={styles.callMenuIcon}>
-                      <Ionicons name="call-outline" size={20} color="#2563eb" />
+                      <Ionicons name="call-outline" size={20} color="#166534" />
                     </View>
                     <View style={styles.callMenuTextBox}>
                       <Text style={styles.menuText}>가게 전화</Text>

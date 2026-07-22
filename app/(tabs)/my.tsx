@@ -386,12 +386,12 @@ function createStyles(theme: AppPalette) {
   },
   verifiedText: {
     borderWidth: 1,
-    borderColor: theme.primary,
+    borderColor: '#166534',
     borderRadius: 999,
-    backgroundColor: theme.primarySoft,
+    backgroundColor: '#166534',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    color: theme.primary,
+    color: '#fff',
     fontSize: 13,
     fontWeight: '900',
     overflow: 'hidden',
@@ -439,12 +439,14 @@ container: {
 
   logoutBtn: {
     marginTop: 20,
-    backgroundColor: theme.text,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
     borderRadius: 14,
     padding: 14,
     alignItems: 'center',
   },
-  logoutText: { color: theme.background, fontWeight: '800' },
+  logoutText: { color: theme.text, fontWeight: '800' },
 
   companyBox: {
     marginTop: 18,

@@ -272,8 +272,8 @@ export default function HomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor={theme.primary}
-            colors={[theme.primary]}
+            tintColor="#166534"
+            colors={['#166534']}
           />
         }
       >
@@ -341,7 +341,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/estimate/create' as any)}
           >
             <View style={styles.quickIconBox}>
-              <Ionicons name="construct-outline" size={20} color={theme.primary} />
+              <Ionicons name="construct-outline" size={20} color={theme.text} />
             </View>
             <View style={styles.quickTextBox}>
               <Text style={styles.quickTitle}>견적문의</Text>
@@ -354,7 +354,7 @@ export default function HomeScreen() {
             onPress={() => router.push('/store' as any)}
           >
             <View style={styles.quickIconBox}>
-              <Ionicons name="storefront-outline" size={20} color={theme.primary} />
+              <Ionicons name="storefront-outline" size={20} color={theme.text} />
             </View>
             <View style={styles.quickTextBox}>
               <Text style={styles.quickTitle}>가게 찾기</Text>
@@ -451,7 +451,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
 
                   {active ? (
-                    <Ionicons name="checkmark-circle" size={22} color={theme.primary} />
+                    <Ionicons name="checkmark-circle" size={22} color={theme.text} />
                   ) : (
                     <TouchableOpacity onPress={() => handleDeleteRegion(region.id)}>
                       <Ionicons name="trash-outline" size={20} color={theme.textSubtle} />
@@ -468,7 +468,7 @@ export default function HomeScreen() {
                 router.push('/(tabs)/home/region-search' as any);
               }}
             >
-              <Ionicons name="add" size={20} color={theme.primary} />
+              <Ionicons name="add" size={20} color={theme.text} />
               <Text style={styles.addRegionText}>동네 추가</Text>
             </TouchableOpacity>
 
@@ -502,8 +502,8 @@ function createStyles(theme: AppPalette) {
     color: theme.text,
   },
   radiusBadge: {
-    backgroundColor: theme.primarySoft,
-    color: theme.primary,
+    backgroundColor: theme.surfaceSoft,
+    color: theme.text,
     fontWeight: '800',
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -523,8 +523,8 @@ function createStyles(theme: AppPalette) {
     borderRadius: 999,
   },
   tabBtnActive: {
-    backgroundColor: theme.primary,
-    borderColor: theme.primary,
+    backgroundColor: theme.text,
+    borderColor: theme.text,
   },
 
   homeSearchBox: {
@@ -567,7 +567,7 @@ function createStyles(theme: AppPalette) {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: theme.primarySoft,
+    backgroundColor: theme.surfaceSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -587,7 +587,7 @@ function createStyles(theme: AppPalette) {
     fontWeight: '700',
   },
   tabText: { fontWeight: '700', color: theme.textMuted },
-  tabTextActive: { color: theme.primaryText },
+  tabTextActive: { color: theme.background },
   list: { gap: 14 },
   modalOverlay: {
     flex: 1,
@@ -646,7 +646,7 @@ function createStyles(theme: AppPalette) {
   radiusValue: {
     fontSize: 15,
     fontWeight: '800',
-    color: theme.primary,
+    color: theme.text,
   },
 
   topRight: {
@@ -677,7 +677,7 @@ function createStyles(theme: AppPalette) {
   },
 
   notificationBadgeText: {
-    color: theme.primaryText,
+    color: '#fff',
     fontSize: 10,
     fontWeight: '800',
   },
@@ -722,7 +722,7 @@ function createStyles(theme: AppPalette) {
   },
 
   modalRegionActive: {
-    color: theme.primary,
+    color: theme.text,
   },
 
   modalRegionSub: {
@@ -737,14 +737,14 @@ function createStyles(theme: AppPalette) {
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: theme.primary,
-    backgroundColor: theme.primarySoft,
+    borderColor: theme.border,
+    backgroundColor: theme.surfaceSoft,
     borderRadius: 14,
     padding: 14,
   },
 
   addRegionText: {
-    color: theme.primary,
+    color: theme.text,
     fontWeight: '800',
   },
 
@@ -774,7 +774,7 @@ function createStyles(theme: AppPalette) {
   },
 
   searchBtn: {
-    backgroundColor: theme.primary,
+    backgroundColor: theme.text,
     borderRadius: 12,
     paddingHorizontal: 16,
     alignItems: 'center',
@@ -782,7 +782,7 @@ function createStyles(theme: AppPalette) {
   },
 
   searchBtnText: {
-    color: theme.primaryText,
+    color: theme.background,
     fontWeight: '800',
   },
 

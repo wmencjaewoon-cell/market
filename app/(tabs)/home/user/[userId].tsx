@@ -616,9 +616,9 @@ const styles = StyleSheet.create({
   verifiedText: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#2563eb',
+    borderColor: '#166534',
     borderRadius: 999,
-    backgroundColor: '#1d4ed8',
+    backgroundColor: '#166534',
     paddingHorizontal: 12,
     paddingVertical: 6,
     color: '#fff',

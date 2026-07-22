@@ -720,7 +720,7 @@ export default function EstimateCreateScreen() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>사진/도면 첨부</Text>
           <TouchableOpacity style={styles.imageAddBtn} onPress={pickImages}>
-            <Ionicons name="image-outline" size={17} color="#2563eb" />
+            <Ionicons name="image-outline" size={17} color="#166534" />
             <Text style={styles.imageAddText}>추가</Text>
           </TouchableOpacity>
         </View>

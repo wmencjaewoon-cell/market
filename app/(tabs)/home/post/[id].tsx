@@ -317,6 +317,83 @@ export default function PostDetailScreen() {
   const { user } = useAuth();
   const theme = useAppTheme();
   const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
+  const isDark = theme.scheme === 'dark';
+  const postBackground = isDark ? '#000' : theme.background;
+  const postSurface = isDark ? '#050505' : theme.surface;
+  const postSoft = isDark ? '#111111' : theme.surfaceSoft;
+  const postBorder = isDark ? '#262626' : theme.border;
+  const postText = isDark ? '#fff' : theme.text;
+  const postMuted = isDark ? '#d1d5db' : theme.textMuted;
+  const postSubtle = isDark ? '#9ca3af' : theme.textSubtle;
+  const postThemeStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        background: { backgroundColor: postBackground },
+        imageBackground: { backgroundColor: isDark ? '#000' : '#f6f7f9' },
+        headerBtn: {
+          backgroundColor: isDark ? 'rgba(0,0,0,0.74)' : 'rgba(255,255,255,0.86)',
+          borderColor: isDark ? '#262626' : 'transparent',
+          borderWidth: isDark ? 1 : 0,
+        },
+        sellerCard: {
+          backgroundColor: postBackground,
+          borderTopColor: postBorder,
+          borderBottomColor: postBorder,
+        },
+        avatar: { backgroundColor: postSoft },
+        text: { color: postText },
+        mutedText: { color: postMuted },
+        subtleText: { color: postSubtle },
+        quantityBox: {
+          backgroundColor: postSoft,
+          borderColor: postBorder,
+          borderWidth: isDark ? 1 : 0,
+        },
+        storeProductBox: {
+          backgroundColor: postSoft,
+          borderColor: postBorder,
+        },
+        storeFeatureBadge: {
+          backgroundColor: postBackground,
+          color: postText,
+          borderColor: postBorder,
+          borderWidth: isDark ? 1 : 0,
+        },
+        storeActionBtn: {
+          backgroundColor: postBackground,
+          borderColor: postBorder,
+        },
+        responsibilityBox: {
+          backgroundColor: postSoft,
+          borderColor: postBorder,
+        },
+        statItem: { backgroundColor: postSoft },
+        bottomBar: {
+          backgroundColor: postBackground,
+          borderTopColor: postBorder,
+        },
+        heartBtn: {
+          backgroundColor: postBackground,
+          borderColor: postBorder,
+        },
+        modalBox: {
+          backgroundColor: postSurface,
+          borderColor: postBorder,
+          borderWidth: isDark ? 1 : 0,
+        },
+        input: {
+          backgroundColor: postBackground,
+          borderColor: postBorder,
+          color: postText,
+        },
+        reportReasonBtn: {
+          backgroundColor: postBackground,
+          borderColor: postBorder,
+        },
+        reportCancelBtn: { backgroundColor: postSoft },
+      }),
+    [isDark, postBackground, postBorder, postMuted, postSoft, postSubtle, postSurface, postText]
+  );
   const insets = useSafeAreaInsets();
 
 
@@ -1235,7 +1312,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       <View style={styles.headerRight}>
         {isOwner ? (
           <TouchableOpacity
-            style={styles.headerBtn}
+            style={[styles.headerBtn, postThemeStyles.headerBtn]}
             hitSlop={HEADER_HIT_SLOP}
             activeOpacity={0.85}
             onPress={handleEdit}
@@ -1245,7 +1322,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         ) : null}
 
         <TouchableOpacity
-          style={styles.headerBtn}
+          style={[styles.headerBtn, postThemeStyles.headerBtn]}
           hitSlop={HEADER_HIT_SLOP}
           activeOpacity={0.85}
           onPress={handleShare}
@@ -1254,7 +1331,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.headerBtn}
+          style={[styles.headerBtn, postThemeStyles.headerBtn]}
           hitSlop={HEADER_HIT_SLOP}
           activeOpacity={0.85}
           onPress={() => setMenuOpen(true)}
@@ -1275,7 +1352,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         pointerEvents="box-none"
       >
         <TouchableOpacity
-          style={styles.headerBtn}
+          style={[styles.headerBtn, postThemeStyles.headerBtn]}
           hitSlop={HEADER_HIT_SLOP}
           activeOpacity={0.85}
           onPress={() => router.back()}
@@ -1292,20 +1369,20 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     <View
       style={[
         styles.bottomBar,
-        theme.scheme === 'dark' && { backgroundColor: theme.surface, borderTopColor: theme.border },
+        postThemeStyles.bottomBar,
         style,
       ]}
     >
-      <TouchableOpacity style={styles.heartBtn} onPress={handleToggleLike}>
+      <TouchableOpacity style={[styles.heartBtn, postThemeStyles.heartBtn]} onPress={handleToggleLike}>
         <Ionicons
           name={liked ? 'heart' : 'heart-outline'}
           size={24}
-          color={liked ? '#ef4444' : '#111827'}
+          color={liked ? '#ef4444' : postText}
         />
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={[styles.chatBtn, chatStarting && styles.chatBtnDisabled]}
+        style={[styles.chatBtn, { backgroundColor: '#166534' }, chatStarting && styles.chatBtnDisabled]}
         onPress={handleChat}
         activeOpacity={0.85}
         disabled={chatStarting}
@@ -1320,7 +1397,13 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       </TouchableOpacity>
 
       {sellerType === 'store' && publicPhone ? (
-        <TouchableOpacity style={styles.phoneBtn} onPress={handlePhone}>
+        <TouchableOpacity
+          style={[
+            styles.phoneBtn,
+            isDark && { backgroundColor: postSoft, borderWidth: 1, borderColor: postBorder },
+          ]}
+          onPress={handlePhone}
+        >
           <Text style={styles.phoneBtnText}>전화하기</Text>
         </TouchableOpacity>
       ) : null}
@@ -1337,15 +1420,15 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           }}
         />
         {renderFloatingHeader()}
-        <View style={styles.center}>
-          <Text>불러오는 중...</Text>
+        <View style={[styles.center, postThemeStyles.background]}>
+          <Text style={postThemeStyles.text}>불러오는 중...</Text>
         </View>
       </>
     );
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
+    <View style={[styles.screen, postThemeStyles.background]}>
       <Stack.Screen
         options={{
           title: '',
@@ -1354,8 +1437,8 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       />
       {renderFloatingHeader()}
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.imageWrap}>
+      <ScrollView style={postThemeStyles.background} contentContainerStyle={styles.content}>
+        <View style={[styles.imageWrap, postThemeStyles.imageBackground]}>
   {imageUrls.length > 0 ? (
     <>
       <ScrollView
@@ -1379,7 +1462,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           >
             <Image
               source={{ uri: url }}
-              style={styles.mainImage}
+              style={[styles.mainImage, postThemeStyles.imageBackground]}
               resizeMode="contain"
             />
           </TouchableOpacity>
@@ -1429,7 +1512,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       ) : null}
     </>
   ) : (
-    <View style={styles.imagePlaceholder}>
+    <View style={[styles.imagePlaceholder, postThemeStyles.imageBackground]}>
       <Ionicons name="image-outline" size={54} color={theme.textSubtle} />
     </View>
   )}
@@ -1439,9 +1522,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           style={[
             styles.sellerCard,
             {
-              backgroundColor: theme.surface,
-              borderTopColor: theme.border,
-              borderBottomColor: theme.border,
+              backgroundColor: isDark ? postBackground : theme.surface,
+              borderTopColor: postBorder,
+              borderBottomColor: postBorder,
             },
             showSellerLevel && theme.scheme !== 'dark' && {
               borderTopColor: sellerLevelStyle.borderColor,
@@ -1451,7 +1534,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           ]}
           onPress={goToSellerProfile}
         >
-  <View style={styles.sellerAvatar}>
+  <View style={[styles.sellerAvatar, postThemeStyles.avatar]}>
     {item?.profiles?.avatar_path ? (
       <Image
   source={{
@@ -1460,13 +1543,13 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   style={styles.sellerAvatarImage}
 />
     ) : (
-      <Ionicons name="person-outline" size={20} color={theme.textMuted} />
+	      <Ionicons name="person-outline" size={20} color={postMuted} />
     )}
   </View>
 
   <View style={styles.sellerInfo}>
-    <Text style={styles.sellerName}>{sellerName}</Text>
-    <Text style={styles.sellerType}>
+	    <Text style={[styles.sellerName, postThemeStyles.text]}>{sellerName}</Text>
+	    <Text style={[styles.sellerType, postThemeStyles.mutedText]}>
       {sellerType === 'store' ? '가게 판매자' : '개인 판매자'}
     </Text>
     <View style={styles.sellerDecorRow}>
@@ -1479,8 +1562,8 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             styles.sellerLevelBadge,
             {
               borderColor: sellerLevelStyle.borderColor,
-              backgroundColor: theme.scheme === 'dark' ? theme.surface : '#fff',
-              color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
+	              backgroundColor: isDark ? postBackground : '#fff',
+	              color: isDark ? postText : sellerLevelStyle.textColor,
             },
           ]}
         >
@@ -1490,7 +1573,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     </View>
   </View>
 
-  <Ionicons name="chevron-forward" size={18} color={theme.textSubtle} />
+	  <Ionicons name="chevron-forward" size={18} color={postSubtle} />
 </TouchableOpacity>
 
         <View style={styles.badgesRow}>
@@ -1530,36 +1613,36 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   </TouchableOpacity>
 ) : null}
 
-<Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.price}>
+	<Text style={[styles.title, postThemeStyles.text]}>{item.title}</Text>
+        <Text style={[styles.price, postThemeStyles.text]}>
           {item.price_text || '가격 문의'}
           {isStoreProduct ? ` · VAT ${item.vat_included === false ? '별도' : '포함'}` : ''}
         </Text>
         {quantityInfo.isMultiQuantity ? (
-          <View style={styles.quantityBox}>
-            <Ionicons name="cube-outline" size={16} color={theme.primary} />
-            <Text style={styles.quantityText}>
+	          <View style={[styles.quantityBox, postThemeStyles.quantityBox]}>
+	            <Ionicons name="cube-outline" size={16} color={isDark ? postText : theme.primary} />
+	            <Text style={[styles.quantityText, postThemeStyles.text]}>
               남은 {quantityInfo.remaining}
               {item.quantity_unit || '개'} / 전체 {quantityInfo.total}
               {item.quantity_unit || '개'}
             </Text>
             {quantityInfo.sold > 0 ? (
-              <Text style={styles.quantitySubText}>
+	              <Text style={[styles.quantitySubText, postThemeStyles.mutedText]}>
                 {isShareListing ? '나눔' : '판매'} {quantityInfo.sold}개
               </Text>
             ) : null}
           </View>
         ) : null}
-        <Text style={styles.meta}>
+	        <Text style={[styles.meta, postThemeStyles.mutedText]}>
           {[item.region, formatTimeAgo(item.created_at)].filter(Boolean).join(' · ')}
         </Text>
 
         {isStoreProduct ? (
-          <View style={styles.storeProductBox}>
+          <View style={[styles.storeProductBox, postThemeStyles.storeProductBox]}>
             <View style={styles.storeProductHeader}>
               <View style={styles.storeProductSellerLine}>
                 <Text style={styles.storeProductBadge}>가게 인증</Text>
-                <Text style={styles.storeProductTitle} numberOfLines={1}>
+                <Text style={[styles.storeProductTitle, postThemeStyles.text]} numberOfLines={1}>
                   {sellerName}
                 </Text>
               </View>
@@ -1567,49 +1650,49 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
 
             <View style={styles.storeFeatureWrap}>
               {storeFeatureBadges.map((badge) => (
-                <Text key={badge} style={styles.storeFeatureBadge}>
+                <Text key={badge} style={[styles.storeFeatureBadge, postThemeStyles.storeFeatureBadge]}>
                   {badge}
                 </Text>
               ))}
             </View>
 
             <View style={styles.storeActionRow}>
-              <TouchableOpacity style={styles.storeActionBtn} onPress={handleChat}>
-                <Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.text} />
-                <Text style={styles.storeActionText}>채팅 문의</Text>
+              <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={handleChat}>
+                <Ionicons name="chatbubble-ellipses-outline" size={17} color={postText} />
+                <Text style={[styles.storeActionText, postThemeStyles.text]}>채팅 문의</Text>
               </TouchableOpacity>
 
               {publicPhone ? (
-                <TouchableOpacity style={styles.storeActionBtn} onPress={handlePhone}>
-                  <Ionicons name="call-outline" size={17} color={theme.text} />
-                  <Text style={styles.storeActionText}>전화하기</Text>
+                <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={handlePhone}>
+                  <Ionicons name="call-outline" size={17} color={postText} />
+                  <Text style={[styles.storeActionText, postThemeStyles.text]}>전화하기</Text>
                 </TouchableOpacity>
               ) : null}
 
-              <TouchableOpacity style={styles.storeActionBtn} onPress={goToTradeMap}>
-                <Ionicons name="navigate-outline" size={17} color={theme.text} />
-                <Text style={styles.storeActionText}>길찾기</Text>
+              <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={goToTradeMap}>
+                <Ionicons name="navigate-outline" size={17} color={postText} />
+                <Text style={[styles.storeActionText, postThemeStyles.text]}>길찾기</Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.otherStoreProductsBtn} onPress={goToStoreDetail}>
-              <Text style={styles.otherStoreProductsText}>가게 다른 상품 보기</Text>
-              <Ionicons name="chevron-forward" size={17} color={theme.primary} />
+            <TouchableOpacity style={[styles.otherStoreProductsBtn, postThemeStyles.storeActionBtn]} onPress={goToStoreDetail}>
+              <Text style={[styles.otherStoreProductsText, { color: isDark ? postText : '#166534' }]}>가게 다른 상품 보기</Text>
+              <Ionicons name="chevron-forward" size={17} color={isDark ? postText : '#166534'} />
             </TouchableOpacity>
           </View>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>내용</Text>
-          <Text style={styles.desc}>
+          <Text style={[styles.sectionTitle, postThemeStyles.text]}>내용</Text>
+          <Text style={[styles.desc, postThemeStyles.text]}>
             {item.description || '등록된 설명이 없습니다.'}
           </Text>
         </View>
 
         {isStoreProduct ? (
-          <View style={styles.storeResponsibilityBox}>
-            <Text style={styles.storeResponsibilityTitle}>가게 상품 안내</Text>
-            <Text style={styles.storeResponsibilityText}>
+          <View style={[styles.storeResponsibilityBox, postThemeStyles.responsibilityBox]}>
+            <Text style={[styles.storeResponsibilityTitle, postThemeStyles.text]}>가게 상품 안내</Text>
+            <Text style={[styles.storeResponsibilityText, postThemeStyles.mutedText]}>
               이 상품은 인증 가게가 등록한 상품입니다.{'\n'}
               상품 판매, 결제, 배송, 환불, 세금계산서 및 현금영수증 발급 책임은 판매
               가게에 있습니다.{'\n'}
@@ -1621,9 +1704,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         {item.latitude != null && item.longitude != null ? (
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>거래 희망 장소</Text>
+              <Text style={[styles.sectionTitle, postThemeStyles.text]}>거래 희망 장소</Text>
               <TouchableOpacity onPress={goToTradeMap}>
-                <Text style={styles.mapLink}>지도 크게 보기</Text>
+                <Text style={[styles.mapLink, { color: isDark ? '#86efac' : '#166534' }]}>지도 크게 보기</Text>
               </TouchableOpacity>
             </View>
 
@@ -1632,32 +1715,32 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>활동 정보</Text>
+          <Text style={[styles.sectionTitle, postThemeStyles.text]}>활동 정보</Text>
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Ionicons name="heart-outline" size={18} color={theme.textMuted} />
-              <Text style={styles.statText}>관심 {favoriteCount}</Text>
+            <View style={[styles.statItem, postThemeStyles.statItem]}>
+              <Ionicons name="heart-outline" size={18} color={postMuted} />
+              <Text style={[styles.statText, postThemeStyles.text]}>관심 {favoriteCount}</Text>
             </View>
 
-            <View style={styles.statItem}>
-              <Ionicons name="eye-outline" size={18} color={theme.textMuted} />
-              <Text style={styles.statText}>조회 {item.views_count ?? 0}</Text>
+            <View style={[styles.statItem, postThemeStyles.statItem]}>
+              <Ionicons name="eye-outline" size={18} color={postMuted} />
+              <Text style={[styles.statText, postThemeStyles.text]}>조회 {item.views_count ?? 0}</Text>
             </View>
 
-            <View style={styles.statItem}>
+            <View style={[styles.statItem, postThemeStyles.statItem]}>
               <Ionicons
                 name="chatbubble-ellipses-outline"
                 size={18}
-                color={theme.textMuted}
+                color={postMuted}
               />
-              <Text style={styles.statText}>채팅 {chatCount}</Text>
+              <Text style={[styles.statText, postThemeStyles.text]}>채팅 {chatCount}</Text>
             </View>
           </View>
         </View>
 
         {similarItems.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>비슷한 물품 추천</Text>
+            <Text style={[styles.sectionTitle, postThemeStyles.text]}>비슷한 물품 추천</Text>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={styles.similarRow}>
@@ -1675,19 +1758,19 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                       style={styles.similarCard}
                       onPress={() => router.push(`/(tabs)/home/post/${similar.id}` as any)}
                     >
-                      <View style={styles.similarImageWrap}>
+                      <View style={[styles.similarImageWrap, postThemeStyles.avatar]}>
                         {similarImageUrl ? (
                           <Image source={{ uri: similarImageUrl }} style={styles.similarImage} />
                         ) : (
                           <View style={styles.similarPlaceholder}>
-                            <Ionicons name="image-outline" size={22} color={theme.textSubtle} />
+                            <Ionicons name="image-outline" size={22} color={postSubtle} />
                           </View>
                         )}
                       </View>
-                      <Text style={styles.similarTitle} numberOfLines={2}>
+                      <Text style={[styles.similarTitle, postThemeStyles.text]} numberOfLines={2}>
                         {similar.title}
                       </Text>
-                      <Text style={styles.similarPrice} numberOfLines={1}>
+                      <Text style={[styles.similarPrice, postThemeStyles.text]} numberOfLines={1}>
                         {similar.price_text || '가격 문의'}
                       </Text>
                     </TouchableOpacity>
@@ -1705,9 +1788,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.menuBox}>
+              <View style={[styles.menuBox, postThemeStyles.modalBox]}>
                 <TouchableOpacity style={styles.menuItem} onPress={handleHidePost}>
-                  <Text style={styles.menuText}>게시글 숨기기</Text>
+                  <Text style={[styles.menuText, postThemeStyles.text]}>게시글 숨기기</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.menuItem} onPress={handleBlockAuthor}>
@@ -1722,7 +1805,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                   style={styles.menuItem}
                   onPress={() => setMenuOpen(false)}
                 >
-                  <Text style={styles.menuText}>닫기</Text>
+                  <Text style={[styles.menuText, postThemeStyles.text]}>닫기</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -1734,9 +1817,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
         <TouchableWithoutFeedback onPress={() => setReportModalOpen(false)}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
-              <View style={styles.reportModalBox}>
-                <Text style={styles.reportModalTitle}>신고하기</Text>
-                <Text style={styles.reportModalDesc}>
+              <View style={[styles.reportModalBox, postThemeStyles.modalBox]}>
+                <Text style={[styles.reportModalTitle, postThemeStyles.text]}>신고하기</Text>
+                <Text style={[styles.reportModalDesc, postThemeStyles.mutedText]}>
                   신고 항목을 선택하고 필요한 내용을 적어주세요.
                 </Text>
 
@@ -1749,6 +1832,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                         key={reason}
                         style={[
                           styles.reportReasonBtn,
+                          postThemeStyles.reportReasonBtn,
                           selected && styles.reportReasonBtnActive,
                         ]}
                         onPress={() => setReportReason(reason)}
@@ -1756,6 +1840,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                         <Text
                           style={[
                             styles.reportReasonText,
+                            postThemeStyles.text,
                             selected && styles.reportReasonTextActive,
                           ]}
                         >
@@ -1767,8 +1852,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                 </View>
 
                 <TextInput
-                  style={styles.reportInput}
+                  style={[styles.reportInput, postThemeStyles.input]}
                   placeholder="신고 내용을 자세히 적어주세요."
+                  placeholderTextColor={postSubtle}
                   value={reportContent}
                   onChangeText={setReportContent}
                   multiline
@@ -1779,10 +1865,10 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                   <Text style={styles.reportSubmitText}>신고 접수하기</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.reportCancelBtn}
+                  style={[styles.reportCancelBtn, postThemeStyles.reportCancelBtn]}
                   onPress={() => setReportModalOpen(false)}
                 >
-                  <Text style={styles.reportCancelText}>취소</Text>
+                  <Text style={[styles.reportCancelText, postThemeStyles.text]}>취소</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -1794,26 +1880,26 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   <TouchableWithoutFeedback onPress={() => setStatusMenuOpen(false)}>
     <View style={styles.modalOverlay}>
       <TouchableWithoutFeedback>
-        <View style={styles.menuBox}>
+        <View style={[styles.menuBox, postThemeStyles.modalBox]}>
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => updateListingStatus('active')}
           >
-            <Text style={styles.menuText}>거래중으로 변경</Text>
+            <Text style={[styles.menuText, postThemeStyles.text]}>거래중으로 변경</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => updateListingStatus('reserved')}
           >
-            <Text style={styles.menuText}>예약중으로 변경</Text>
+            <Text style={[styles.menuText, postThemeStyles.text]}>예약중으로 변경</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => updateListingStatus('done')}
           >
-            <Text style={styles.menuText}>
+            <Text style={[styles.menuText, postThemeStyles.text]}>
               {isShareListing ? '나눔 완료 처리하기' : '판매 처리하기'}
             </Text>
           </TouchableOpacity>
@@ -1822,7 +1908,13 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             style={styles.menuItem}
             onPress={toggleListingVisibility}
           >
-            <Text style={[styles.menuText, item?.status === 'hidden' ? styles.restoreText : styles.reportText]}>
+            <Text
+              style={[
+                styles.menuText,
+                postThemeStyles.text,
+                item?.status === 'hidden' ? styles.restoreText : styles.reportText,
+              ]}
+            >
               {item?.status === 'hidden' ? '숨김 취소하기' : '게시글 숨기기'}
             </Text>
           </TouchableOpacity>
@@ -1836,17 +1928,17 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   <TouchableWithoutFeedback onPress={() => setBuyerModalOpen(false)}>
     <View style={styles.modalOverlay}>
       <TouchableWithoutFeedback>
-        <View style={styles.menuBox}>
-          <Text style={styles.modalTitle}>
+        <View style={[styles.menuBox, postThemeStyles.modalBox]}>
+          <Text style={[styles.modalTitle, postThemeStyles.text]}>
             {isShareListing ? '나눔한 상대와 수량을 선택하세요' : '거래한 상대와 수량을 선택하세요'}
           </Text>
 
           <View style={styles.saleQuantityBox}>
-            <Text style={styles.saleQuantityLabel}>
+            <Text style={[styles.saleQuantityLabel, postThemeStyles.text]}>
               {isShareListing ? '나눔 수량' : '판매 수량'}
             </Text>
             <TextInput
-              style={styles.saleQuantityInput}
+              style={[styles.saleQuantityInput, postThemeStyles.input]}
               keyboardType="number-pad"
               value={saleQuantityText}
               onChangeText={(value) => {
@@ -1854,14 +1946,15 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                 setSaleQuantityText(onlyNumber);
               }}
               placeholder="1"
+              placeholderTextColor={postSubtle}
             />
-            <Text style={styles.saleQuantityHint}>
+            <Text style={[styles.saleQuantityHint, postThemeStyles.mutedText]}>
               남은 수량 {quantityInfo.remaining}개
             </Text>
           </View>
 
           {chatUsers.length === 0 ? (
-            <Text style={styles.emptyBuyerText}>채팅한 상대가 없습니다.</Text>
+            <Text style={[styles.emptyBuyerText, postThemeStyles.mutedText]}>채팅한 상대가 없습니다.</Text>
           ) : (
             chatUsers.map((buyer) => (
               <TouchableOpacity
@@ -1869,7 +1962,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                 style={styles.menuItem}
                 onPress={() => completeDealWithBuyer(buyer.id, buyer.roomId)}
               >
-                <Text style={styles.menuText}>{buyer.name}</Text>
+                <Text style={[styles.menuText, postThemeStyles.text]}>{buyer.name}</Text>
               </TouchableOpacity>
             ))
           )}
@@ -1878,7 +1971,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             style={styles.menuItem}
             onPress={() => setBuyerModalOpen(false)}
           >
-            <Text style={styles.menuText}>취소</Text>
+            <Text style={[styles.menuText, postThemeStyles.text]}>취소</Text>
           </TouchableOpacity>
         </View>
       </TouchableWithoutFeedback>
@@ -2106,7 +2199,7 @@ hiddenStatusBadge: {
   },
   sellerVerifiedBadge: {
     borderRadius: 999,
-    backgroundColor: '#1d4ed8',
+    backgroundColor: '#166534',
     color: '#fff',
     paddingHorizontal: 9,
     paddingVertical: 4,
@@ -2143,7 +2236,7 @@ hiddenStatusBadge: {
   },
 
   storeBadge: {
-    backgroundColor: '#1d4ed8',
+    backgroundColor: '#166534',
     color: '#fff',
   },
 
@@ -2310,8 +2403,8 @@ emptyBuyerText: {
   },
   storeProductBadge: {
     borderRadius: 999,
-    backgroundColor: '#fff',
-    color: '#1d4ed8',
+    backgroundColor: '#166534',
+    color: '#fff',
     overflow: 'hidden',
     paddingHorizontal: 9,
     paddingVertical: 4,

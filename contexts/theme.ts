@@ -5,8 +5,8 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const tintColorLight = '#166534';
+const tintColorDark = '#86efac';
 
 export const Colors = {
   light: {
@@ -41,8 +41,8 @@ export const AppPalettes = {
     textSubtle: '#9ca3af',
     border: '#e5e7eb',
     borderSoft: '#f3f4f6',
-    primary: '#2563eb',
-    primarySoft: '#eff6ff',
+    primary: '#166534',
+    primarySoft: '#ecfdf5',
     primaryText: '#ffffff',
     danger: '#dc2626',
     dangerSoft: '#fff7f7',
@@ -66,9 +66,9 @@ export const AppPalettes = {
     textSubtle: '#7b8494',
     border: '#303747',
     borderSoft: '#252b38',
-    primary: '#60a5fa',
-    primarySoft: 'rgba(96,165,250,0.16)',
-    primaryText: '#08111f',
+    primary: '#86efac',
+    primarySoft: 'rgba(134,239,172,0.16)',
+    primaryText: '#052e16',
     danger: '#f87171',
     dangerSoft: '#2a1719',
     warningBg: 'rgba(251,146,60,0.16)',

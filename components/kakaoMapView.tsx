@@ -61,7 +61,7 @@ export default function KakaoMapView({ items, onMarkerPress }: Props) {
             }
 
             function getCategoryColor(category) {
-              if (category === 'trade') return '#2563eb';
+              if (category === 'trade') return '#166534';
               if (category === 'share') return '#16a34a';
               return '#d97706';
             }

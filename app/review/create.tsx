@@ -372,7 +372,7 @@ export default function ReviewCreateScreen() {
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerIcon}>
-        <Ionicons name="ribbon-outline" size={32} color="#2563eb" />
+        <Ionicons name="ribbon-outline" size={32} color="#166534" />
       </View>
 
       <Text style={styles.title}>거래 후기를 남겨요</Text>
@@ -446,7 +446,7 @@ export default function ReviewCreateScreen() {
           <View style={styles.photoHeader}>
             <Text style={styles.sectionTitle}>가게 후기 사진</Text>
             <TouchableOpacity style={styles.photoAddBtn} onPress={pickReviewImages}>
-              <Ionicons name="image-outline" size={16} color="#2563eb" />
+              <Ionicons name="image-outline" size={16} color="#166534" />
               <Text style={styles.photoAddText}>추가</Text>
             </TouchableOpacity>
           </View>

@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   addBtn: {
     height: 46,
     borderRadius: 14,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   cardInfo: { flex: 1, gap: 4 },
   productTitle: { color: '#111827', fontSize: 16, fontWeight: '900', lineHeight: 22 },
-  priceText: { color: '#2563eb', fontSize: 15, fontWeight: '900' },
+  priceText: { color: '#166534', fontSize: 15, fontWeight: '900' },
   metaText: { color: '#6b7280', fontSize: 12, fontWeight: '700' },
   statusBadge: {
     alignSelf: 'flex-start',

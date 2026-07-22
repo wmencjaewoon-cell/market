@@ -170,9 +170,9 @@ export default function NotificationsScreen() {
                 activeOpacity={0.75}
               >
                 {bulkAction === 'read' ? (
-                  <ActivityIndicator size="small" color="#2563eb" />
+                  <ActivityIndicator size="small" color="#166534" />
                 ) : (
-                  <Ionicons name="checkmark-done-outline" size={18} color="#2563eb" />
+                  <Ionicons name="checkmark-done-outline" size={18} color="#166534" />
                 )}
                 <Text style={styles.readAllText}>모두 읽음</Text>
               </TouchableOpacity>
