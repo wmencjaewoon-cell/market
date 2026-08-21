@@ -54,16 +54,34 @@ serve(async (req) => {
       'Content-Type': 'application/json',
     };
 
+    const encodedRoomId = encodeURIComponent(String(roomId));
+    const encodedSenderId = encodeURIComponent(String(senderId));
+
     const membersRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/chat_room_members?room_id=eq.${roomId}&select=user_id`,
+      `${SUPABASE_URL}/rest/v1/chat_room_members?room_id=eq.${encodedRoomId}&select=user_id`,
       { headers }
     );
 
     const members = await membersRes.json();
 
-    const receiverIds = members
-      .map((m: any) => m.user_id)
-      .filter((id: string) => id !== senderId);
+    const memberIds = Array.from(
+      new Set(
+        (Array.isArray(members) ? members : [])
+          .map((m: any) => m.user_id)
+          .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+      )
+    );
+
+    if (!memberIds.includes(senderId)) {
+      return new Response(JSON.stringify({ ok: true, reason: 'sender is not room member' }), {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+
+    const receiverIds = memberIds.filter((id) => id !== senderId);
 
     if (receiverIds.length === 0) {
       return new Response(JSON.stringify({ ok: true, reason: 'no receiver' }), {
@@ -74,10 +92,8 @@ serve(async (req) => {
       });
     }
 
-    const receiverId = receiverIds[0];
-
     const senderProfileRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${senderId}&select=display_name`,
+      `${SUPABASE_URL}/rest/v1/profiles?id=eq.${encodedSenderId}&select=display_name`,
       { headers }
     );
 
@@ -85,15 +101,24 @@ serve(async (req) => {
 
     const senderName = senderProfiles?.[0]?.display_name || '상대방';
 
+    const receiverFilter = receiverIds.map((id) => encodeURIComponent(id)).join(',');
+
     const settingRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/chat_room_settings?room_id=eq.${roomId}&user_id=eq.${receiverId}&select=muted`,
+      `${SUPABASE_URL}/rest/v1/chat_room_settings?room_id=eq.${encodedRoomId}&user_id=in.(${receiverFilter})&select=user_id,muted`,
       { headers }
     );
 
     const settings = await settingRes.json();
+    const mutedReceiverIds = new Set(
+      (Array.isArray(settings) ? settings : [])
+        .filter((row: any) => row?.muted === true)
+        .map((row: any) => row.user_id)
+    );
 
-    if (settings?.[0]?.muted === true) {
-      return new Response(JSON.stringify({ ok: true, reason: 'muted' }), {
+    const activeReceiverIds = receiverIds.filter((id) => !mutedReceiverIds.has(id));
+
+    if (activeReceiverIds.length === 0) {
+      return new Response(JSON.stringify({ ok: true, reason: 'all muted' }), {
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
@@ -101,12 +126,23 @@ serve(async (req) => {
       });
     }
 
+    const activeReceiverFilter = activeReceiverIds.map((id) => encodeURIComponent(id)).join(',');
+
     const tokenRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/push_tokens?user_id=eq.${receiverId}&select=token,platform`,
+      `${SUPABASE_URL}/rest/v1/push_tokens?user_id=in.(${activeReceiverFilter})&select=user_id,token,platform`,
       { headers }
     );
 
-    const tokens = await tokenRes.json();
+    const rawTokens = await tokenRes.json();
+    const tokenMap = new Map<string, any>();
+
+    (Array.isArray(rawTokens) ? rawTokens : []).forEach((row: any) => {
+      if (typeof row?.token === 'string' && row.token.length > 0) {
+        tokenMap.set(row.token, row);
+      }
+    });
+
+    const tokens = Array.from(tokenMap.values());
 
     if (!tokens || tokens.length === 0) {
       return new Response(JSON.stringify({ ok: true, reason: 'no token' }), {
@@ -147,6 +183,7 @@ serve(async (req) => {
         roomId,
         senderId,
         senderName,
+        receiverUserId: row.user_id,
       },
     }));
 
@@ -191,7 +228,7 @@ serve(async (req) => {
       'send-chat-push expo result',
       JSON.stringify({
         roomId,
-        receiverId,
+        receiverIds: activeReceiverIds,
         tokenCount: tokens.length,
         tokenPlatformCounts,
         expoStatus: pushRes.status,

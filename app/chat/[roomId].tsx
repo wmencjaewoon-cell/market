@@ -3,11 +3,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
+  BackHandler,
   Dimensions,
   FlatList,
   Image,
@@ -17,6 +18,7 @@ import {
   Modal,
   PermissionsAndroid,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -24,6 +26,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  type GestureResponderEvent,
 } from 'react-native';
 import {
   Gesture,
@@ -38,6 +41,7 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FullWindowOverlay } from 'react-native-screens';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
@@ -46,11 +50,11 @@ import {
   InCallManager,
   isNativeCallSupported,
   mediaDevices,
-  type MediaStream,
   RTCIceCandidate,
   RTCPeerConnection,
   RTCSessionDescription,
   RTCView,
+  type MediaStream,
 } from '../../lib/nativeCall';
 import {
   clearChatPlaceSelection,
@@ -144,6 +148,13 @@ type RoomInfo = {
   id: string;
   listing_id: number | null;
   store_user_id?: string | null;
+  room_type?: string | null;
+  estimate_request_id?: number | null;
+  estimate_quote_id?: number | null;
+  project_id?: string | null;
+  title?: string | null;
+  workflow_status?: string | null;
+  completed_at?: string | null;
   created_by: string;
   created_at: string;
   members?: {
@@ -168,7 +179,100 @@ type RoomInfo = {
     }[];
   } | null;
   sellerProfile?: ChatUserProfile | null;
+  project?: {
+    id: string;
+    store_user_id?: string | null;
+    assigned_staff_user_id?: string | null;
+    name: string;
+    status: string | null;
+    address: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    project_members?: {
+      id?: string | null;
+      member_user_id: string | null;
+      member_type?: string | null;
+      role: string | null;
+      company_name?: string | null;
+      display_name?: string | null;
+      phone?: string | null;
+      invitation_status: string | null;
+      created_at?: string | null;
+    }[];
+    project_schedules?: {
+      id: string;
+      title: string;
+      start_date: string;
+      end_date: string | null;
+      status: string | null;
+      memo?: string | null;
+    }[];
+    daily_reports?: {
+      id: string;
+      report_date: string;
+      work_content: string;
+      progress_percent: number | null;
+      customer_visible: boolean | null;
+      daily_report_images?: {
+        id: string;
+        image_path: string;
+      }[];
+    }[];
+  } | null;
+  estimateRequest?: {
+    id: number;
+    title: string | null;
+    category: string | null;
+    status: string | null;
+    region: string | null;
+    address: string | null;
+    desired_date: string | null;
+    applicant_name: string | null;
+    applicant_phone: string | null;
+  } | null;
 };
+
+type ChatParticipantItem = {
+  userId: string;
+  name: string;
+  meta: string;
+  projectMemberId: string | null;
+  isOwner: boolean;
+  isMe: boolean;
+  canRemove: boolean;
+};
+
+function getProjectRoleLabel(role?: string | null) {
+  switch (role) {
+    case 'owner':
+      return '방장';
+    case 'manager':
+      return '매니저';
+    case 'employee':
+      return '직원';
+    case 'partner':
+      return '협력업체';
+    case 'customer':
+      return '고객';
+    case 'viewer':
+      return '참여자';
+    default:
+      return '참여자';
+  }
+}
+
+function getProjectInvitationStatusLabel(status?: string | null) {
+  switch (status) {
+    case 'accepted':
+      return '참여중';
+    case 'pending':
+      return '초대중';
+    case 'removed':
+      return '내보냄';
+    default:
+      return '채팅 참여중';
+  }
+}
 
 function getListingStockText(listing?: RoomInfo['listing']) {
   if (!listing) return '';
@@ -177,6 +281,33 @@ function getListingStockText(listing?: RoomInfo['listing']) {
   if (total <= 1) return '';
 
   return `남은 ${remaining}/${total}개`;
+}
+
+function getProjectStatusLabel(status?: string | null) {
+  if (status === 'in_progress') return '진행중';
+  if (status === 'completed') return '완료';
+  if (status === 'on_hold') return '보류';
+  if (status === 'canceled') return '취소';
+  return '준비중';
+}
+
+function getProjectScheduleStatusLabel(status?: string | null) {
+  if (status === 'in_progress') return '진행';
+  if (status === 'done') return '완료';
+  if (status === 'canceled') return '취소';
+  return '예정';
+}
+
+function formatProjectDate(value?: string | null) {
+  if (!value) return '미정';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+}
+
+function projectScheduleContainsDate(dateText: string, schedule: { start_date: string; end_date?: string | null }) {
+  const endDate = schedule.end_date || schedule.start_date;
+  return dateText >= schedule.start_date && dateText <= endDate;
 }
 
 const REVIEW_TAG_LABELS: Record<string, string> = {
@@ -337,6 +468,30 @@ function formatTime(dateString?: string) {
   const hour12 = hours % 12 === 0 ? 12 : hours % 12;
   return `${ampm} ${hour12}:${minutes}`;
 }
+
+function getChatDateKey(dateString?: string) {
+  if (!dateString) return '';
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString.slice(0, 10);
+
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(
+    date.getDate()
+  )}`;
+}
+
+function formatChatDateDivider(dateString?: string) {
+  if (!dateString) return '';
+
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return dateString.slice(0, 10);
+
+  const weekdays = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 ${
+    weekdays[date.getDay()]
+  }`;
+}
+
 function formatCallDuration(totalSeconds: number) {
   const safeSeconds = Math.max(0, totalSeconds);
   const minutes = Math.floor(safeSeconds / 60);
@@ -718,18 +873,23 @@ function ZoomableChatImage({
 }
 
 export default function ChatRoomScreen() {
-  const { roomId, lat, lng, address } = useLocalSearchParams<{
+  const { roomId, lat, lng, address, returnTo } = useLocalSearchParams<{
     roomId: string;
     lat?: string;
     lng?: string;
     address?: string;
+    returnTo?: string;
   }>();
 
   const { user } = useAuth();
   const theme = useAppTheme();
-  const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
+  const isDarkMode = theme.scheme === 'dark';
+  const backIconColor = isDarkMode ? '#fff' : theme.text;
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
+  const messageInputRef = useRef<TextInput>(null);
+  const messageTouchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const messageTouchMovedRef = useRef(false);
   const initialReportWarningRunningRef = useRef(false);
   const appointmentCompletionPromptRunningRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -756,14 +916,18 @@ export default function ChatRoomScreen() {
 
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [participantModalOpen, setParticipantModalOpen] = useState(false);
+  const [participantActionLoadingId, setParticipantActionLoadingId] = useState<string | null>(null);
   const [imageViewerOpen, setImageViewerOpen] = useState(false);
   const [selectedImageUrls, setSelectedImageUrls] = useState<string[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [screenFocused, setScreenFocused] = useState(true);
 
   const [chatTargetProfile, setChatTargetProfile] = useState<ChatUserProfile | null>(null);
+  const [participantProfileMap, setParticipantProfileMap] = useState<Record<string, ChatUserProfile>>({});
   const [chatTargetRating, setChatTargetRating] = useState<{ avg: number | null; count: number }>({
     avg: null,
     count: 0,
@@ -797,12 +961,163 @@ export default function ChatRoomScreen() {
   const [callSpeakerOn, setCallSpeakerOn] = useState(false);
   const [callCameraOff, setCallCameraOff] = useState(false);
   const [callFacingMode, setCallFacingMode] = useState<'user' | 'environment'>('user');
+  const [selectedProjectDate, setSelectedProjectDate] = useState(() => formatDateInput(new Date()));
+  const [workPanelCollapsed, setWorkPanelCollapsed] = useState(false);
 
   const listing = roomInfo?.listing;
+  const isProjectRoom =
+    !!roomInfo?.project || !!roomInfo?.project_id || roomInfo?.room_type === 'project';
+  const estimateRequest = roomInfo?.estimateRequest || null;
+  const isEstimateRoom =
+    !isProjectRoom &&
+    (!!estimateRequest || !!roomInfo?.estimate_request_id || roomInfo?.room_type === 'estimate');
+  const isWorkChatRoom = isProjectRoom || isEstimateRoom;
+  const isCompletedWorkChat = roomInfo?.workflow_status === 'completed';
+  const project = useMemo(
+    () =>
+      roomInfo?.project ||
+      (isProjectRoom
+        ? {
+            id: roomInfo?.project_id || '',
+            store_user_id: null,
+            assigned_staff_user_id: null,
+            name: roomInfo?.title || '현장 채팅',
+            status: isCompletedWorkChat ? 'completed' : null,
+            address: null,
+            start_date: null,
+            end_date: null,
+            project_members: [],
+            project_schedules: [],
+            daily_reports: [],
+          }
+        : null),
+    [isCompletedWorkChat, isProjectRoom, roomInfo?.project, roomInfo?.project_id, roomInfo?.title]
+  );
   const currentListingId = listing?.id ?? null;
   const currentListingAuthorId = listing?.author_id ?? null;
   const listingQuantityInfo = useMemo(() => getListingQuantityInfo(listing), [listing]);
   const isShareListing = listing?.category === 'share';
+  const todayProjectDate = formatDateInput(new Date());
+  const canReadInternalProjectReports = useMemo(() => {
+    if (!project || !user?.id) return false;
+
+    if (project.store_user_id === user.id || project.assigned_staff_user_id === user.id) {
+      return true;
+    }
+
+    return (project.project_members || []).some((member) => (
+      member.member_user_id === user.id &&
+      member.invitation_status === 'accepted' &&
+      ['owner', 'manager', 'employee', 'partner'].includes(member.role || '')
+    ));
+  }, [project, user?.id]);
+  const canWriteProjectReports = canReadInternalProjectReports;
+  const visibleProjectReports = useMemo(() => {
+    return (project?.daily_reports || []).filter(
+      (report) => canReadInternalProjectReports || !!report.customer_visible
+    );
+  }, [canReadInternalProjectReports, project?.daily_reports]);
+  const canManageChatParticipants = useMemo(() => {
+    if (!project || !user?.id) return false;
+
+    if (project.store_user_id === user.id) return true;
+
+    return (project.project_members || []).some((member) => (
+      member.member_user_id === user.id &&
+      member.invitation_status !== 'removed' &&
+      ['owner', 'manager'].includes(member.role || '')
+    ));
+  }, [project, user?.id]);
+  const chatParticipants = useMemo<ChatParticipantItem[]>(() => {
+    const roomMemberIds = Array.from(
+      new Set(
+        (roomInfo?.members || [])
+          .map((member) => member.user_id)
+          .filter((memberId): memberId is string => !!memberId)
+      )
+    );
+
+    const activeProjectMemberByUser = new Map(
+      (project?.project_members || [])
+        .filter((member) => !!member.member_user_id && member.invitation_status !== 'removed')
+        .map((member) => [member.member_user_id as string, member])
+    );
+    const removedProjectMemberIds = new Set(
+      (project?.project_members || [])
+        .filter((member) => !!member.member_user_id && member.invitation_status === 'removed')
+        .map((member) => member.member_user_id as string)
+    );
+
+    return roomMemberIds
+      .filter((memberId) => !removedProjectMemberIds.has(memberId))
+      .map((memberId) => {
+        const member = activeProjectMemberByUser.get(memberId);
+        const profile = participantProfileMap[memberId];
+        const name =
+          member?.company_name ||
+          member?.display_name ||
+          profile?.display_name ||
+          (memberId === user?.id ? '나' : '참여자');
+        const roleLabel = getProjectRoleLabel(member?.role);
+        const statusLabel = getProjectInvitationStatusLabel(member?.invitation_status);
+        const phone = member?.phone || profile?.phone || null;
+        const isOwner =
+          memberId === project?.store_user_id ||
+          memberId === roomInfo?.created_by ||
+          member?.role === 'owner';
+
+        return {
+          userId: memberId,
+          name,
+          meta: [roleLabel, statusLabel, phone].filter(Boolean).join(' · '),
+          projectMemberId: member?.id || null,
+          isOwner,
+          isMe: memberId === user?.id,
+          canRemove: canManageChatParticipants && memberId !== user?.id && !isOwner,
+        };
+      });
+  }, [
+    canManageChatParticipants,
+    participantProfileMap,
+    project?.project_members,
+    project?.store_user_id,
+    roomInfo?.created_by,
+    roomInfo?.members,
+    user?.id,
+  ]);
+  const chatParticipantCount = roomInfo ? chatParticipants.length : 0;
+  const shouldShowSenderNames = isWorkChatRoom || chatParticipantCount > 2;
+  const selectedProjectSchedules = useMemo(() => {
+    if (!project?.project_schedules) return [];
+
+    return [...project.project_schedules]
+      .filter((schedule) => projectScheduleContainsDate(selectedProjectDate, schedule))
+      .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)));
+  }, [project?.project_schedules, selectedProjectDate]);
+  const selectedProjectScheduleTitle =
+    selectedProjectDate === todayProjectDate
+      ? '오늘 일정'
+      : `${formatProjectDate(selectedProjectDate)} 일정`;
+  const projectCalendarDays = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + index);
+      const value = formatDateInput(date);
+      return {
+        value,
+        day: date.getDate(),
+        label: date.toLocaleDateString('ko-KR', { weekday: 'short' }),
+        hasSchedule: (project?.project_schedules || []).some((schedule) =>
+          projectScheduleContainsDate(value, schedule)
+        ),
+        hasReport: visibleProjectReports.some((report) => report.report_date === value),
+      };
+    });
+  }, [project?.project_schedules, visibleProjectReports]);
+  const latestProjectReport = visibleProjectReports[0] || null;
   const latestAppointment = useMemo(() => {
     const appointmentMessages = messages
       .map((message) => {
@@ -904,9 +1219,10 @@ export default function ChatRoomScreen() {
     setSelectedImageIndex((prev) => Math.min(selectedImageUrls.length - 1, prev + 1));
   }, [selectedImageUrls.length]);
 
-  const targetUserId =
-    roomInfo?.members?.find((m) => m.user_id !== user?.id)?.user_id ||
-    (user?.id === listing?.author_id ? listing?.buyer_id : listing?.author_id);
+  const targetUserId = isWorkChatRoom
+    ? null
+    : roomInfo?.members?.find((m) => m.user_id !== user?.id)?.user_id ||
+      (user?.id === listing?.author_id ? listing?.buyer_id : listing?.author_id);
   const incomingCall =
     currentCall?.status === 'ringing' && currentCall.callee_id === user?.id ? currentCall : null;
   const outgoingCall =
@@ -927,11 +1243,141 @@ export default function ChatRoomScreen() {
     : outgoingCall
       ? `${visibleCallLabel} 발신 중`
       : `${visibleCallLabel} 연결됨`;
+  const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
+
+  const dismissChatKeyboard = useCallback(() => {
+    Keyboard.dismiss();
+    setKeyboardVisible(false);
+    setKeyboardHeight(0);
+  }, []);
+
+  const prepareChatNavigation = useCallback(() => {
+    dismissChatKeyboard();
+    setScreenFocused(false);
+  }, [dismissChatKeyboard]);
+
+  const handleMessageListTouchStart = useCallback((event: GestureResponderEvent) => {
+    messageTouchStartRef.current = {
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY,
+    };
+    messageTouchMovedRef.current = false;
+  }, []);
+
+  const handleMessageListTouchMove = useCallback((event: GestureResponderEvent) => {
+    const start = messageTouchStartRef.current;
+    if (!start) return;
+
+    const dx = Math.abs(event.nativeEvent.pageX - start.x);
+    const dy = Math.abs(event.nativeEvent.pageY - start.y);
+
+    if (dx > 8 || dy > 8) {
+      messageTouchMovedRef.current = true;
+    }
+  }, []);
+
+  const handleMessageListTouchEnd = useCallback(() => {
+    if (keyboardVisible && !messageTouchMovedRef.current) {
+      dismissChatKeyboard();
+    }
+
+    messageTouchStartRef.current = null;
+    messageTouchMovedRef.current = false;
+  }, [dismissChatKeyboard, keyboardVisible]);
+
+  const handleMessageListTouchCancel = useCallback(() => {
+    messageTouchStartRef.current = null;
+    messageTouchMovedRef.current = false;
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+
+      return () => {
+        setScreenFocused(false);
+        dismissChatKeyboard();
+      };
+    }, [dismissChatKeyboard])
+  );
+
+  const handleBackPress = useCallback(() => {
+    prepareChatNavigation();
+
+    if (returnTarget === 'chatList') {
+      router.replace('/(tabs)/chat' as any);
+      return;
+    }
+
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/(tabs)/chat' as any);
+  }, [prepareChatNavigation, returnTarget]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return undefined;
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        handleBackPress();
+        return true;
+      });
+
+      return () => {
+        subscription.remove();
+      };
+    }, [handleBackPress])
+  );
 
 
   const goToChatTargetProfile = () => {
+    if (project?.id) {
+      goToProjectManagement();
+      return;
+    }
+
+    if (isEstimateRoom && (estimateRequest?.id || roomInfo?.estimate_request_id)) {
+      prepareChatNavigation();
+      router.push({
+        pathname: '/store/estimates',
+        params: { requestId: String(estimateRequest?.id || roomInfo?.estimate_request_id) },
+      } as any);
+      return;
+    }
+
     if (!targetUserId) return;
+    prepareChatNavigation();
     router.push(`/(tabs)/home/user/${targetUserId}` as any);
+  };
+
+  const goToProjectManagement = (reportId?: string | null) => {
+    if (!project?.id) return;
+    prepareChatNavigation();
+    router.push({
+      pathname: '/store/projects',
+      params: {
+        projectId: project.id,
+        returnTo: 'chat',
+        ...(reportId ? { reportId } : {}),
+      },
+    } as any);
+  };
+
+  const goToProjectDailyReport = () => {
+    if (!project?.id) return;
+    prepareChatNavigation();
+    router.push({
+      pathname: '/store/projects',
+      params: {
+        projectId: project.id,
+        returnTo: 'chat',
+        action: 'dailyReport',
+        focus: String(Date.now()),
+      },
+    } as any);
   };
 
   const isCallParticipant = useCallback(
@@ -962,6 +1408,7 @@ export default function ChatRoomScreen() {
     setCurrentCall(isCallParticipant(latestCall) ? latestCall : null);
   }, [roomId, user, isCallParticipant]);
 
+  // 통화 연결음/벨소리 종료
   const stopCallSound = useCallback(() => {
     try {
       const manager = InCallManager as any;
@@ -978,6 +1425,7 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
+  // 통화 연결 정리
   const cleanupCallMedia = useCallback(() => {
     stopCallSound();
 
@@ -1012,6 +1460,7 @@ export default function ChatRoomScreen() {
     }
   }, [stopCallSound]);
 
+  // 통화용 로컬 미디어 스트림 가져오기
   const getLocalCallStream = useCallback(
     async (callType: ChatCallType) => {
       if (localStreamRef.current) {
@@ -1055,6 +1504,7 @@ export default function ChatRoomScreen() {
     [callMicMuted, callCameraOff, callFacingMode]
   );
 
+  // ICE 후보 저장
   const insertIceCandidate = useCallback(
     async (callId: string, candidate: RTCIceCandidatePayload) => {
       if (!user) return;
@@ -1072,6 +1522,7 @@ export default function ChatRoomScreen() {
     [user]
   );
 
+  // 대기 중인 ICE 후보 적용
   const flushQueuedIceCandidates = useCallback(async () => {
     if (!peerConnectionRef.current || !remoteDescriptionSetRef.current) return;
 
@@ -1087,6 +1538,8 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
+
+  // 원격 ICE 후보 적용
   const addRemoteIceCandidate = useCallback(
     async (candidateRow: ChatCallIceCandidate) => {
       if (!user || candidateRow.user_id === user.id) return;
@@ -1110,6 +1563,7 @@ export default function ChatRoomScreen() {
     [user]
   );
 
+  // 통화 연결음/벨소리 시작
   const startCallSound = useCallback(
     (call: ChatCallSession) => {
       try {
@@ -1138,6 +1592,7 @@ export default function ChatRoomScreen() {
 
 
 
+  // 통화용 PeerConnection 생성
   const createCallPeerConnection = useCallback(
     (callId: string, stream: MediaStream) => {
       const peer = new RTCPeerConnection({ iceServers: CALL_ICE_SERVERS });
@@ -1170,6 +1625,7 @@ export default function ChatRoomScreen() {
     [insertIceCandidate]
   );
 
+  // ICE 후보 조회 및 적용
   const fetchAndApplyIceCandidates = useCallback(
     async (callId: string) => {
       const { data, error } = await supabase
@@ -1190,6 +1646,7 @@ export default function ChatRoomScreen() {
     [addRemoteIceCandidate]
   );
 
+  // 채팅방 정보, 메시지, 읽음 상태 등 초기 데이터 조회 및 실시간 구독 설정
   useEffect(() => {
     if (!roomId) return;
 
@@ -1208,7 +1665,10 @@ export default function ChatRoomScreen() {
     fetchRoomInfo();
     fetchMessages();
     fetchReads();
-    markAsReadSafe();
+    void (async () => {
+      await markAsReadSafe();
+      await fetchReads();
+    })();
     fetchMuteState();
 
     const messageChannel = supabase
@@ -1261,6 +1721,7 @@ export default function ChatRoomScreen() {
     };
   }, [roomId, user?.id]);
 
+  // 통화 시작 시각 및 통화 시간 표시 업데이트
   useEffect(() => {
     if (!activeCall) {
       setCallStartedAtMs(null);
@@ -1285,6 +1746,7 @@ export default function ChatRoomScreen() {
     };
   }, [activeCall?.id, activeCall?.answered_at]);
 
+  // 영상통화 수신 시 미리보기용 로컬 스트림 준비
   useEffect(() => {
     if (!incomingCall) return;
     if (incomingCall.call_type !== 'video') return;
@@ -1310,6 +1772,7 @@ export default function ChatRoomScreen() {
     };
   }, [incomingCall?.id]);
 
+  // 통화 세션 상태 변경 구독 및 처리
   useEffect(() => {
     if (!roomId || !user) return;
 
@@ -1346,12 +1809,14 @@ export default function ChatRoomScreen() {
     };
   }, [roomId, user, fetchActiveCall, isCallParticipant, cleanupCallMedia]);
 
+  // 통화 종료 시 미디어 정리
   useEffect(() => {
     return () => {
       cleanupCallMedia();
     };
   }, [cleanupCallMedia]);
 
+  // ICE 후보 실시간 구독 및 적용
   useEffect(() => {
     if (!currentCall?.id || !user) return;
 
@@ -1378,6 +1843,7 @@ export default function ChatRoomScreen() {
     };
   }, [currentCall?.id, user, fetchAndApplyIceCandidates, addRemoteIceCandidate]);
 
+  // 통화 수락 시 원격 SDP 적용
   useEffect(() => {
     if (
       !currentCall ||
@@ -1413,11 +1879,13 @@ export default function ChatRoomScreen() {
     flushQueuedIceCandidates,
   ]);
 
+  // 초기 거래완료 확인 메시지 전송 경고 표시
   useEffect(() => {
     if (!messagesLoaded || !targetUserId || !roomId) return;
     maybeShowInitialRoomReportWarning();
   }, [messagesLoaded, targetUserId, roomId, messages.length]);
 
+  // 통화 오디오 매니저 시작 및 종료
   useEffect(() => {
     if (!visibleCall) return;
 
@@ -1452,13 +1920,14 @@ export default function ChatRoomScreen() {
       }
     };
   }, [visibleCall?.id, startCallSound, stopCallSound]);
+  // 통화 시작 시 연결음/벨소리 종료
   useEffect(() => {
     if (activeCall) {
       stopCallSound();
     }
   }, [activeCall?.id, stopCallSound]);
 
-
+  // 통화 중 마이크 음소거 상태 적용
   useEffect(() => {
     if (!visibleCall) return;
 
@@ -1469,13 +1938,14 @@ export default function ChatRoomScreen() {
     }
   }, [visibleCall?.id, callMicMuted]);
 
+  // 통화 중 스피커 모드 적용
   useEffect(() => {
     if (!visibleCall) return;
 
     applyCallSpeakerMode(callSpeakerOn);
   }, [visibleCall?.id, callSpeakerOn]);
 
-
+  // 거래완료 확인 메시지 자동 전송
   useEffect(() => {
     const intervalId = setInterval(() => {
       setNowMs(Date.now());
@@ -1486,6 +1956,11 @@ export default function ChatRoomScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    setWorkPanelCollapsed(false);
+  }, [roomId]);
+
+  // 거래완료 확인 메시지 자동 전송
   useEffect(() => {
     if (!roomId || !messagesLoaded || !latestAppointmentTimestamp) return;
     if (latestAppointmentTimestamp > nowMs) return;
@@ -1543,17 +2018,14 @@ export default function ChatRoomScreen() {
     hasAppointmentCompletionPromptForDate,
   ]);
 
+  // 키보드 높이 및 표시 상태 관리
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, (e) => {
-      const rawHeight = e.endCoordinates?.height ?? 0;
-      const adjustedHeight =
-        Platform.OS === 'android' ? Math.max(0, rawHeight - insets.bottom) : rawHeight;
-
-      setKeyboardHeight(adjustedHeight);
       setKeyboardVisible(true);
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 120);
     });
 
@@ -1568,6 +2040,7 @@ export default function ChatRoomScreen() {
     };
   }, [insets.bottom]);
 
+  // 장소 전송 처리
   useEffect(() => {
     if (!roomId || !lat || !lng) return;
 
@@ -1594,6 +2067,7 @@ export default function ChatRoomScreen() {
       });
   }, [roomId, lat, lng, address]);
 
+  // 선택한 장소 전송 처리
   const sendSelectedPlace = useCallback(
     (selection: ChatPlaceSelection) => {
       if (!roomId || selection.roomId !== roomId) return;
@@ -1623,6 +2097,7 @@ export default function ChatRoomScreen() {
     [roomId]
   );
 
+  // 선택한 장소 전송 처리 구독
   useEffect(() => {
     if (!roomId) return;
 
@@ -1634,6 +2109,7 @@ export default function ChatRoomScreen() {
     return subscribeChatPlaceSelection(sendSelectedPlace);
   }, [roomId, sendSelectedPlace]);
 
+  // 상대방 프로필, 평점, 신고수 조회
   useEffect(() => {
     if (!targetUserId) {
       setChatTargetProfile(null);
@@ -1650,6 +2126,7 @@ export default function ChatRoomScreen() {
     fetchUserReportCount(targetUserId);
   }, [targetUserId]);
 
+  // 이미지 메시지 썸네일 미리 불러오기 (안드로이드 전용)
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
@@ -1668,6 +2145,51 @@ export default function ChatRoomScreen() {
       });
   }, [messages]);
 
+
+  // 상대방 프로필 조회
+  const mergeParticipantProfiles = useCallback((profiles: any[]) => {
+    setParticipantProfileMap((prev) => {
+      const next = { ...prev };
+
+      profiles.forEach((profile) => {
+        if (!profile?.id) return;
+
+        next[profile.id] = {
+          display_name: profile.display_name,
+          phone: profile.phone,
+          is_phone_public: profile.is_phone_public ?? null,
+          user_type: profile.user_type,
+          business_verified: profile.business_verified,
+          account: profile.account,
+          trust_points: profile.trust_points,
+          trust_level: profile.trust_level,
+        };
+      });
+
+      return next;
+    });
+  }, []);
+
+  const fetchProfilesForUserIds = useCallback(
+    async (userIds: string[]) => {
+      const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+      if (uniqueUserIds.length === 0) return;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, phone, is_phone_public, user_type, business_verified, account, trust_points, trust_level')
+        .in('id', uniqueUserIds);
+
+      if (error) {
+        console.log('채팅 사용자 프로필 조회 실패:', error);
+        return;
+      }
+
+      mergeParticipantProfiles(data || []);
+    },
+    [mergeParticipantProfiles]
+  );
+
   const fetchChatTargetProfile = async (targetId: string) => {
     const { data, error } = await supabase
       .from('profiles')
@@ -1684,6 +2206,7 @@ export default function ChatRoomScreen() {
     setChatTargetProfile((data || null) as ChatUserProfile | null);
   };
 
+  // 상대방 평점 조회
   const fetchUserRating = async (targetId: string) => {
     const { count, error } = await supabase
       .from('reviews')
@@ -1698,6 +2221,7 @@ export default function ChatRoomScreen() {
     setChatTargetRating({ avg: null, count: count || 0 });
   };
 
+  // 상대방 신고수 조회
   const fetchUserReportCount = async (targetId: string) => {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
@@ -1725,6 +2249,7 @@ export default function ChatRoomScreen() {
     setChatTargetReportCount(reportCount);
   };
 
+  // 채팅방 정보 조회
   const fetchRoomInfo = async () => {
     if (!roomId) return;
 
@@ -1734,10 +2259,68 @@ export default function ChatRoomScreen() {
     id,
     listing_id,
     store_user_id,
+    room_type,
+    estimate_request_id,
+    estimate_quote_id,
+    project_id,
+    title,
+    workflow_status,
+    completed_at,
     created_by,
     created_at,
     chat_room_members (
       user_id
+    ),
+    store_projects (
+      id,
+      store_user_id,
+      assigned_staff_user_id,
+      name,
+      status,
+      address,
+      start_date,
+      end_date,
+      project_members (
+        id,
+        member_user_id,
+        member_type,
+        role,
+        company_name,
+        display_name,
+        phone,
+        invitation_status,
+        created_at
+      ),
+      project_schedules (
+        id,
+        title,
+        start_date,
+        end_date,
+        status,
+        memo
+      ),
+      daily_reports (
+        id,
+        report_date,
+        work_content,
+        progress_percent,
+        customer_visible,
+        daily_report_images (
+          id,
+          image_path
+        )
+      )
+    ),
+    estimate_requests (
+      id,
+      title,
+      category,
+      status,
+      region,
+      address,
+      desired_date,
+      applicant_name,
+      applicant_phone
     ),
     listings (
           id,
@@ -1775,15 +2358,52 @@ export default function ChatRoomScreen() {
     }
 
     const listingData: any = data?.listings;
+    const projectData: any = data?.store_projects;
+    const estimateRequestData: any = data?.estimate_requests;
+    const roomMemberIds = Array.from(
+      new Set(
+        (data?.chat_room_members || [])
+          .map((member: any) => member.user_id)
+          .filter(Boolean)
+      )
+    ) as string[];
 
     const sortedImages = [...(listingData?.listing_images || [])].sort(
       (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
     );
+    const sortedSchedules = [...(projectData?.project_schedules || [])].sort(
+      (a: any, b: any) => String(a.start_date).localeCompare(String(b.start_date))
+    );
+    const sortedReports = [...(projectData?.daily_reports || [])].sort(
+      (a: any, b: any) => String(b.report_date).localeCompare(String(a.report_date))
+    );
+
+    if (roomMemberIds.length > 0) {
+      const { data: participantProfiles, error: participantProfileError } = await supabase
+        .from('profiles')
+        .select('id, display_name, phone, is_phone_public, user_type, business_verified, account, trust_points, trust_level')
+        .in('id', roomMemberIds);
+
+      if (participantProfileError) {
+        console.log('채팅 참여자 프로필 조회 실패:', participantProfileError);
+        setParticipantProfileMap({});
+      } else {
+        mergeParticipantProfiles(participantProfiles || []);
+      }
+    }
 
     setRoomInfo({
       ...data,
       members: data?.chat_room_members || [],
       listing: listingData ? { ...listingData, listing_images: sortedImages } : null,
+      project: projectData
+        ? {
+            ...projectData,
+            project_schedules: sortedSchedules,
+            daily_reports: sortedReports,
+          }
+        : null,
+      estimateRequest: estimateRequestData || null,
       sellerProfile: listingData?.profiles
         ? {
           display_name: listingData.profiles.display_name,
@@ -1798,6 +2418,7 @@ export default function ChatRoomScreen() {
 
   };
 
+  // 채팅방 음소거 상태 조회
   const fetchMuteState = async () => {
     if (!user || !roomId) return;
 
@@ -1811,6 +2432,7 @@ export default function ChatRoomScreen() {
     setIsMuted(data?.muted ?? false);
   };
 
+  // 채팅방 정보 및 음소거 상태 초기 조회
   useFocusEffect(
     useCallback(() => {
       if (!roomId) return;
@@ -1820,6 +2442,7 @@ export default function ChatRoomScreen() {
     }, [roomId, user?.id])
   );
 
+  // 신고 경고 관련 정보 조회
   const fetchReportRisk = async (targetId: string) => {
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
@@ -1850,21 +2473,25 @@ export default function ChatRoomScreen() {
     };
   };
 
+  // 신고 경고 표시 상태 키 생성
   const getReportWarningDismissedKey = (targetId: string) => {
     if (!user || !roomId) return null;
     return `${REPORT_WARNING_DISMISSED_PREFIX}:${user.id}:${roomId}:${targetId}`;
   };
 
+  // 초기 신고 경고 표시 상태 키 생성
   const getInitialReportWarningShownKey = (targetId: string) => {
     if (!user || !roomId) return null;
     return `${REPORT_WARNING_INITIAL_SHOWN_PREFIX}:${user.id}:${roomId}:${targetId}`;
   };
 
+  // 메시지별 신고 경고 표시 상태 키 생성
   const getMessageReportWarningShownKey = (messageId: string) => {
     if (!user || !roomId) return null;
     return `${REPORT_WARNING_MESSAGE_SHOWN_PREFIX}:${user.id}:${roomId}:${messageId}`;
   };
 
+  // 신고 경고 숨김 상태 조회
   const isReportWarningDismissedForRoom = async (targetId: string) => {
     const key = getReportWarningDismissedKey(targetId);
     if (!key) return false;
@@ -1877,6 +2504,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 신고 경고 숨김 상태 저장
   const dismissReportWarningForRoom = async (targetId: string) => {
     const key = getReportWarningDismissedKey(targetId);
     if (!key) return;
@@ -1888,6 +2516,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 초기 거래 주의 표시 상태 조회
   const isInitialReportWarningShownForRoom = async (targetId: string) => {
     const key = getInitialReportWarningShownKey(targetId);
     if (!key) return false;
@@ -1900,6 +2529,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 초기 거래 주의 표시 상태 저장
   const markInitialReportWarningShownForRoom = async (targetId: string) => {
     const key = getInitialReportWarningShownKey(targetId);
     if (!key) return;
@@ -1911,6 +2541,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 메시지별 거래 주의 표시 상태 조회
   const isMessageReportWarningShown = async (messageId: string) => {
     const key = getMessageReportWarningShownKey(messageId);
     if (!key) return false;
@@ -1923,6 +2554,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 메시지별 거래 주의 표시 상태 저장
   const markMessageReportWarningShown = async (messageId: string) => {
     const key = getMessageReportWarningShownKey(messageId);
     if (!key) return;
@@ -1934,6 +2566,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 거래 주의 관련 메시지 판단
   const isPaymentRequestRelatedMessage = (message: string) => {
     return (
       message.startsWith(PAYMENT_REQUEST_PREFIX) ||
@@ -1941,10 +2574,12 @@ export default function ChatRoomScreen() {
     );
   };
 
+  // 약속 요청 관련 메시지 판단
   const isAppointmentRequestRelatedMessage = (message: string) => {
     return message.startsWith(APPOINTMENT_REQUEST_PREFIX);
   };
 
+  // 거래 주의 관련 메시지 판단
   const isTradeWarningRelatedMessage = (message: string) => {
     return (
       isPaymentRequestRelatedMessage(message) ||
@@ -1952,6 +2587,7 @@ export default function ChatRoomScreen() {
     );
   };
 
+  // 거래 주의 경고 표시
   const showHighReportWarning = async (targetId: string, onConfirm?: () => void) => {
     if (!user || targetId === user.id) return false;
 
@@ -2004,6 +2640,7 @@ export default function ChatRoomScreen() {
     return true;
   };
 
+  // 메시지 수신 시 거래 주의 경고 표시
   const maybeShowIncomingTradeWarning = async (message: ChatMessage) => {
     if (
       !user ||
@@ -2023,6 +2660,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 초기 거래 주의 경고 표시
   const showInitialRoomReportWarning = async (targetId: string, onConfirm?: () => void) => {
     const initialWarningShown = await isInitialReportWarningShownForRoom(targetId);
     if (initialWarningShown) return false;
@@ -2036,6 +2674,7 @@ export default function ChatRoomScreen() {
     return warningShown;
   };
 
+  // 초기 거래 주의 경고 표시 여부 판단 및 표시
   const maybeShowInitialRoomReportWarning = async () => {
     if (!targetUserId || targetUserId === user?.id) return;
     if (initialReportWarningRunningRef.current) return;
@@ -2056,6 +2695,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 메시지 조회
   const fetchMessages = async () => {
     if (!roomId) return;
 
@@ -2076,6 +2716,7 @@ export default function ChatRoomScreen() {
     const loadedMessages = (data || []) as ChatMessage[];
     setMessages(loadedMessages);
     setMessagesLoaded(true);
+    void fetchProfilesForUserIds(loadedMessages.map((message) => message.sender_id));
 
     const latestTradeWarningMessage = [...loadedMessages]
       .reverse()
@@ -2092,6 +2733,7 @@ export default function ChatRoomScreen() {
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 120);
   };
 
+  // 메시지 읽음 조회
   const fetchReads = async () => {
     if (!roomId) return;
 
@@ -2120,6 +2762,7 @@ export default function ChatRoomScreen() {
     setReads((data || []) as MessageRead[]);
   };
 
+  // 메시지 읽음 처리
   const markAsReadSafe = async () => {
     try {
       if (!roomId) return;
@@ -2129,6 +2772,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 메시지 전송 처리
   const sendTextMessage = async (messageText: string) => {
   if (!roomId || sending || !user) return;
 
@@ -2170,6 +2814,8 @@ export default function ChatRoomScreen() {
   }
 };
 
+
+// 메시지 전송 버튼 처리
   const onSend = async () => {
     if (!roomId || !text.trim() || sending) return;
 
@@ -2186,6 +2832,7 @@ export default function ChatRoomScreen() {
     await sendTextMessage(messageText);
   };
 
+  // 이미지 업로드 처리
   const uploadChatImage = async (asset: ImagePicker.ImagePickerAsset) => {
     if (!roomId || !user) return null;
 
@@ -2263,6 +2910,7 @@ export default function ChatRoomScreen() {
     return data.publicUrl;
   };
 
+  // 채팅방 관련 이미지 URL
   const productImageUrl = useMemo(() => {
     const path = roomInfo?.listing?.listing_images?.[0]?.image_path;
     if (!path) return null;
@@ -2270,7 +2918,11 @@ export default function ChatRoomScreen() {
     return data.publicUrl;
   }, [roomInfo?.listing?.listing_images]);
 
+  // 채팅방 관련 정보
   const chatTargetName =
+    roomInfo?.title ||
+    project?.name ||
+    (isEstimateRoom ? estimateRequest?.title || '견적 채팅' : null) ||
     chatTargetProfile?.display_name ||
     (targetUserId === listing?.author_id ? roomInfo?.sellerProfile?.display_name : null) ||
     '상대방';
@@ -2281,13 +2933,18 @@ export default function ChatRoomScreen() {
         getSellerLevel(chatTargetProfile, chatTargetRating.count * 100)
       )} · 후기 ${chatTargetRating.count}개`
       : '후기 0개';
-  const chatTargetSub = `${chatTargetReviewText} · 신고 ${chatTargetReportCount}개`;
+  const chatTargetSub = project
+    ? `${isCompletedWorkChat ? '완료 · ' : ''}현장 채팅 · 참여자 ${chatParticipantCount}명`
+    : isEstimateRoom
+      ? `${isCompletedWorkChat ? '완료 · ' : ''}견적 채팅 · 참여자 ${chatParticipantCount}명`
+    : `${chatTargetReviewText} · 신고 ${chatTargetReportCount}개`;
   const canStorePhoneCall =
     chatTargetProfile?.user_type === 'store' &&
     !!chatTargetProfile?.business_verified &&
     !!chatTargetProfile?.is_phone_public &&
     !!chatTargetProfile?.phone;
 
+    // 전화 걸기 처리
   const openPhone = async () => {
     if (!targetUserId) {
       Alert.alert('전화하기', '전화할 상대를 찾을 수 없습니다.');
@@ -2336,6 +2993,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 통화 권한 확인 및 요청
   const ensureCallDevicePermissions = async (callType: ChatCallType) => {
     if (!isNativeCallSupported) {
       Alert.alert(
@@ -2376,6 +3034,7 @@ export default function ChatRoomScreen() {
     return true;
   };
 
+  // 통화 상태 메시지 전송
   const sendCallStatusMessage = async (
     call: Pick<ChatCallSession, 'call_type' | 'answered_at'>,
     status: ChatCallStatus,
@@ -2399,6 +3058,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 통화 시작 처리
   const startInAppCall = async (callType: ChatCallType) => {
   if (callActionLockRef.current) return;
   callActionLockRef.current = true;
@@ -2508,6 +3168,7 @@ export default function ChatRoomScreen() {
   }
 };
 
+// 통화 상태 변경 처리
   const updateCallStatus = async (call: ChatCallSession, status: ChatCallStatus) => {
     if (!call || callActionLoading) return;
 
@@ -2605,6 +3266,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 통화 마이크 음소거 토글
   const toggleCallMic = async () => {
     const nextMuted = !callMicMuted;
 
@@ -2629,6 +3291,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 통화 카메라 전환
   const switchCallCamera = async () => {
     if (!visibleCall || visibleCall.call_type !== 'video') return;
 
@@ -2660,6 +3323,7 @@ export default function ChatRoomScreen() {
     Alert.alert('카메라 전환', '이 기기에서는 카메라 전환을 지원하지 않습니다.');
   };
 
+  // 통화 카메라 꺼짐 상태 동기화
   const syncCallCameraOffState = useCallback(
     async (cameraOff: boolean) => {
       const call = visibleCall;
@@ -2691,6 +3355,7 @@ export default function ChatRoomScreen() {
     [user, visibleCall]
   );
 
+  // 통화 카메라 토글
   const toggleCallCamera = async () => {
     if (!visibleCall || visibleCall.call_type !== 'video') return;
 
@@ -2730,10 +3395,7 @@ export default function ChatRoomScreen() {
     void syncCallCameraOffState(nextCameraOff);
   };
 
-
-
-
-
+  // 통화 스피커 모드 적용
   const applyCallSpeakerMode = (speakerOn: boolean) => {
     try {
       const manager = InCallManager as any;
@@ -2757,6 +3419,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 통화 스피커 모드 토글
   const toggleCallSpeaker = () => {
     setCallSpeakerOn((prev) => {
       const nextSpeakerOn = !prev;
@@ -2765,7 +3428,7 @@ export default function ChatRoomScreen() {
     });
   };
 
-
+  // 이미지 선택 처리
   const handleAlbum = async () => {
     setPlusMenuOpen(false);
 
@@ -2811,6 +3474,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 카메라 촬영 처리
   const handleCamera = async () => {
     setPlusMenuOpen(false);
 
@@ -2848,8 +3512,10 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 장소 선택 처리
   const handlePlace = () => {
     setPlusMenuOpen(false);
+    prepareChatNavigation();
     router.push({
       pathname: '/map-picker',
       params: {
@@ -2863,6 +3529,7 @@ export default function ChatRoomScreen() {
     } as any);
   };
 
+  // 약속 날짜와 시간 선택 처리
   const getSelectedAppointmentDate = (dateText = selectedDateText, timeText = selectedTimeText) => {
     if (!dateText || !timeText) return null;
 
@@ -2870,11 +3537,13 @@ export default function ChatRoomScreen() {
     return Number.isNaN(date.getTime()) ? null : date;
   };
 
+  // 약속 시간 선택 가능 여부 판단
   const isAppointmentTimeOptionDisabled = (timeText: string) => {
     const appointmentDate = getSelectedAppointmentDate(selectedDateText, timeText);
     return !appointmentDate || appointmentDate.getTime() <= nowMs;
   };
 
+  // 약속 변경 가능 여부 판단
   const openAppointmentForm = () => {
     if (appointmentChangeLocked) {
       showChatAlert(
@@ -2894,6 +3563,7 @@ export default function ChatRoomScreen() {
     setAppointmentModalOpen(true);
   };
 
+  // 약속 전송 처리
   const submitAppointment = async () => {
     if (!roomId) return;
 
@@ -2932,6 +3602,7 @@ export default function ChatRoomScreen() {
     setAppointmentModalOpen(false);
   };
 
+  // 약속 모달 열기 처리
   const openAppointmentModal = async () => {
     setPlusMenuOpen(false);
 
@@ -2943,9 +3614,11 @@ export default function ChatRoomScreen() {
     openAppointmentForm();
   };
 
+  // 약속 선택 처리
   const handleSchedule = () => openAppointmentModal();
   const handlePromise = () => openAppointmentModal();
 
+  // 플러스 메뉴 열기 처리
   const openPlusMenu = () => {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -2966,11 +3639,13 @@ export default function ChatRoomScreen() {
     setPlusMenuOpen(true);
   };
 
+  // 송금 요청 처리
   const openPaymentRequestForm = () => {
     setAccountText(roomInfo?.sellerProfile?.account || '');
     setAccountModalOpen(true);
   };
 
+  // 송금 요청 처리
   const handlePaymentRequest = async () => {
     if (targetUserId) {
       const warningShown = await showHighReportWarning(targetUserId, openPaymentRequestForm);
@@ -2980,6 +3655,7 @@ export default function ChatRoomScreen() {
     openPaymentRequestForm();
   };
 
+  // 송금 요청 전송 처리
   const submitPaymentRequest = async () => {
     if (!user || !roomId) return;
 
@@ -3017,6 +3693,7 @@ export default function ChatRoomScreen() {
     setAccountModalOpen(false);
   };
 
+  // 판매 후기 작성 대상자 ID 결정
   const getReviewTargetId = () => {
     if (!listing || !user) return null;
 
@@ -3027,9 +3704,11 @@ export default function ChatRoomScreen() {
     return listing.author_id;
   };
 
+  // 판매 후기 작성 페이지로 이동
   const goToReviewCreate = (reviewTargetId: string, saleId?: number | null) => {
     if (!listing) return;
 
+    prepareChatNavigation();
     router.push({
       pathname: '/review/create',
       params: {
@@ -3041,6 +3720,7 @@ export default function ChatRoomScreen() {
     } as any);
   };
 
+  // 판매 기록 조회
   const fetchLatestSaleForBuyer = useCallback(async (buyerId: string) => {
     if (!currentListingId || !roomId) return null;
 
@@ -3062,6 +3742,7 @@ export default function ChatRoomScreen() {
     return data as { id: number; created_at: string } | null;
   }, [currentListingId, roomId]);
 
+  // 판매 후기 작성 여부 확인
   const hasReviewForSale = async (reviewTargetId: string, saleId: number) => {
     if (!user) return false;
 
@@ -3081,6 +3762,7 @@ export default function ChatRoomScreen() {
     return Boolean(data);
   };
 
+  // 판매 후기 미리보기 조회
   const fetchTradeReviewPreview = useCallback(async () => {
     if (!currentListingId || !currentListingAuthorId || !roomId || !user?.id || !targetUserId) {
       setCounterpartReview(null);
@@ -3137,12 +3819,14 @@ export default function ChatRoomScreen() {
     user?.id,
   ]);
 
+  // 판매 후기 미리보기 조회
   useFocusEffect(
     useCallback(() => {
       void fetchTradeReviewPreview();
     }, [fetchTradeReviewPreview])
   );
 
+  // 판매 완료 모달 열기
   const openSaleCompleteModal = (reviewTargetId: string, fallbackSaleId?: number | null) => {
     setPendingReviewTargetId(reviewTargetId);
     setReviewOnlySaleId(fallbackSaleId ?? null);
@@ -3150,6 +3834,7 @@ export default function ChatRoomScreen() {
     setSaleCompleteModalOpen(true);
   };
 
+  // 판매 완료 모달 닫기
   const closeSaleCompleteModal = () => {
     if (saleCompleting) return;
 
@@ -3159,6 +3844,7 @@ export default function ChatRoomScreen() {
     setSaleQuantityText('1');
   };
 
+  // 판매 완료 처리 후 후기 작성 페이지로 이동
   const handleAdditionalPurchaseConfirm = (reviewTargetId: string) => {
     if (listingQuantityInfo.remaining < 1) {
       showChatAlert('재고 없음', '남은 수량이 없어 추가 판매 처리할 수 없습니다.');
@@ -3168,6 +3854,7 @@ export default function ChatRoomScreen() {
     openSaleCompleteModal(reviewTargetId);
   };
 
+  // 이미 후기 작성 완료 후 추가 구매 여부 확인
   const showAdditionalPurchaseConfirm = (reviewTargetId: string) => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const ok = window.confirm('이미 후기 작성 완료\n추가 구매를 하셨나요?');
@@ -3184,6 +3871,7 @@ export default function ChatRoomScreen() {
     ]);
   };
 
+  // 판매 완료 처리 후 후기 작성 페이지로 이동
   const handleReview = async () => {
     if (!user?.id) {
       showChatAlert('후기 보내기', '로그인이 필요합니다.');
@@ -3248,6 +3936,7 @@ export default function ChatRoomScreen() {
     openSaleCompleteModal(reviewTargetId);
   };
 
+  // 판매 완료 처리 후 후기 작성 페이지로 이동 (헤더 메뉴용)
   const handleHeaderReview = () => {
     setHeaderMenuOpen(false);
     setTimeout(() => {
@@ -3255,6 +3944,7 @@ export default function ChatRoomScreen() {
     }, 250);
   };
 
+  // 판매 완료 처리 후 후기 작성 페이지로 이동 (모달용)
   const completeSaleAndGoToReview = async () => {
     if (!listing || !user || !roomId || !pendingReviewTargetId || saleCompleting) return;
 
@@ -3326,6 +4016,7 @@ export default function ChatRoomScreen() {
     }
   };
 
+  // 상대방 차단 처리
   const handleBlock = async () => {
     setHeaderMenuOpen(false);
 
@@ -3366,6 +4057,8 @@ export default function ChatRoomScreen() {
     Alert.alert('차단 완료', '상대방을 차단했습니다.');
   };
 
+
+  // 신고 대상 닉네임 조회
   const fetchReportTargetName = async (targetId: string) => {
     const { data, error } = await supabase
       .from('profiles')
@@ -3381,6 +4074,8 @@ export default function ChatRoomScreen() {
     return data?.display_name || '상대방';
   };
 
+
+  // 신고 처리
   const handleReport = () => {
     setHeaderMenuOpen(false);
 
@@ -3404,6 +4099,8 @@ export default function ChatRoomScreen() {
     }, 300);
   };
 
+
+  // 신고 접수 처리
   const submitReport = async () => {
     if (!user || !targetUserId) return;
 
@@ -3439,6 +4136,8 @@ export default function ChatRoomScreen() {
     Alert.alert('신고 접수 완료', '신고가 접수되었습니다.');
   };
 
+
+  // 사기 이력 조회
   const handleFraudHistory = async () => {
     setHeaderMenuOpen(false);
 
@@ -3453,6 +4152,8 @@ export default function ChatRoomScreen() {
     await Linking.openURL(url);
   };
 
+
+  // 채팅방 알림 설정 처리
   const handleMute = async () => {
     setHeaderMenuOpen(false);
 
@@ -3485,6 +4186,111 @@ export default function ChatRoomScreen() {
     );
   };
 
+  const openParticipantModal = () => {
+    setHeaderMenuOpen(false);
+    setParticipantModalOpen(true);
+  };
+
+  const handleRemoveParticipant = (participant: ChatParticipantItem) => {
+    if (!roomId || !project || !participant.canRemove) return;
+
+    Alert.alert(
+      '참여자 내보내기',
+      `${participant.name}님을 이 현장 채팅에서 내보낼까요?\n기존 채팅 기록은 삭제되지 않습니다.`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '내보내기',
+          style: 'destructive',
+          onPress: async () => {
+            setParticipantActionLoadingId(participant.userId);
+
+            try {
+              let handledByProjectChatRpc = false;
+              const { error: projectChatRpcError } = await supabase.rpc(
+                'remove_project_chat_participant',
+                {
+                  p_room_id: roomId,
+                  p_member_user_id: participant.userId,
+                  p_project_member_id: participant.projectMemberId,
+                }
+              );
+
+              if (projectChatRpcError) {
+                const functionMissing =
+                  projectChatRpcError.code === 'PGRST202' ||
+                  projectChatRpcError.message?.includes('Could not find the function');
+
+                if (!functionMissing) {
+                  throw projectChatRpcError;
+                }
+              } else {
+                handledByProjectChatRpc = true;
+              }
+
+              if (!handledByProjectChatRpc) {
+                if (participant.projectMemberId) {
+                  const { error: projectMemberError } = await supabase.rpc('remove_project_member', {
+                    p_member_id: participant.projectMemberId,
+                  });
+
+                  if (projectMemberError) {
+                    throw projectMemberError;
+                  }
+                }
+
+                const { error: chatMemberError } = await supabase
+                  .from('chat_room_members')
+                  .delete()
+                  .match({
+                    room_id: roomId,
+                    user_id: participant.userId,
+                  });
+
+                if (chatMemberError) {
+                  throw chatMemberError;
+                }
+              }
+
+              setRoomInfo((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      members: (prev.members || []).filter(
+                        (member) => member.user_id !== participant.userId
+                      ),
+                      project: prev.project
+                        ? {
+                            ...prev.project,
+                            project_members: (prev.project.project_members || []).map((member) =>
+                              member.id === participant.projectMemberId
+                                ? { ...member, invitation_status: 'removed' }
+                                : member
+                            ),
+                          }
+                        : prev.project,
+                    }
+                  : prev
+              );
+              await fetchRoomInfo();
+              Alert.alert('참여자 내보내기', '참여자를 내보냈습니다.');
+            } catch (error: any) {
+              console.log('채팅 참여자 내보내기 실패:', error);
+              Alert.alert(
+                '참여자 내보내기 실패',
+                error?.message || '참여자를 내보내지 못했습니다.'
+              );
+            } finally {
+              setParticipantActionLoadingId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+
+  // 채팅방 나가기 처리
   const handleExitRoom = () => {
     setHeaderMenuOpen(false);
 
@@ -3507,6 +4313,7 @@ export default function ChatRoomScreen() {
             return;
           }
 
+          prepareChatNavigation();
           router.replace('/(tabs)/chat' as any);
         },
       },
@@ -3520,16 +4327,30 @@ export default function ChatRoomScreen() {
 
 
 
-  const getUnreadCount = (messageId: string) => {
-    if (!user) return 1;
+  const getUnreadCount = (messageId: string, senderId: string) => {
+    if (!user) return 0;
 
-    const readByOther = reads.some(
-      (r) =>
-        String(r.message_id) === String(messageId) &&
-        r.user_id !== user.id
+    const roomMemberIds = new Set(
+      (roomInfo?.members || [])
+        .map((member) => member.user_id)
+        .filter((memberId): memberId is string => !!memberId)
+    );
+    const activeParticipantIds = new Set(chatParticipants.map((participant) => participant.userId));
+    const participantIds = activeParticipantIds.size > 0 ? activeParticipantIds : roomMemberIds;
+    const recipientIds = new Set([...participantIds].filter((memberId) => memberId !== senderId));
+
+    if (recipientIds.size === 0) {
+      return 0;
+    }
+
+    const readUserIds = new Set(
+      reads
+        .filter((read) => String(read.message_id) === String(messageId))
+        .map((read) => read.user_id)
+        .filter((readerId) => recipientIds.has(readerId))
     );
 
-    return readByOther ? 0 : 1;
+    return Math.max(recipientIds.size - readUserIds.size, 0);
   };
 
   const handleAppointmentCompletionAnswer = async (
@@ -3617,6 +4438,7 @@ export default function ChatRoomScreen() {
   };
 
   const openPlaceMessageMap = (place: PlaceMessagePayload) => {
+    prepareChatNavigation();
     router.push({
       pathname: '/trade-map',
       params: {
@@ -3660,9 +4482,39 @@ export default function ChatRoomScreen() {
     );
   };
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => {
+  const getMessageSenderName = useCallback(
+    (senderId: string) => {
+      const projectMember =
+        (project?.project_members || []).find(
+          (member) => member.member_user_id === senderId && member.invitation_status !== 'removed'
+        ) ||
+        (project?.project_members || []).find((member) => member.member_user_id === senderId);
+      const profile = participantProfileMap[senderId];
+      const displayName =
+        projectMember?.display_name?.trim() ||
+        profile?.display_name?.trim() ||
+        '';
+      const companyName = projectMember?.company_name?.trim() || '';
+
+      if (displayName && companyName && displayName !== companyName) {
+        return `${displayName} · ${companyName}`;
+      }
+
+      return displayName || companyName || '참여자';
+    },
+    [participantProfileMap, project?.project_members]
+  );
+
+  const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const isMine = item.sender_id === user?.id;
-    const unreadCount = isMine ? getUnreadCount(item.id) : 0;
+    const previousMessage = index > 0 ? messages[index - 1] : null;
+    const currentDateKey = getChatDateKey(item.created_at);
+    const previousDateKey = previousMessage ? getChatDateKey(previousMessage.created_at) : '';
+    const showDateDivider = !previousMessage || currentDateKey !== previousDateKey;
+    const groupedWithPrevious =
+      previousMessage?.sender_id === item.sender_id && currentDateKey === previousDateKey;
+    const showSenderName = shouldShowSenderNames && !isMine && !groupedWithPrevious;
+    const unreadCount = getUnreadCount(item.id, item.sender_id);
 
     const imageItems = parseImageMessage(item.message);
     const isImageMessage = imageItems.length > 0;
@@ -3678,146 +4530,273 @@ export default function ChatRoomScreen() {
       : false;
 
     return (
-      <View style={[styles.messageRow, isMine ? styles.myRow : styles.otherRow]}>
+      <>
+        {showDateDivider ? (
+          <View style={[styles.dateDividerWrap, index === 0 && styles.firstDateDividerWrap]}>
+            <View style={[styles.dateDividerPill, isDarkMode && styles.dateDividerPillDark]}>
+              <Text style={[styles.dateDividerText, isDarkMode && styles.dateDividerTextDark]}>
+                {formatChatDateDivider(item.created_at)}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
         <View
           style={[
-            styles.bubble,
-            isMine ? styles.myBubble : styles.otherBubble,
-            isImageMessage && styles.imageBubble,
+            styles.messageRow,
+            showDateDivider && styles.messageRowAfterDate,
+            groupedWithPrevious && styles.groupedMessageRow,
+            isMine ? styles.myRow : styles.otherRow,
           ]}
         >
-          {isAppointmentCompletionPrompt && appointmentCompletionDate ? (
-            <View>
-              <Text style={[styles.messageText, isMine && styles.myMessageText]}>
-                {item.message}
-              </Text>
-
-              {appointmentCompletionAnswered ? (
-                <Text
-                  style={[
-                    styles.completionAnsweredText,
-                    isMine && styles.myCompletionAnsweredText,
-                  ]}
-                >
-                  응답 완료
-                </Text>
-              ) : (
-                <View style={styles.completionActions}>
-                  <TouchableOpacity
-                    style={styles.completionYesBtn}
-                    onPress={() => handleAppointmentCompletionAnswer(true, appointmentCompletionDate)}
-                  >
-                    <Text style={styles.completionYesText}>예</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.completionNoBtn}
-                    onPress={() => handleAppointmentCompletionAnswer(false, appointmentCompletionDate)}
-                  >
-                    <Text style={styles.completionNoText}>아니요</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          ) : placeMessage ? (
-            <TouchableOpacity
-              style={styles.placeMessageCard}
-              onPress={() => openPlaceMessageMap(placeMessage)}
+          {showSenderName ? (
+            <Text
+              style={[styles.senderName, isDarkMode && styles.senderNameDark]}
+              numberOfLines={1}
             >
-              <View style={styles.placeMessageHeader}>
-                <Ionicons
-                  name="location"
-                  size={18}
-                  color={isMine ? '#bbf7d0' : '#166534'}
-                />
-                <Text style={[styles.placeMessageTitle, isMine && styles.myPlaceMessageTitle]}>
-                  약속장소
+              {getMessageSenderName(item.sender_id)}
+            </Text>
+          ) : null}
+          <View
+            style={[
+              styles.bubble,
+              isMine ? styles.myBubble : styles.otherBubble,
+              isImageMessage && styles.imageBubble,
+            ]}
+          >
+            {isAppointmentCompletionPrompt && appointmentCompletionDate ? (
+              <View>
+                <Text style={[styles.messageText, isMine && styles.myMessageText]}>
+                  {item.message}
                 </Text>
-              </View>
-              <Text
-                style={[styles.placeMessageAddress, isMine && styles.myPlaceMessageAddress]}
-                numberOfLines={2}
-              >
-                {placeMessage.address}
-              </Text>
-              <Text style={[styles.placeMessageHint, isMine && styles.myPlaceMessageHint]}>
-                지도에서 보기
-              </Text>
-            </TouchableOpacity>
-          ) : isImageMessage ? (
-            <TouchableOpacity
-              onPress={() => {
-                const imageUrls = imageItems.map((image) => image.url);
-                console.log('이미지 URL:', imageUrls);
-                setSelectedImageUrls(imageUrls);
-                setSelectedImageIndex(0);
-                setImageViewerOpen(true);
-              }}
-            >
-              <View
-                style={[
-                  styles.imageGrid,
-                  imageItems.length === 1 && styles.singleImageGrid,
-                ]}
-              >
-                {imageItems.slice(0, 4).map((image, index) => (
-                  <View
-                    key={`${image.url}-${index}`}
+
+                {appointmentCompletionAnswered ? (
+                  <Text
                     style={[
-                      styles.gridImageWrap,
-                      imageItems.length === 1 && styles.singleImageWrap,
+                      styles.completionAnsweredText,
+                      isMine && styles.myCompletionAnsweredText,
                     ]}
                   >
-                    <ChatThumbnailImage image={image} />
+                    응답 완료
+                  </Text>
+                ) : (
+                  <View style={styles.completionActions}>
+                    <TouchableOpacity
+                      style={styles.completionYesBtn}
+                      onPress={() => handleAppointmentCompletionAnswer(true, appointmentCompletionDate)}
+                    >
+                      <Text style={styles.completionYesText}>예</Text>
+                    </TouchableOpacity>
 
-                    {index === 3 && imageItems.length > 4 ? (
-                      <View style={styles.moreImageOverlay}>
-                        <Text style={styles.moreImageText}>
-                          +{imageItems.length - 4}
-                        </Text>
-                      </View>
-                    ) : null}
+                    <TouchableOpacity
+                      style={styles.completionNoBtn}
+                      onPress={() => handleAppointmentCompletionAnswer(false, appointmentCompletionDate)}
+                    >
+                      <Text style={styles.completionNoText}>아니요</Text>
+                    </TouchableOpacity>
                   </View>
-                ))}
+                )}
               </View>
-            </TouchableOpacity>
-          ) : (
-            renderMessageTextWithLinks(item.message, isMine)
-          )}
-        </View>
+            ) : placeMessage ? (
+              <TouchableOpacity
+                style={styles.placeMessageCard}
+                onPress={() => openPlaceMessageMap(placeMessage)}
+              >
+                <View style={styles.placeMessageHeader}>
+                  <Ionicons
+                    name="location"
+                    size={18}
+                    color={isMine ? '#bbf7d0' : '#166534'}
+                  />
+                  <Text style={[styles.placeMessageTitle, isMine && styles.myPlaceMessageTitle]}>
+                    약속장소
+                  </Text>
+                </View>
+                <Text
+                  style={[styles.placeMessageAddress, isMine && styles.myPlaceMessageAddress]}
+                  numberOfLines={2}
+                >
+                  {placeMessage.address}
+                </Text>
+                <Text style={[styles.placeMessageHint, isMine && styles.myPlaceMessageHint]}>
+                  지도에서 보기
+                </Text>
+              </TouchableOpacity>
+            ) : isImageMessage ? (
+              <TouchableOpacity
+                onPress={() => {
+                  const imageUrls = imageItems.map((image) => image.url);
+                  console.log('이미지 URL:', imageUrls);
+                  setSelectedImageUrls(imageUrls);
+                  setSelectedImageIndex(0);
+                  setImageViewerOpen(true);
+                }}
+              >
+                <View
+                  style={[
+                    styles.imageGrid,
+                    imageItems.length === 1 && styles.singleImageGrid,
+                  ]}
+                >
+                  {imageItems.slice(0, 4).map((image, index) => (
+                    <View
+                      key={`${image.url}-${index}`}
+                      style={[
+                        styles.gridImageWrap,
+                        imageItems.length === 1 && styles.singleImageWrap,
+                      ]}
+                    >
+                      <ChatThumbnailImage image={image} />
 
-        <View style={styles.metaRow}>
-          {isMine && unreadCount > 0 ? (
-            <Text style={styles.unreadText}>{unreadCount}</Text>
-          ) : null}
-          <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
+                      {index === 3 && imageItems.length > 4 ? (
+                        <View style={styles.moreImageOverlay}>
+                          <Text style={styles.moreImageText}>
+                            +{imageItems.length - 4}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            ) : (
+              renderMessageTextWithLinks(item.message, isMine)
+            )}
+          </View>
+
+          <View style={styles.metaRow}>
+            {unreadCount > 0 ? (
+              <Text style={styles.unreadText}>{unreadCount}</Text>
+            ) : null}
+            <Text style={styles.timeText}>{formatTime(item.created_at)}</Text>
+          </View>
         </View>
-      </View>
+      </>
     );
   };
 
-  // const inputBarBottom =
-  // Platform.OS === 'android'
-  //   ? keyboardVisible
-  //     ? keyboardHeight + 8
-  //     : Math.max(insets.bottom, 8)
-  //   : keyboardVisible
-  //     ? keyboardHeight
-  //     : Math.max(insets.bottom, 8);
-  // const listBottomPadding = 16
+  const inputBottomPadding = keyboardVisible ? 6 : Math.max(insets.bottom, 6);
+  const inputRowEstimatedHeight = 56 + inputBottomPadding;
+  const inputOverlayBottom = keyboardVisible ? keyboardHeight : 0;
+  const listViewportBottomInset =
+    Platform.OS === 'ios'
+      ? inputRowEstimatedHeight + (keyboardVisible ? keyboardHeight : 0)
+      : 0;
+  const listBottomPadding = 18;
+
+  const workPanelCollapseDock = (
+    <View style={styles.projectCollapseDock}>
+      <TouchableOpacity
+        style={[styles.projectCollapseFloatBtn, isDarkMode && styles.projectCollapseFloatBtnDark]}
+        onPress={() => setWorkPanelCollapsed((prev) => !prev)}
+        activeOpacity={0.86}
+      >
+        <Ionicons
+          name={workPanelCollapsed ? 'chevron-down' : 'chevron-up'}
+          size={16}
+          color={isDarkMode ? '#fff' : '#111827'}
+        />
+      </TouchableOpacity>
+    </View>
+  );
+
+  useEffect(() => {
+    if (!keyboardVisible) return;
+
+    const frameId = requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    });
+    const timeoutIds = [80, 220, 420].map((delay) =>
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, delay)
+    );
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      timeoutIds.forEach(clearTimeout);
+    };
+  }, [keyboardHeight, keyboardVisible, listViewportBottomInset]);
+
+  const chatInputRow = (
+    <View
+      style={[
+        styles.inputRow,
+        isDarkMode && styles.inputRowDark,
+        {
+          paddingBottom: inputBottomPadding,
+        },
+      ]}
+      pointerEvents="auto"
+      collapsable={false}
+    >
+      <Pressable
+        style={({ pressed }) => [
+          styles.plusBtn,
+          isDarkMode && styles.plusBtnDark,
+          pressed && styles.controlPressed,
+        ]}
+        onPress={() => {
+          openPlusMenu();
+        }}
+        hitSlop={10}
+      >
+        <Ionicons name="add" size={24} color={isDarkMode ? '#fff' : '#111827'} />
+      </Pressable>
+
+      <Pressable
+        style={styles.inputPressTarget}
+        onPress={() => {
+          messageInputRef.current?.focus();
+        }}
+      >
+        <TextInput
+          ref={messageInputRef}
+          style={[styles.input, isDarkMode && styles.inputDark]}
+          placeholder="메시지를 입력하세요"
+          placeholderTextColor={isDarkMode ? '#9ca3af' : '#6b7280'}
+          selectionColor="#166534"
+          value={text}
+          onChangeText={setText}
+          multiline
+          textAlignVertical="top"
+          blurOnSubmit={false}
+          onFocus={() => {
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 120);
+          }}
+        />
+      </Pressable>
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.sendBtn,
+          sending && styles.sendBtnDisabled,
+          pressed && !sending && styles.controlPressed,
+        ]}
+        onPress={() => {
+          void onSend();
+        }}
+        disabled={sending}
+        hitSlop={10}
+      >
+        <Text style={styles.sendBtnText}>{sending ? '전송중' : '전송'}</Text>
+      </Pressable>
+    </View>
+  );
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()}>
+    <SafeAreaView style={[styles.screen, isDarkMode && styles.screenDark]} edges={['top']}>
+      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
+      <View style={[styles.header, isDarkMode && styles.headerDark]}>
+        <TouchableOpacity style={styles.headerBtn} onPress={handleBackPress}>
           <Ionicons name="chevron-back" size={24} color={backIconColor} />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.headerCenter} onPress={goToChatTargetProfile}>
-          <Text style={styles.headerName} numberOfLines={1}>
+          <Text style={[styles.headerName, isDarkMode && styles.headerNameDark]} numberOfLines={1}>
             {chatTargetName}
           </Text>
-          <Text style={styles.headerSub} numberOfLines={1}>
+          <Text style={[styles.headerSub, isDarkMode && styles.headerSubDark]} numberOfLines={1}>
             {chatTargetSub}
           </Text>
         </TouchableOpacity>
@@ -3831,12 +4810,12 @@ export default function ChatRoomScreen() {
 
           {targetUserId ? (
             <TouchableOpacity style={styles.headerBtn} onPress={() => setCallMenuOpen(true)}>
-              <Ionicons name="call-outline" size={20} color="#111827" />
+              <Ionicons name="call-outline" size={20} color={backIconColor} />
             </TouchableOpacity>
           ) : null}
 
           <TouchableOpacity style={styles.headerBtn} onPress={() => setHeaderMenuOpen(true)}>
-            <Ionicons name="ellipsis-vertical" size={20} color="#111827" />
+            <Ionicons name="ellipsis-vertical" size={20} color={backIconColor} />
           </TouchableOpacity>
         </View>
       </View>
@@ -3845,7 +4824,10 @@ export default function ChatRoomScreen() {
         <View>
           <TouchableOpacity
             style={styles.productCard}
-            onPress={() => router.push(`/(tabs)/home/post/${listing.id}` as any)}
+            onPress={() => {
+              prepareChatNavigation();
+              router.push(`/(tabs)/home/post/${listing.id}` as any);
+            }}
           >
             <View style={styles.productThumbWrap}>
               {productImageUrl ? (
@@ -3941,10 +4923,157 @@ export default function ChatRoomScreen() {
         </View>
       ) : null}
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
-        keyboardVerticalOffset={0}
+      {project ? (
+        <>
+        <View style={[styles.projectPanel, workPanelCollapsed && styles.projectPanelCollapsed]}>
+          <View style={styles.projectPanelHeader}>
+            <View style={styles.projectPanelTitleBox}>
+              <View style={styles.projectBadgeRow}>
+                <Text style={styles.projectBadge}>현장</Text>
+                <Text style={styles.projectStatusBadge}>
+                  {getProjectStatusLabel(isCompletedWorkChat ? 'completed' : project.status)}
+                </Text>
+              </View>
+              <Text style={styles.projectPanelTitle} numberOfLines={1}>
+                {roomInfo?.title || project.name}
+              </Text>
+              {!workPanelCollapsed ? (
+                <Text style={styles.projectPanelMeta} numberOfLines={1}>
+                  {project.address || '주소 미입력'} · {formatProjectDate(project.start_date)} ~ {formatProjectDate(project.end_date)}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.projectPanelActions}>
+              {!workPanelCollapsed ? (
+                <TouchableOpacity style={styles.projectOpenBtn} onPress={() => goToProjectManagement()}>
+                  <Text style={styles.projectOpenText}>현장관리</Text>
+                </TouchableOpacity>
+              ) : null}
+              {canWriteProjectReports ? (
+                !workPanelCollapsed ? (
+                  <TouchableOpacity style={styles.projectOpenBtn} onPress={goToProjectDailyReport}>
+                    <Text style={styles.projectOpenText}>일일보고서</Text>
+                  </TouchableOpacity>
+                ) : null
+              ) : null}
+            </View>
+          </View>
+
+          {!workPanelCollapsed ? (
+            <>
+              <View style={styles.projectCalendarStrip}>
+                {projectCalendarDays.map((day) => {
+                  const active = day.value === selectedProjectDate;
+
+                  return (
+                    <TouchableOpacity
+                      key={day.value}
+                      style={[styles.projectCalendarDay, active && styles.projectCalendarDayActive]}
+                      onPress={() => setSelectedProjectDate(day.value)}
+                    >
+                      <Text style={[styles.projectCalendarWeekday, active && styles.projectCalendarWeekdayActive]}>
+                        {day.label}
+                      </Text>
+                      <Text style={[styles.projectCalendarDate, active && styles.projectCalendarDateActive]}>
+                        {day.day}
+                      </Text>
+                      <View style={styles.projectCalendarDots}>
+                        {day.hasSchedule ? <View style={styles.projectScheduleDot} /> : null}
+                        {day.hasReport ? <View style={styles.projectReportDot} /> : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.projectPanelGrid}>
+                <View style={styles.projectPanelItem}>
+                  <Text style={styles.projectPanelLabel}>{selectedProjectScheduleTitle}</Text>
+                  {selectedProjectSchedules.length === 0 ? (
+                    <Text style={styles.projectPanelValue}>등록된 일정 없음</Text>
+                  ) : (
+                    selectedProjectSchedules.map((schedule) => (
+                      <Text key={schedule.id} style={styles.projectPanelValue} numberOfLines={1}>
+                        {schedule.title} · {getProjectScheduleStatusLabel(schedule.status)}
+                        {schedule.memo ? ` · ${schedule.memo}` : ''}
+                      </Text>
+                    ))
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.projectPanelItem}
+                  onPress={() => latestProjectReport && goToProjectManagement(latestProjectReport.id)}
+                  disabled={!latestProjectReport}
+                  activeOpacity={0.86}
+                >
+                  <Text style={styles.projectPanelLabel}>최근 보고서</Text>
+                  {latestProjectReport ? (
+                    <>
+                      <Text style={styles.projectPanelValue}>{latestProjectReport.report_date}</Text>
+                      <Text style={styles.projectPanelValue} numberOfLines={1}>
+                        진행률 {latestProjectReport.progress_percent || 0}% · 사진 {(latestProjectReport.daily_report_images || []).length}장
+                      </Text>
+                      <Text style={styles.projectPanelValue} numberOfLines={1}>
+                        {latestProjectReport.work_content}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.projectPanelValue}>작성된 보고서 없음</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : null}
+        </View>
+        {workPanelCollapseDock}
+        </>
+      ) : null}
+
+      {!project && isEstimateRoom ? (
+        <>
+        <View style={[styles.projectPanel, workPanelCollapsed && styles.projectPanelCollapsed]}>
+          <View style={styles.projectPanelHeader}>
+            <View style={styles.projectPanelTitleBox}>
+              <View style={styles.projectBadgeRow}>
+                <Text style={styles.projectBadge}>견적</Text>
+                <Text style={styles.projectStatusBadge}>
+                  {isCompletedWorkChat ? '완료' : '상담중'}
+                </Text>
+              </View>
+              <Text style={styles.projectPanelTitle} numberOfLines={1}>
+                {roomInfo?.title || estimateRequest?.title || '견적 채팅'}
+              </Text>
+              {!workPanelCollapsed ? (
+                <Text style={styles.projectPanelMeta} numberOfLines={1}>
+                  {estimateRequest?.address || estimateRequest?.region || '주소 미입력'} · 희망 일정 {estimateRequest?.desired_date || '미정'}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.projectPanelActions}>
+              {!workPanelCollapsed ? (
+                <TouchableOpacity style={styles.projectOpenBtn} onPress={goToChatTargetProfile}>
+                  <Text style={styles.projectOpenText}>견적관리</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        </View>
+        {workPanelCollapseDock}
+        </>
+      ) : null}
+
+      <View
+        style={[
+          styles.messageListLayer,
+          {
+            marginBottom: listViewportBottomInset,
+          },
+        ]}
+        collapsable={false}
+        onTouchStart={handleMessageListTouchStart}
+        onTouchMove={handleMessageListTouchMove}
+        onTouchEnd={handleMessageListTouchEnd}
+        onTouchCancel={handleMessageListTouchCancel}
       >
         <FlatList
           ref={flatListRef}
@@ -3952,10 +5081,17 @@ export default function ChatRoomScreen() {
           keyExtractor={(item) => String(item.id)}
           renderItem={renderMessage}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
+          onLayout={() => {
+            if (!keyboardVisible) return;
+            requestAnimationFrame(() => {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            });
+          }}
           contentContainerStyle={[
             styles.list,
             {
-              paddingBottom: keyboardVisible ? 80 : 100,
+              paddingBottom: listBottomPadding,
             },
           ]}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
@@ -3965,48 +5101,29 @@ export default function ChatRoomScreen() {
             </View>
           }
         />
+      </View>
 
-        <View
-          style={[
-            styles.inputRow,
-            {
-              paddingBottom:
-                Platform.OS === 'android'
-                  ? keyboardVisible
-                    ? 8
-                    : 24
-                  : keyboardVisible
-                    ? 8
-                    : Math.max(insets.bottom, 8),
-            },
-          ]}
-        >
-          <TouchableOpacity style={styles.plusBtn} onPress={openPlusMenu}>
-            <Ionicons name="add" size={24} color="#111827" />
-          </TouchableOpacity>
-
-          <TextInput
-            style={styles.input}
-            placeholder="메시지를 입력하세요"
-            value={text}
-            onChangeText={setText}
-            multiline
-            textAlignVertical="top"
-            blurOnSubmit={false}
-            onFocus={() => {
-              setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 120);
-            }}
-          />
-
-          <TouchableOpacity
-            style={[styles.sendBtn, sending && styles.sendBtnDisabled]}
-            onPress={onSend}
-            disabled={sending}
-          >
-            <Text style={styles.sendBtnText}>{sending ? '전송중' : '전송'}</Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+      {Platform.OS === 'ios' ? (
+        screenFocused ? (
+        <FullWindowOverlay>
+          <View style={styles.inputWindowLayer} pointerEvents="box-none">
+            <View
+              style={[
+                styles.inputOverlayPosition,
+                {
+                  bottom: inputOverlayBottom,
+                },
+              ]}
+              pointerEvents="box-none"
+            >
+              {chatInputRow}
+            </View>
+          </View>
+        </FullWindowOverlay>
+        ) : null
+      ) : (
+        chatInputRow
+      )}
 
       <Modal visible={callMenuOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setCallMenuOpen(false)}>
@@ -4508,6 +5625,8 @@ export default function ChatRoomScreen() {
           </View>
         </GestureHandlerRootView>
       </Modal>
+
+      {/* 송금요청 모달 */}
       <Modal visible={accountModalOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setAccountModalOpen(false)}>
           <View
@@ -4550,7 +5669,7 @@ export default function ChatRoomScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
+      {/* 플러스 버튼 메뉴 */}
       <Modal visible={plusMenuOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setPlusMenuOpen(false)}>
           <View style={styles.modalOverlay}>
@@ -4573,12 +5692,17 @@ export default function ChatRoomScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-
+      {/* 헤더 메뉴 */}
       <Modal visible={headerMenuOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setHeaderMenuOpen(false)}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback>
               <View style={styles.headerMenuBox}>
+                {isProjectRoom ? (
+                  <TouchableOpacity style={styles.menuItem} onPress={openParticipantModal}>
+                    <Text style={styles.menuText}>참여자 보기</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity style={styles.menuItem} onPress={handleHeaderReview}>
                   <Text style={styles.menuText}>후기 보내기</Text>
                 </TouchableOpacity>
@@ -4610,6 +5734,112 @@ export default function ChatRoomScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+      {/* 참여자 보기 모달 */}
+      <Modal
+        visible={participantModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setParticipantModalOpen(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setParticipantModalOpen(false)}>
+          <View style={styles.centerModalOverlay}>
+            <TouchableWithoutFeedback>
+              <View style={[styles.participantModalBox, isDarkMode && styles.participantModalBoxDark]}>
+                <View style={styles.participantModalHeader}>
+                  <Text style={[styles.modalTitle, isDarkMode && styles.participantModalTitleDark]}>
+                    참여자 {chatParticipants.length}명
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.participantCloseBtn}
+                    onPress={() => setParticipantModalOpen(false)}
+                  >
+                    <Ionicons name="close" size={20} color={isDarkMode ? '#fff' : '#111827'} />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={[styles.modalDesc, isDarkMode && styles.participantModalDescDark]}>
+                  내보내도 기존 채팅 기록은 삭제되지 않습니다.
+                </Text>
+
+                <ScrollView
+                  style={styles.participantList}
+                  contentContainerStyle={styles.participantListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {chatParticipants.length === 0 ? (
+                    <Text style={[styles.participantEmptyText, isDarkMode && styles.participantMetaTextDark]}>
+                      참여자를 찾지 못했습니다.
+                    </Text>
+                  ) : (
+                    chatParticipants.map((participant) => {
+                      const removing = participantActionLoadingId === participant.userId;
+
+                      return (
+                        <View
+                          key={participant.userId}
+                          style={[
+                            styles.participantRow,
+                            isDarkMode && styles.participantRowDark,
+                          ]}
+                        >
+                          <View style={styles.participantAvatar}>
+                            <Text style={styles.participantAvatarText}>
+                              {participant.name.trim().slice(0, 1) || '?'}
+                            </Text>
+                          </View>
+
+                          <View style={styles.participantInfo}>
+                            <View style={styles.participantNameRow}>
+                              <Text
+                                style={[
+                                  styles.participantName,
+                                  isDarkMode && styles.participantNameDark,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {participant.name}
+                                {participant.isMe ? ' (나)' : ''}
+                              </Text>
+                              {participant.isOwner ? (
+                                <Text style={styles.participantOwnerBadge}>방장</Text>
+                              ) : null}
+                            </View>
+                            <Text
+                              style={[
+                                styles.participantMetaText,
+                                isDarkMode && styles.participantMetaTextDark,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {participant.meta}
+                            </Text>
+                          </View>
+
+                          {participant.canRemove ? (
+                            <TouchableOpacity
+                              style={[
+                                styles.participantRemoveBtn,
+                                removing && styles.participantRemoveBtnDisabled,
+                              ]}
+                              onPress={() => handleRemoveParticipant(participant)}
+                              disabled={removing}
+                            >
+                              <Text style={styles.participantRemoveText}>
+                                {removing ? '처리중' : '내보내기'}
+                              </Text>
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+                      );
+                    })
+                  )}
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+      {/* 신고하기 모달 */}
       <Modal visible={reportModalOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setReportModalOpen(false)}>
           <View style={styles.centerModalOverlay}>
@@ -4681,7 +5911,15 @@ export default function ChatRoomScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#fff' },
+  screenDark: {
+    // backgroundColor: '#000',
+  },
   flex: { flex: 1 },
+  messageListLayer: {
+    flex: 1,
+    zIndex: 0,
+    elevation: 0,
+  },
 
   header: {
     height: 56,
@@ -4691,6 +5929,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
     backgroundColor: '#fff',
+  },
+  headerDark: {
+    borderBottomColor: '#1f2937',
+    // backgroundColor: '#000',
   },
   reportTargetText: {
     marginTop: 10,
@@ -4712,12 +5954,18 @@ const styles = StyleSheet.create({
     color: '#111827',
     maxWidth: 180,
   },
+  headerNameDark: {
+    color: '#fff',
+  },
 
   headerSub: {
     marginTop: 2,
     fontSize: 11,
     color: '#9ca3af',
     maxWidth: 180,
+  },
+  headerSubDark: {
+    color: '#d1d5db',
   },
 
 
@@ -4866,6 +6114,214 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 
+  projectPanel: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 10,
+  },
+
+  projectPanelCollapsed: {
+    paddingVertical: 9,
+    gap: 0,
+  },
+
+  projectPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+
+  projectPanelTitleBox: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  projectPanelActions: {
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 6,
+  },
+
+  projectCollapseDock: {
+    height: 28,
+    marginTop: -14,
+    paddingRight: 16,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    zIndex: 10,
+    elevation: 10,
+  },
+
+  projectCollapseFloatBtn: {
+    width: 30,
+    height: 24,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+
+  projectCollapseFloatBtnDark: {
+    backgroundColor: 'rgba(17,24,39,0.74)',
+    borderColor: 'rgba(75,85,99,0.78)',
+  },
+
+  projectBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+
+  projectBadge: {
+    borderRadius: 999,
+    backgroundColor: '#ecfdf5',
+    color: '#166534',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+
+  projectStatusBadge: {
+    borderRadius: 999,
+    backgroundColor: '#111827',
+    color: '#fff',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+
+  projectPanelTitle: {
+    marginTop: 7,
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+
+  projectPanelMeta: {
+    marginTop: 3,
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  projectOpenBtn: {
+    minHeight: 34,
+    borderRadius: 10,
+    backgroundColor: '#166534',
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  projectOpenText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  projectPanelGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  projectCalendarStrip: {
+    flexDirection: 'row',
+    gap: 3,
+  },
+
+  projectCalendarDay: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 1,
+  },
+
+  projectCalendarDayActive: {
+    backgroundColor: '#166534',
+    borderColor: '#166534',
+  },
+
+  projectCalendarWeekday: {
+    color: '#6b7280',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+
+  projectCalendarWeekdayActive: {
+    color: '#fff',
+  },
+
+  projectCalendarDate: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+
+  projectCalendarDateActive: {
+    color: '#fff',
+  },
+
+  projectCalendarDots: {
+    minHeight: 6,
+    flexDirection: 'row',
+    gap: 3,
+  },
+
+  projectScheduleDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#166534',
+  },
+
+  projectReportDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#dc2626',
+  },
+
+  projectPanelItem: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    padding: 10,
+    gap: 4,
+  },
+
+  projectPanelLabel: {
+    color: '#6b7280',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+
+  projectPanelValue: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
   incomingCallControlPanel: {
     bottom: 170,
   },
@@ -4900,13 +6356,13 @@ const styles = StyleSheet.create({
   },
 
   linkText: {
-    color: '#2563eb',
+    color: '#166534',
     textDecorationLine: 'underline',
     fontWeight: '800',
   },
 
   myLinkText: {
-    color: '#dbeafe',
+    color: '#dcfce7',
     textDecorationLine: 'underline',
     fontWeight: '800',
   },
@@ -5212,8 +6668,8 @@ const styles = StyleSheet.create({
   },
 
   reviewPreviewBadgeOpen: {
-    backgroundColor: '#eff6ff',
-    color: '#2563eb',
+    backgroundColor: '#ecfdf5',
+    color: '#166534',
   },
 
   reviewPreviewSummary: {
@@ -5262,11 +6718,52 @@ const styles = StyleSheet.create({
 
   list: {
     padding: 16,
-    gap: 10,
+    paddingTop: 6,
   },
 
   messageRow: {
     maxWidth: '78%',
+    marginTop: 10,
+  },
+
+  messageRowAfterDate: {
+    marginTop: 6,
+  },
+
+  groupedMessageRow: {
+    marginTop: 3,
+  },
+
+  dateDividerWrap: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 6,
+  },
+
+  firstDateDividerWrap: {
+    marginTop: 2,
+  },
+
+  dateDividerPill: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(17,24,39,0.07)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+
+  dateDividerPillDark: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+  },
+
+  dateDividerText: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  dateDividerTextDark: {
+    color: '#f3f4f6',
   },
 
   myRow: {
@@ -5279,6 +6776,19 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
 
+  senderName: {
+    maxWidth: 230,
+    marginBottom: 4,
+    marginLeft: 4,
+    color: '#6b7280',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  senderNameDark: {
+    color: '#d1d5db',
+  },
+
   bubble: {
     borderRadius: 16,
     paddingHorizontal: 14,
@@ -5286,7 +6796,7 @@ const styles = StyleSheet.create({
   },
 
   myBubble: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     borderBottomRightRadius: 6,
   },
 
@@ -5340,13 +6850,13 @@ const styles = StyleSheet.create({
 
   placeMessageHint: {
     marginTop: 8,
-    color: '#2563eb',
+    color: '#166534',
     fontSize: 12,
     fontWeight: '900',
   },
 
   myPlaceMessageHint: {
-    color: '#dbeafe',
+    color: '#dcfce7',
   },
 
   completionActions: {
@@ -5393,7 +6903,7 @@ const styles = StyleSheet.create({
   },
 
   myCompletionAnsweredText: {
-    color: '#dbeafe',
+    color: '#dcfce7',
   },
 
   chatImage: {
@@ -5412,7 +6922,7 @@ const styles = StyleSheet.create({
 
   unreadText: {
     fontSize: 11,
-    color: '#2563eb',
+    color: '#166534',
     fontWeight: '800',
   },
 
@@ -5432,15 +6942,29 @@ const styles = StyleSheet.create({
   },
 
   inputRow: {
-
     flexDirection: 'row',
     gap: 8,
     paddingHorizontal: 12,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderTopColor: 'transparent',
+    backgroundColor: 'transparent',
     alignItems: 'flex-end',
+  },
+
+  inputRowDark: {
+    borderTopColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+
+  inputWindowLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  inputOverlayPosition: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
   },
 
   plusBtn: {
@@ -5454,6 +6978,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
 
+  plusBtnDark: {
+    borderColor: '#374151',
+    backgroundColor: '#111827',
+  },
+
   input: {
     flex: 1,
     minHeight: 46,
@@ -5464,10 +6993,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     backgroundColor: '#fff',
+    color: '#111827',
+  },
+
+  inputPressTarget: {
+    flex: 1,
+  },
+
+  inputDark: {
+    borderColor: '#374151',
+    backgroundColor: '#111827',
+    color: '#fff',
   },
 
   sendBtn: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     borderRadius: 14,
     paddingHorizontal: 16,
     height: 46,
@@ -5477,6 +7017,10 @@ const styles = StyleSheet.create({
 
   sendBtnDisabled: {
     opacity: 0.6,
+  },
+
+  controlPressed: {
+    opacity: 0.72,
   },
 
   sendBtnText: {
@@ -5506,6 +7050,154 @@ const styles = StyleSheet.create({
     padding: 18,
   },
 
+  participantModalBox: {
+    width: '100%',
+    maxHeight: '76%',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 18,
+  },
+
+  participantModalBoxDark: {
+    backgroundColor: '#111827',
+  },
+
+  participantModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+
+  participantModalTitleDark: {
+    color: '#fff',
+  },
+
+  participantModalDescDark: {
+    color: '#9ca3af',
+  },
+
+  participantCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  participantList: {
+    marginTop: 14,
+  },
+
+  participantListContent: {
+    gap: 10,
+    paddingBottom: 2,
+  },
+
+  participantRow: {
+    minHeight: 58,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  participantRowDark: {
+    backgroundColor: '#1f2937',
+    borderColor: '#374151',
+  },
+
+  participantAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#166534',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+
+  participantAvatarText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+
+  participantInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  participantNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  participantName: {
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#111827',
+  },
+
+  participantNameDark: {
+    color: '#fff',
+  },
+
+  participantOwnerBadge: {
+    overflow: 'hidden',
+    borderRadius: 999,
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    color: '#166534',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+
+  participantMetaText: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+
+  participantMetaTextDark: {
+    color: '#d1d5db',
+  },
+
+  participantEmptyText: {
+    paddingVertical: 18,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+
+  participantRemoveBtn: {
+    borderRadius: 999,
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexShrink: 0,
+  },
+
+  participantRemoveBtnDisabled: {
+    opacity: 0.5,
+  },
+
+  participantRemoveText: {
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
@@ -5523,7 +7215,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 13,
     fontWeight: '800',
-    color: '#2563eb',
+    color: '#166534',
   },
 
   appointmentDateOptions: {
@@ -5587,8 +7279,8 @@ const styles = StyleSheet.create({
   },
 
   appointmentTimeBtnActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: '#166534',
+    borderColor: '#166534',
   },
 
   appointmentTimeBtnDisabled: {
@@ -5622,7 +7314,7 @@ const styles = StyleSheet.create({
 
   primaryModalBtn: {
     marginTop: 14,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#166534',
     borderRadius: 12,
     paddingVertical: 13,
     alignItems: 'center',

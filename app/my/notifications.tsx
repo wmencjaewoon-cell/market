@@ -28,6 +28,11 @@ type NotificationItem = {
   data?: {
     listingId?: number | string;
     roomId?: number | string;
+    estimateRequestId?: number | string;
+    projectId?: string;
+    projectMemberId?: string;
+    inviteToken?: string;
+    staffMemberId?: string;
   } | null;
 };
 
@@ -108,7 +113,54 @@ export default function NotificationsScreen() {
       const roomId = item.data?.roomId;
       if (roomId) {
         router.push(`/chat/${roomId}` as any);
+        return;
       }
+    }
+
+    if (item.type === 'estimate_request') {
+      const estimateRequestId = item.data?.estimateRequestId;
+      if (estimateRequestId) {
+        router.push(`/store/estimates?requestId=${estimateRequestId}` as any);
+        return;
+      }
+
+      router.push('/store/estimates' as any);
+      return;
+    }
+
+    if (item.type === 'project_invite') {
+      const inviteToken = item.data?.inviteToken;
+      if (inviteToken) {
+        router.push(`/project-invite/${inviteToken}` as any);
+        return;
+      }
+
+      const projectId = item.data?.projectId;
+      if (projectId) {
+        router.push(`/store/projects?projectId=${projectId}` as any);
+      }
+    }
+
+    if (
+      item.type === 'project_schedule_created' ||
+      item.type === 'project_schedule_updated' ||
+      item.type === 'project_daily_report_created'
+    ) {
+      const roomId = item.data?.roomId;
+      if (roomId) {
+        router.push(`/chat/${roomId}` as any);
+        return;
+      }
+
+      const projectId = item.data?.projectId;
+      if (projectId) {
+        router.push(`/store/projects?projectId=${projectId}` as any);
+      }
+    }
+
+    if (item.type === 'staff_password_reset_request') {
+      router.push('/store/staff' as any);
+      return;
     }
   };
 

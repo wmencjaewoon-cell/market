@@ -632,12 +632,13 @@ function createStyles(theme: AppPalette) {
 
   infoWrap: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'space-between',
   },
 
   badgesRow: {
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
     gap: 6,
     marginBottom: 6,
   },
@@ -647,6 +648,7 @@ function createStyles(theme: AppPalette) {
   },
 
   badge: {
+    maxWidth: '100%',
     fontSize: 11,
     fontWeight: '700',
     paddingHorizontal: 8,

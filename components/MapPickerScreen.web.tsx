@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   desc: { marginTop: 6, color: '#6b7280', lineHeight: 20 },
   btn: {
     marginTop: 14,
-    backgroundColor: '#2563eb',
+    backgroundColor: 'theme.primary',
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',

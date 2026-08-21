@@ -68,6 +68,16 @@ type AdminUser = {
   can_create_listing: boolean | null;
   restricted_until: string | null;
   restriction_reason: string | null;
+  store_subscription_plan?: string | null;
+  store_subscription_status?: string | null;
+  store_subscription_expires_at?: string | null;
+};
+
+type StoreSubscriptionAdminRow = {
+  user_id: string;
+  plan: string | null;
+  status: string | null;
+  expires_at: string | null;
 };
 
 type AdminListing = {
@@ -131,6 +141,8 @@ type AdminEstimateRequest = {
   id: number;
   user_id: string | null;
   category: string;
+  applicant_name: string | null;
+  applicant_phone: string | null;
   region: string | null;
   address: string | null;
   title: string;
@@ -216,6 +228,21 @@ function isDeletionPendingUser(item: AdminUser) {
 
 function isVerifiedStoreUser(item: AdminUser) {
   return item.user_type === 'store' && !!item.business_verified;
+}
+
+function isPremiumStoreUser(item: AdminUser) {
+  return (
+    isVerifiedStoreUser(item) &&
+    item.store_subscription_plan === 'premium' &&
+    (item.store_subscription_status || 'active') === 'active'
+  );
+}
+
+function getStorePlanLabel(plan?: string | null) {
+  if (plan === 'premium') return '프리미엄';
+  if (plan === 'basic') return '베이직';
+  if (plan === 'partner') return '파트너';
+  return '무료';
 }
 
 function getUserStatusLabel(item: AdminUser) {
@@ -466,7 +493,7 @@ const goToListingDetail = (listingId: number) => {
       supabase
         .from('estimate_requests')
         .select(
-          'id, user_id, category, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
+          'id, user_id, category, applicant_name, applicant_phone, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
         )
         .order('created_at', { ascending: false })
         .limit(80),
@@ -491,9 +518,41 @@ const goToListingDetail = (listingId: number) => {
     }
     if (verifiedStoreResult.error) throw verifiedStoreResult.error;
 
+    const rawUsers = (userResult.data || []) as AdminUser[];
+    const userIds = rawUsers.map((item) => item.id);
+    let subscriptionMap = new Map<string, StoreSubscriptionAdminRow>();
+
+    if (userIds.length > 0) {
+      const { data: subscriptionData, error: subscriptionError } = await supabase
+        .from('store_subscriptions')
+        .select('user_id, plan, status, expires_at')
+        .in('user_id', userIds);
+
+      if (subscriptionError && subscriptionError.code !== 'PGRST205') {
+        console.log('가게 구독 조회 실패:', subscriptionError);
+      } else {
+        subscriptionMap = new Map(
+          ((subscriptionData || []) as StoreSubscriptionAdminRow[]).map((item) => [
+            item.user_id,
+            item,
+          ])
+        );
+      }
+    }
+
     setNotices((noticeResult.data || []) as NoticeItem[]);
     setReports((reportResult.data || []) as ReportItem[]);
-    setUsers((userResult.data || []) as AdminUser[]);
+    setUsers(
+      rawUsers.map((item) => {
+        const subscription = subscriptionMap.get(item.id);
+        return {
+          ...item,
+          store_subscription_plan: subscription?.plan || 'free',
+          store_subscription_status: subscription?.status || 'active',
+          store_subscription_expires_at: subscription?.expires_at || null,
+        };
+      })
+    );
     setListings((listingResult.data || []) as AdminListing[]);
     setStoreRequests(
       storeRequestResult.error
@@ -702,6 +761,45 @@ const goToListingDetail = (listingId: number) => {
 
     if (error) {
       showAdminAlert('가게 인증 취소 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const toggleStorePremium = async (item: AdminUser) => {
+    if (!isVerifiedStoreUser(item)) {
+      showAdminAlert('프리미엄 권한', '가게 인증 완료 계정에만 프리미엄 권한을 줄 수 있습니다.');
+      return;
+    }
+
+    const enabled = isPremiumStoreUser(item);
+    const nextPlan = enabled ? 'free' : 'premium';
+    const ok = await confirmAdminAction(
+      enabled ? '프리미엄 권한 해제' : '프리미엄 권한 부여',
+      `${item.display_name || item.email || item.id} 계정을 ${
+        enabled
+          ? '무료 플랜으로 되돌릴까요?'
+          : '프리미엄 플랜으로 변경할까요?\n직원 무제한, 상품 50개, 전체 통계, 지도 강조가 적용됩니다.'
+      }`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_set_store_subscription', {
+      p_store_user_id: item.id,
+      p_plan: nextPlan,
+      p_status: 'active',
+      p_expires_at: null,
+    });
+
+    if (error) {
+      showAdminAlert(
+        '프리미엄 권한 변경 실패',
+        error.message.includes('function')
+          ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
+          : error.message
+      );
       return;
     }
 
@@ -1321,7 +1419,9 @@ const filteredStoreRequests = useMemo(() => {
             #{item.id} · {item.category} · {new Date(item.created_at).toLocaleString()}
           </Text>
           <Text style={styles.metaText}>지역: {[item.region, item.address].filter(Boolean).join(' ') || '-'}</Text>
-          <Text style={styles.metaText}>문의자: {item.user_id || '-'}</Text>
+          <Text style={styles.metaText}>
+            문의자: {item.applicant_name || item.user_id || '-'} · {item.applicant_phone || '전화번호 미입력'}
+          </Text>
           <Text style={styles.metaText}>
             배정 상태: {assignedStore ? assignedStore.display_name || assignedStore.id : '관리자 배정 대기 / 디자인위쇼'}
           </Text>
@@ -1422,6 +1522,12 @@ const filteredStoreRequests = useMemo(() => {
           <Text style={styles.metaText}>
             가게 인증: {item.business_verified ? '인증완료' : item.store_verification_status || 'none'}
           </Text>
+          {isVerifiedStoreUser(item) ? (
+            <Text style={styles.metaText}>
+              가게 플랜: {getStorePlanLabel(item.store_subscription_plan)} ·{' '}
+              {item.store_subscription_status || 'active'}
+            </Text>
+          ) : null}
           {item.business_number ? (
             <Text style={styles.metaText}>사업자번호: {item.business_number}</Text>
           ) : null}
@@ -1493,12 +1599,23 @@ const filteredStoreRequests = useMemo(() => {
           </TouchableOpacity>
 
           {isVerifiedStoreUser(item) ? (
-            <TouchableOpacity
-              style={styles.dangerBtn}
-              onPress={() => revokeStoreVerification(item)}
-            >
-              <Text style={styles.dangerText}>가게인증 취소</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={isPremiumStoreUser(item) ? styles.secondaryBtn : styles.approveBtn}
+                onPress={() => toggleStorePremium(item)}
+              >
+                <Text style={isPremiumStoreUser(item) ? styles.secondaryText : styles.approveText}>
+                  {isPremiumStoreUser(item) ? '프리미엄 해제' : '프리미엄 권한 부여'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.dangerBtn}
+                onPress={() => revokeStoreVerification(item)}
+              >
+                <Text style={styles.dangerText}>가게인증 취소</Text>
+              </TouchableOpacity>
+            </>
           ) : null}
         </View>
       ))}

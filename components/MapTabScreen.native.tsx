@@ -49,6 +49,9 @@ type StoreMapItem = {
   store_tax_invoice_available: boolean | null;
   store_latitude: number;
   store_longitude: number;
+  is_premium?: boolean;
+  map_highlight?: boolean;
+  recommended_exposure?: boolean;
 };
 
 type GroupedMarker = {
@@ -70,6 +73,28 @@ type MapLayer = 'listings' | 'stores';
 function roundCoord(value: number, precision = 3) {
   const factor = Math.pow(10, precision);
   return Math.round(value * factor) / factor;
+}
+
+function getDailyStoreExposureScore(storeId: string) {
+  const seed = `${new Date().toISOString().slice(0, 10)}:${storeId}`;
+  return seed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+function shouldShowRecommendedStore(store: StoreMapItem) {
+  return !!store.recommended_exposure && getDailyStoreExposureScore(store.id) % 3 === 0;
+}
+
+function sortStoresByExposure(stores: StoreMapItem[]) {
+  return [...stores].sort((a, b) => {
+    const recommendationScore =
+      Number(shouldShowRecommendedStore(b)) - Number(shouldShowRecommendedStore(a));
+    if (recommendationScore !== 0) return recommendationScore;
+
+    const highlightScore = Number(!!b.map_highlight) - Number(!!a.map_highlight);
+    if (highlightScore !== 0) return highlightScore;
+
+    return (a.display_name || '').localeCompare(b.display_name || '');
+  });
 }
 
 export default function MapTabScreen() {
@@ -168,7 +193,36 @@ export default function MapTabScreen() {
       return;
     }
 
-    setStores(data as StoreMapItem[]);
+    const storeRows = (data || []) as StoreMapItem[];
+    const storeIds = storeRows.map((store) => store.id);
+    let exposureMap = new Map<string, any>();
+
+    if (storeIds.length > 0) {
+      const { data: exposureData, error: exposureError } = await supabase
+        .from('store_public_exposure')
+        .select('store_user_id, is_premium, map_highlight, recommended_exposure')
+        .in('store_user_id', storeIds);
+
+      if (exposureError && exposureError.code !== 'PGRST205') {
+        console.log('지도 가게 노출 정보 조회 실패:', exposureError);
+      } else {
+        exposureMap = new Map((exposureData || []).map((row: any) => [row.store_user_id, row]));
+      }
+    }
+
+    setStores(
+      sortStoresByExposure(
+        storeRows.map((store) => {
+          const exposure = exposureMap.get(store.id);
+          return {
+            ...store,
+            is_premium: !!exposure?.is_premium,
+            map_highlight: !!exposure?.map_highlight,
+            recommended_exposure: !!exposure?.recommended_exposure,
+          };
+        })
+      )
+    );
   };
 
   const loadMyLocation = async () => {
@@ -448,6 +502,9 @@ export default function MapTabScreen() {
         {activeLayer === 'stores' &&
           groupedStoreMarkers.map((group) => {
             const single = group.items.length === 1;
+            const first = group.items[0];
+            const highlighted = group.items.some((store) => store.map_highlight);
+            const recommended = single && shouldShowRecommendedStore(first);
 
             return (
               <Marker
@@ -460,9 +517,15 @@ export default function MapTabScreen() {
                 onPress={() => handleStoreMarkerPress(group)}
               >
                 <View collapsable={false} style={styles.markerOuter}>
-                  <View style={[styles.markerWrap, styles.storeMarkerWrap]}>
+                  <View
+                    style={[
+                      styles.markerWrap,
+                      styles.storeMarkerWrap,
+                      highlighted && styles.storeMarkerHighlight,
+                    ]}
+                  >
                     <Text style={styles.markerText}>
-                      {single ? '가게' : String(group.items.length)}
+                      {single ? (recommended ? '추천' : '가게') : String(group.items.length)}
                     </Text>
                   </View>
                 </View>
@@ -580,7 +643,14 @@ export default function MapTabScreen() {
       {selectedStore ? (
         <View style={styles.bottomCard}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.storeBadge}>인증 가게</Text>
+            <Text
+              style={[
+                styles.storeBadge,
+                shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
+              ]}
+            >
+              {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
+            </Text>
 
             <TouchableOpacity onPress={() => setSelectedStore(null)}>
               <Text style={styles.closeText}>닫기</Text>
@@ -685,7 +755,14 @@ export default function MapTabScreen() {
                       </View>
 
                       <View style={styles.groupInfo}>
-                        <Text style={styles.storeGroupBadge}>인증 가게</Text>
+                        <Text
+                          style={[
+                            styles.storeGroupBadge,
+                            shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
+                          ]}
+                        >
+                          {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
+                        </Text>
                         <Text style={styles.groupTitle} numberOfLines={1}>
                           {store.display_name || '가게'}
                         </Text>
@@ -802,6 +879,12 @@ markerWrap: {
     backgroundColor: '#059669',
   },
 
+  storeMarkerHighlight: {
+    backgroundColor: '#166534',
+    borderColor: '#bbf7d0',
+    minWidth: 46,
+  },
+
   markerText: {
     color: '#fff',
     fontSize: 12,
@@ -896,6 +979,10 @@ markerWrap: {
     fontSize: 12,
     fontWeight: '800',
     marginBottom: 10,
+  },
+  recommendedStoreBadge: {
+    backgroundColor: '#14532d',
+    color: '#fff',
   },
   storeIntro: {
     marginTop: 8,

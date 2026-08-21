@@ -3,7 +3,7 @@ import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Image,
@@ -114,12 +114,15 @@ export default function EstimateCreateScreen() {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
   });
+  const [applicantName, setApplicantName] = useState('');
+  const [applicantPhone, setApplicantPhone] = useState('');
   const [budget, setBudget] = useState('');
   const [preferredContact, setPreferredContact] = useState('앱 채팅');
   const [description, setDescription] = useState('');
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [stores, setStores] = useState<any[]>([]);
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
+  const [activeStoreRequestIds, setActiveStoreRequestIds] = useState<Record<string, number>>({});
   const [selectedStoreCategory, setSelectedStoreCategory] = useState('전체');
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [selectedStaffUserId, setSelectedStaffUserId] = useState<string | null>(null);
@@ -143,6 +146,66 @@ export default function EstimateCreateScreen() {
     void loadDefaultRegion();
     void loadStores();
   }, []);
+
+  const loadActiveStoreRequests = useCallback(async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from('estimate_requests')
+      .select(`
+        id,
+        preferred_store_user_id,
+        assigned_store_user_id,
+        status,
+        estimate_request_store_statuses (
+          store_user_id,
+          status
+        )
+      `)
+      .eq('user_id', user.id)
+      .neq('status', 'closed')
+      .neq('status', 'hidden')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.log('진행 중 견적문의 조회 실패:', error);
+      setActiveStoreRequestIds({});
+      return;
+    }
+
+    const nextMap = (data || []).reduce<Record<string, number>>((acc, item: any) => {
+      const storeId = item.assigned_store_user_id || item.preferred_store_user_id;
+      if (!storeId || acc[storeId]) return acc;
+
+      const storeStatus = (item.estimate_request_store_statuses || []).find(
+        (row: any) => row.store_user_id === storeId
+      )?.status;
+
+      if (storeStatus === 'completed' || storeStatus === 'closed') return acc;
+
+      acc[storeId] = Number(item.id);
+      return acc;
+    }, {});
+
+    setActiveStoreRequestIds(nextMap);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setActiveStoreRequestIds({});
+      return;
+    }
+
+    void loadActiveStoreRequests();
+  }, [loadActiveStoreRequests, user]);
+
+  useEffect(() => {
+    if (selectedStoreId && activeStoreRequestIds[selectedStoreId]) {
+      setSelectedStoreId(null);
+      setSelectedStaffUserId(null);
+    }
+  }, [activeStoreRequestIds, selectedStoreId]);
 
   const loadStores = async () => {
     const { data, error } = await supabase
@@ -214,6 +277,15 @@ export default function EstimateCreateScreen() {
   }, [selectedStoreId, staffMembers]);
 
   const calendarDays = useMemo(() => getMonthDays(calendarMonth), [calendarMonth]);
+  const calendarWeeks = useMemo(() => {
+    const weeks: typeof calendarDays[] = [];
+
+    for (let index = 0; index < calendarDays.length; index += 7) {
+      weeks.push(calendarDays.slice(index, index + 7));
+    }
+
+    return weeks;
+  }, [calendarDays]);
 
   const calendarTitle = useMemo(() => {
     return calendarMonth.toLocaleDateString('ko-KR', {
@@ -321,6 +393,20 @@ export default function EstimateCreateScreen() {
     if (rowError) throw rowError;
   };
 
+  const sendEstimateNotification = async (requestId: number) => {
+    try {
+      const { error } = await supabase.functions.invoke('send-estimate-request-notification', {
+        body: { requestId },
+      });
+
+      if (error) {
+        console.log('견적문의 알림 전송 실패:', error);
+      }
+    } catch (error) {
+      console.log('견적문의 알림 전송 실패:', error);
+    }
+  };
+
   const submitEstimate = async () => {
     if (submitting) return;
 
@@ -331,9 +417,32 @@ export default function EstimateCreateScreen() {
 
     const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
+    const trimmedApplicantName = applicantName.trim();
+    const trimmedApplicantPhone = applicantPhone.trim();
+    const phoneDigits = trimmedApplicantPhone.replace(/[^\d]/g, '');
 
     if (selectedCategories.length === 0) {
       setMessage('필요한 공사 종류를 하나 이상 선택해 주세요.');
+      return;
+    }
+
+    if (!trimmedApplicantName) {
+      setMessage('신청자 이름을 입력해 주세요.');
+      return;
+    }
+
+    if (!trimmedApplicantPhone) {
+      setMessage('신청자 전화번호를 입력해 주세요.');
+      return;
+    }
+
+    if (phoneDigits.length < 8) {
+      setMessage('연락 가능한 전화번호를 입력해 주세요.');
+      return;
+    }
+
+    if (selectedStoreId && activeStoreRequestIds[selectedStoreId]) {
+      setMessage('이미 이 가게에 진행 중인 견적문의가 있습니다. 기존 문의가 종료된 뒤 새로 신청할 수 있습니다.');
       return;
     }
 
@@ -361,6 +470,8 @@ export default function EstimateCreateScreen() {
         .insert({
           user_id: user.id,
           category: selectedCategoryText,
+          applicant_name: trimmedApplicantName,
+          applicant_phone: trimmedApplicantPhone,
           region: region.trim() || null,
           address: address.trim() || null,
           budget: budget.trim() || null,
@@ -380,7 +491,12 @@ export default function EstimateCreateScreen() {
         .single();
 
       if (error) {
-        setMessage(error.message);
+        setMessage(
+          error.message.includes('이미 이 가게에 진행 중인 견적문의')
+            ? '이미 이 가게에 진행 중인 견적문의가 있습니다. 기존 문의가 종료된 뒤 새로 신청할 수 있습니다.'
+            : error.message
+        );
+        await loadActiveStoreRequests();
         return;
       }
 
@@ -393,6 +509,8 @@ export default function EstimateCreateScreen() {
       for (let i = 0; i < imageUris.length; i += 1) {
         await uploadEstimateImage(requestId, imageUris[i], i);
       }
+
+      await sendEstimateNotification(requestId);
 
       showAlert(
         '견적문의 등록 완료',
@@ -484,6 +602,7 @@ export default function EstimateCreateScreen() {
           >
             {filteredStores.map((store) => {
               const active = selectedStoreId === store.id;
+              const alreadyRequested = Boolean(activeStoreRequestIds[store.id]);
               const avatarUrl =
                 store.avatar_path || store.avatar_url
                   ? getProfileImageUrl(store.avatar_path || store.avatar_url)
@@ -492,10 +611,20 @@ export default function EstimateCreateScreen() {
               return (
                 <TouchableOpacity
                   key={store.id}
-                  style={[styles.storeCard, active && styles.storeCardActive]}
+                  style={[
+                    styles.storeCard,
+                    active && styles.storeCardActive,
+                    alreadyRequested && styles.storeCardLocked,
+                  ]}
                   onPress={() => {
+                    if (alreadyRequested) {
+                      setMessage('이미 이 가게에 진행 중인 견적문의가 있습니다. 기존 문의가 종료된 뒤 새로 신청할 수 있습니다.');
+                      return;
+                    }
+
                     setSelectedStoreId(active ? null : store.id);
                     setSelectedStaffUserId(null);
+                    setMessage('');
                   }}
                 >
                   <View style={styles.storeAvatar}>
@@ -518,6 +647,11 @@ export default function EstimateCreateScreen() {
                     <View style={styles.selectedBadge}>
                       <Ionicons name="checkmark" size={13} color="#fff" />
                       <Text style={styles.selectedBadgeText}>선택됨</Text>
+                    </View>
+                  ) : alreadyRequested ? (
+                    <View style={styles.requestedBadge}>
+                      <Ionicons name="document-text-outline" size={13} color={theme.text} />
+                      <Text style={styles.requestedBadgeText}>신청됨</Text>
                     </View>
                   ) : null}
                 </TouchableOpacity>
@@ -581,6 +715,28 @@ export default function EstimateCreateScreen() {
       </View>
 
       <View style={styles.formSection}>
+        <Text style={styles.label}>신청자 이름</Text>
+        <TextInput
+          style={styles.input}
+          value={applicantName}
+          onChangeText={setApplicantName}
+          placeholder="예: 홍길동"
+          autoCapitalize="none"
+        />
+
+        <Text style={styles.label}>신청자 전화번호</Text>
+        <TextInput
+          style={styles.input}
+          value={applicantPhone}
+          onChangeText={setApplicantPhone}
+          placeholder="예: 010-1234-5678"
+          keyboardType="phone-pad"
+          autoCapitalize="none"
+        />
+        <Text style={styles.fieldHelp}>
+          입력한 연락처는 선택한 가게의 상담과 견적 확인에 사용됩니다.
+        </Text>
+
         <Text style={styles.label}>제목</Text>
         <TextInput
           style={styles.input}
@@ -611,7 +767,7 @@ export default function EstimateCreateScreen() {
           onPress={() => setCalendarVisible((visible) => !visible)}
           activeOpacity={0.8}
         >
-          <View>
+          <View style={styles.dateSelectTextBox}>
             <Text style={styles.dateSelectLabel}>
               {desiredDate || '날짜를 선택해 주세요'}
             </Text>
@@ -645,22 +801,30 @@ export default function EstimateCreateScreen() {
             </View>
 
             <View style={styles.dayGrid}>
-              {calendarDays.map((cell) => {
-                const active = !!cell.dateText && cell.dateText === desiredDate;
+              {calendarWeeks.map((week, weekIndex) => (
+                <View key={`week-${weekIndex}`} style={styles.dayRow}>
+                  {week.map((cell) => {
+                    const active = !!cell.dateText && cell.dateText === desiredDate;
 
-                return (
-                  <TouchableOpacity
-                    key={cell.key}
-                    style={[styles.dayCell, active && styles.dayCellActive]}
-                    disabled={!cell.dateText}
-                    onPress={() => cell.dateText && selectDesiredDate(cell.dateText)}
-                  >
-                    <Text style={[styles.dayText, active && styles.dayTextActive]}>
-                      {cell.day || ''}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
+                    return (
+                      <TouchableOpacity
+                        key={cell.key}
+                        style={[
+                          styles.dayCell,
+                          !cell.dateText && styles.dayCellEmpty,
+                          active && styles.dayCellActive,
+                        ]}
+                        disabled={!cell.dateText}
+                        onPress={() => cell.dateText && selectDesiredDate(cell.dateText)}
+                      >
+                        <Text style={[styles.dayText, active && styles.dayTextActive]}>
+                          {cell.day || ''}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
 
             <View style={styles.calendarQuickRow}>
@@ -847,6 +1011,9 @@ function createStyles(theme: AppPalette) {
     borderColor: theme.primary,
     backgroundColor: theme.primarySoft,
   },
+  storeCardLocked: {
+    opacity: 0.72,
+  },
   storeAvatar: {
     width: 44,
     height: 44,
@@ -871,6 +1038,17 @@ function createStyles(theme: AppPalette) {
     gap: 3,
   },
   selectedBadgeText: { color: theme.primaryText, fontSize: 11, fontWeight: '900' },
+  requestedBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: theme.surfaceSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  requestedBadgeText: { color: theme.text, fontSize: 11, fontWeight: '900' },
   staffSelectBox: {
     borderRadius: 14,
     backgroundColor: theme.surfaceMuted,
@@ -908,6 +1086,13 @@ function createStyles(theme: AppPalette) {
   },
   formSection: { gap: 10 },
   label: { color: theme.text, fontSize: 14, fontWeight: '900' },
+  fieldHelp: {
+    marginTop: -4,
+    color: theme.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
   input: {
     minHeight: 48,
     borderWidth: 1,
@@ -932,6 +1117,10 @@ function createStyles(theme: AppPalette) {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  dateSelectTextBox: {
+    flex: 1,
+    minWidth: 0,
   },
   dateSelectLabel: { color: theme.text, fontSize: 15, fontWeight: '900' },
   dateSelectHelp: { marginTop: 3, color: theme.primary, fontSize: 12, fontWeight: '700' },
@@ -958,22 +1147,43 @@ function createStyles(theme: AppPalette) {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  calendarTitle: { color: theme.text, fontSize: 16, fontWeight: '900' },
-  weekdayRow: { flexDirection: 'row' },
+  calendarTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
   weekdayText: {
-    width: `${100 / 7}%`,
+    flex: 1,
     textAlign: 'center',
     color: theme.textMuted,
     fontSize: 12,
+    lineHeight: 16,
     fontWeight: '900',
   },
-  dayGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  dayGrid: {
+    gap: 4,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
   dayCell: {
-    width: `${100 / 7}%`,
+    flex: 1,
     aspectRatio: 1,
+    minHeight: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
+  },
+  dayCellEmpty: {
+    opacity: 0,
   },
   dayCellActive: { backgroundColor: theme.primary },
   dayText: { color: theme.text, fontSize: 14, fontWeight: '800' },

@@ -125,6 +125,20 @@ function getStoreVerificationStatusLabel(status?: StoreVerificationStatus | null
   return '가게 인증 전';
 }
 
+function isValidKoreanBusinessNumber(value: string) {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 10) return false;
+
+  const weights = [1, 3, 7, 1, 3, 7, 1, 3];
+  const sum =
+    weights.reduce((acc, weight, index) => acc + Number(digits[index]) * weight, 0) +
+    Math.floor((Number(digits[8]) * 5) / 10) +
+    ((Number(digits[8]) * 5) % 10);
+  const checkDigit = (10 - (sum % 10)) % 10;
+
+  return checkDigit === Number(digits[9]);
+}
+
 export default function ProfileEditScreen() {
   const params = useLocalSearchParams<{
     lat?: string;
@@ -471,6 +485,12 @@ export default function ProfileEditScreen() {
       return;
     }
 
+    if (!isValidKoreanBusinessNumber(businessNumber)) {
+      setBusinessVerified(false);
+      setMessage('유효한 사업자등록번호 형식이 아닙니다.');
+      return;
+    }
+
     try {
       setVerifyingBusiness(true);
       setMessage('');
@@ -555,6 +575,11 @@ export default function ProfileEditScreen() {
 
       if (!businessNumber.trim()) {
         setMessage('사업자등록번호를 입력해 주세요.');
+        return;
+      }
+
+      if (!isValidKoreanBusinessNumber(cleanBusinessNumber)) {
+        setMessage('유효한 사업자등록번호 형식이 아닙니다.');
         return;
       }
 

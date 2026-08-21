@@ -110,6 +110,9 @@ export async function getOrCreateStoreRoom(
     .from('chat_rooms')
     .select('id')
     .is('listing_id', null)
+    .is('project_id', null)
+    .is('estimate_request_id', null)
+    .is('estimate_quote_id', null)
     .eq('store_user_id', storeUserId)
     .eq('created_by', me)
     .maybeSingle();
@@ -138,6 +141,7 @@ export async function getOrCreateStoreRoom(
     .insert({
       listing_id: null,
       store_user_id: storeUserId,
+      room_type: 'store',
       assigned_staff_user_id: assignedStaffUserId || null,
       created_by: me,
     })

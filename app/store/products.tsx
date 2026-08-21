@@ -13,6 +13,12 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  DEFAULT_STORE_LIMITS,
+  getPlanLabel,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
@@ -36,6 +42,7 @@ function getStatusLabel(status?: string) {
 export default function StoreProductsScreen() {
   const { user } = useAuth();
   const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
+  const [limits, setLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [items, setItems] = useState<any[]>([]);
   const [filter, setFilter] = useState<ProductFilter>('all');
   const [loading, setLoading] = useState(true);
@@ -49,34 +56,40 @@ export default function StoreProductsScreen() {
     setStoreAccess(access);
 
     if (!access.canManageStore || !access.storeUserId) {
+      setLimits(DEFAULT_STORE_LIMITS);
       setItems([]);
       setLoading(false);
       return;
     }
 
-    const { data, error } = await supabase
-      .from('listings')
-      .select(`
-        *,
-        listing_images (
-          id,
-          image_path,
-          sort_order
-        )
-      `)
-      .eq('store_user_id', access.storeUserId)
-      .eq('seller_type', 'store')
-      .order('created_at', { ascending: false });
+    const [limitData, productResult] = await Promise.all([
+      getStoreSubscriptionLimits(access.storeUserId),
+      supabase
+        .from('listings')
+        .select(`
+          *,
+          listing_images (
+            id,
+            image_path,
+            sort_order
+          )
+        `)
+        .eq('store_user_id', access.storeUserId)
+        .eq('seller_type', 'store')
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) {
-      console.log('가게 상품 조회 실패:', error);
+    setLimits(limitData);
+
+    if (productResult.error) {
+      console.log('가게 상품 조회 실패:', productResult.error);
       setItems([]);
       setLoading(false);
       return;
     }
 
     setItems(
-      (data || []).map((item: any) => ({
+      (productResult.data || []).map((item: any) => ({
         ...item,
         listing_images: [...(item.listing_images || [])].sort(
           (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
@@ -94,6 +107,7 @@ export default function StoreProductsScreen() {
     if (filter === 'all') return items;
     return items.filter((item) => item.status === filter);
   }, [filter, items]);
+  const productLimitReached = items.length >= limits.productLimit;
 
   const updateStatus = async (item: any, status: 'active' | 'reserved' | 'done') => {
     if (!user || !storeAccess?.storeUserId) return;
@@ -158,6 +172,14 @@ export default function StoreProductsScreen() {
 
   const duplicateProduct = async (item: any) => {
     if (!user || !storeAccess?.storeUserId) return;
+
+    if (productLimitReached) {
+      Alert.alert(
+        '상품 등록 한도',
+        `현재 ${getPlanLabel(limits.plan)} 플랜에서는 상품 등록이 ${limits.productLimit}개까지 가능합니다.`
+      );
+      return;
+    }
 
     const ok =
       Platform.OS === 'web'
@@ -266,12 +288,18 @@ export default function StoreProductsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>상품 관리</Text>
         <TouchableOpacity
-          style={styles.addBtn}
+          style={[styles.addBtn, productLimitReached && styles.disabledBtn]}
           onPress={() => router.push('/store/product-create' as any)}
+          disabled={productLimitReached}
         >
           <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addText}>상품 등록하기</Text>
+          <Text style={styles.addText}>
+            {productLimitReached ? '상품 등록 한도 도달' : '상품 등록하기'}
+          </Text>
         </TouchableOpacity>
+        <Text style={styles.limitText}>
+          현재 플랜 {getPlanLabel(limits.plan)} · 상품 {items.length}/{limits.productLimit}개
+        </Text>
       </View>
 
       <View style={styles.filterRow}>
@@ -331,7 +359,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
+  disabledBtn: { opacity: 0.55 },
   addText: { color: '#fff', fontSize: 15, fontWeight: '900' },
+  limitText: { color: '#6b7280', fontSize: 12, fontWeight: '800' },
   filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
   filterBtn: {
     borderWidth: 1,

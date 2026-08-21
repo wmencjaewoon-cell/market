@@ -76,3 +76,15 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/request-password-reset/deno.json"
 entrypoint = "./functions/request-password-reset/index.ts"
+
+[functions.send-estimate-request-notification]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-estimate-request-notification/deno.json"
+entrypoint = "./functions/send-estimate-request-notification/index.ts"
+
+[functions.send-project-invite-notification]
+enabled = true
+verify_jwt = true
+import_map = "./functions/send-project-invite-notification/deno.json"
+entrypoint = "./functions/send-project-invite-notification/index.ts"

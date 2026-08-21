@@ -11,6 +11,13 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  DEFAULT_STORE_LIMITS,
+  formatLimit,
+  getPlanLabel,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
@@ -19,8 +26,11 @@ type CreatedStaffCredential = {
   password: string;
 };
 
-async function getEdgeFunctionErrorMessage(error: any) {
-  const fallback = error?.message || '직원 계정 생성 중 오류가 발생했습니다.';
+async function getEdgeFunctionErrorMessage(
+  error: any,
+  fallbackMessage = '요청 처리 중 오류가 발생했습니다.'
+) {
+  const fallback = error?.message || fallbackMessage;
   const response = error?.context;
 
   if (!response || typeof response.clone !== 'function') {
@@ -44,6 +54,7 @@ export default function StoreStaffScreen() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<any | null>(null);
   const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
+  const [limits, setLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [staffRows, setStaffRows] = useState<any[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
@@ -60,6 +71,7 @@ export default function StoreStaffScreen() {
   const [creating, setCreating] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null);
+  const [resettingPasswordId, setResettingPasswordId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
   const loadStaff = useCallback(async () => {
@@ -74,23 +86,29 @@ export default function StoreStaffScreen() {
     setProfile(profileData || null);
 
     if (!access.canManageStore || !access.storeUserId) {
+      setLimits(DEFAULT_STORE_LIMITS);
       setStaffRows([]);
       setLoading(false);
       return;
     }
 
-    const { data, error } = await supabase
-      .from('store_staff_members')
-      .select('*')
-      .eq('store_user_id', access.storeUserId)
-      .order('created_at', { ascending: false });
+    const [limitData, staffResult] = await Promise.all([
+      getStoreSubscriptionLimits(access.storeUserId),
+      supabase
+        .from('store_staff_members')
+        .select('*')
+        .eq('store_user_id', access.storeUserId)
+        .order('created_at', { ascending: false }),
+    ]);
 
-    if (error) {
-      console.log('직원 목록 조회 실패:', error);
-      setMessage(error.message);
+    setLimits(limitData);
+
+    if (staffResult.error) {
+      console.log('직원 목록 조회 실패:', staffResult.error);
+      setMessage(staffResult.error.message);
       setStaffRows([]);
     } else {
-      setStaffRows(data || []);
+      setStaffRows(staffResult.data || []);
     }
 
     setLoading(false);
@@ -114,6 +132,8 @@ export default function StoreStaffScreen() {
     () => staffRows.filter((item) => item.status === 'inactive'),
     [staffRows]
   );
+  const staffLimitReached =
+    limits.staffLimit != null && activeStaff.length >= limits.staffLimit;
 
   const createStaff = async () => {
     if (creating) return;
@@ -125,6 +145,13 @@ export default function StoreStaffScreen() {
 
     if (!storeAccess?.canManageStore || !storeAccess.storeUserId) {
       setMessage('직원 생성 권한이 없습니다.');
+      return;
+    }
+
+    if (staffLimitReached) {
+      setMessage(
+        `현재 ${getPlanLabel(limits.plan)} 플랜에서는 직원 등록이 ${limits.staffLimit}명까지 가능합니다.`
+      );
       return;
     }
 
@@ -144,7 +171,10 @@ export default function StoreStaffScreen() {
       });
 
       if (error) {
-        const errorMessage = await getEdgeFunctionErrorMessage(error);
+        const errorMessage = await getEdgeFunctionErrorMessage(
+          error,
+          '직원 계정 생성 중 오류가 발생했습니다.'
+        );
         setMessage(
           errorMessage.includes('Function not found')
             ? 'create-store-staff Edge Function을 먼저 배포해 주세요.'
@@ -251,6 +281,65 @@ export default function StoreStaffScreen() {
     );
   };
 
+  const resetStaffPassword = (item: any) => {
+    if (!storeAccess?.canManageStore || !storeAccess.storeUserId || resettingPasswordId) return;
+
+    Alert.alert(
+      '직원 비밀번호 재발급',
+      `${item.display_name || item.staff_login_id} 직원의 임시 비밀번호를 새로 발급할까요? 기존 비밀번호로는 로그인할 수 없게 됩니다.`,
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '재발급',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setResettingPasswordId(item.id);
+              setMessage('');
+              setCreatedCredential(null);
+
+              const { data, error } = await supabase.functions.invoke('reset-store-staff-password', {
+                body: {
+                  staffMemberId: item.id,
+                  storeUserId: storeAccess.storeUserId,
+                },
+              });
+
+              if (error) {
+                const errorMessage = await getEdgeFunctionErrorMessage(
+                  error,
+                  '직원 비밀번호 재발급 중 오류가 발생했습니다.'
+                );
+                setMessage(
+                  errorMessage.includes('Function not found')
+                    ? 'reset-store-staff-password Edge Function을 먼저 배포해 주세요.'
+                    : errorMessage
+                );
+                return;
+              }
+
+              if (data?.error) {
+                setMessage(data.error);
+                return;
+              }
+
+              setCreatedCredential({
+                loginId: data.loginId || item.staff_login_id,
+                password: data.password,
+              });
+              setMessage(data?.message || '직원 임시 비밀번호를 재발급했습니다.');
+              await loadStaff();
+            } catch (error: any) {
+              setMessage(error?.message || '직원 비밀번호 재발급 중 오류가 발생했습니다.');
+            } finally {
+              setResettingPasswordId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Stack.Screen options={{ title: '직원 관리' }} />
@@ -269,6 +358,12 @@ export default function StoreStaffScreen() {
         <>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>직원 계정 생성</Text>
+            <View style={styles.limitBox}>
+              <Text style={styles.limitText}>
+                현재 플랜 {getPlanLabel(limits.plan)} · 직원 {activeStaff.length}/
+                {formatLimit(limits.staffLimit, '명')}
+              </Text>
+            </View>
             <TextInput
               style={styles.input}
               value={displayName}
@@ -293,11 +388,13 @@ export default function StoreStaffScreen() {
             <RoleSelector value={role} onChange={setRole} />
 
             <TouchableOpacity
-              style={[styles.primaryBtn, creating && styles.disabledBtn]}
+              style={[styles.primaryBtn, (creating || staffLimitReached) && styles.disabledBtn]}
               onPress={createStaff}
-              disabled={creating}
+              disabled={creating || staffLimitReached}
             >
-              <Text style={styles.primaryText}>{creating ? '생성 중...' : '직원 생성'}</Text>
+              <Text style={styles.primaryText}>
+                {creating ? '생성 중...' : staffLimitReached ? '직원 등록 한도 도달' : '직원 생성'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -326,6 +423,7 @@ export default function StoreStaffScreen() {
             editPosition={editPosition}
             editRole={editRole}
             updatingId={updatingId}
+            resettingPasswordId={resettingPasswordId}
             onStartEdit={startEditStaff}
             onCancelEdit={cancelEditStaff}
             onSaveEdit={saveStaffEdit}
@@ -333,6 +431,7 @@ export default function StoreStaffScreen() {
             setEditPhone={setEditPhone}
             setEditPosition={setEditPosition}
             setEditRole={setEditRole}
+            onResetPassword={resetStaffPassword}
             onDeactivate={deactivateStaff}
           />
 
@@ -360,6 +459,7 @@ function StaffSection({
   editPosition,
   editRole,
   updatingId,
+  resettingPasswordId,
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
@@ -367,6 +467,7 @@ function StaffSection({
   setEditPhone,
   setEditPosition,
   setEditRole,
+  onResetPassword,
   onDeactivate,
 }: {
   title: string;
@@ -380,6 +481,7 @@ function StaffSection({
   editPosition?: string;
   editRole?: 'staff' | 'manager';
   updatingId?: string | null;
+  resettingPasswordId?: string | null;
   onStartEdit?: (item: any) => void;
   onCancelEdit?: () => void;
   onSaveEdit?: () => void;
@@ -387,6 +489,7 @@ function StaffSection({
   setEditPhone?: (value: string) => void;
   setEditPosition?: (value: string) => void;
   setEditRole?: (value: 'staff' | 'manager') => void;
+  onResetPassword?: (item: any) => void;
   onDeactivate?: (item: any) => void;
 }) {
   return (
@@ -468,25 +571,43 @@ function StaffSection({
                 </Text>
               ) : null}
             </View>
-            {!readonly && onStartEdit ? (
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => onStartEdit(item)}
-                disabled={deactivatingId === item.id}
-              >
-                <Text style={styles.editText}>수정</Text>
-              </TouchableOpacity>
-            ) : null}
-            {!readonly && onDeactivate ? (
-              <TouchableOpacity
-                style={styles.deactivateBtn}
-                onPress={() => onDeactivate(item)}
-                disabled={deactivatingId === item.id}
-              >
-                <Text style={styles.deactivateText}>
-                  {deactivatingId === item.id ? '처리 중' : '퇴사'}
-                </Text>
-              </TouchableOpacity>
+            {!readonly ? (
+              <View style={styles.staffActions}>
+                {onResetPassword ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.passwordBtn,
+                      resettingPasswordId === item.id && styles.disabledBtn,
+                    ]}
+                    onPress={() => onResetPassword(item)}
+                    disabled={resettingPasswordId === item.id || deactivatingId === item.id}
+                  >
+                    <Text style={styles.passwordText}>
+                      {resettingPasswordId === item.id ? '발급중' : '비밀번호'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {onStartEdit ? (
+                  <TouchableOpacity
+                    style={styles.editBtn}
+                    onPress={() => onStartEdit(item)}
+                    disabled={deactivatingId === item.id}
+                  >
+                    <Text style={styles.editText}>수정</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {onDeactivate ? (
+                  <TouchableOpacity
+                    style={styles.deactivateBtn}
+                    onPress={() => onDeactivate(item)}
+                    disabled={deactivatingId === item.id}
+                  >
+                    <Text style={styles.deactivateText}>
+                      {deactivatingId === item.id ? '처리 중' : '퇴사'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ) : null}
           </View>
         );
@@ -550,6 +671,15 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardTitle: { color: '#111827', fontSize: 17, fontWeight: '900' },
+  limitBox: {
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  limitText: { color: '#14532d', fontSize: 13, fontWeight: '900' },
   input: {
     minHeight: 48,
     borderWidth: 1,
@@ -622,6 +752,10 @@ const styles = StyleSheet.create({
   staffMeta: { marginTop: 3, color: '#6b7280', fontSize: 12, fontWeight: '700' },
   managerHelp: { marginTop: 4, color: '#166534', fontSize: 12, fontWeight: '900' },
   inactiveText: { marginTop: 4, color: '#b45309', fontSize: 12, fontWeight: '900' },
+  staffActions: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
   editCard: {
     borderRadius: 14,
     backgroundColor: '#fff',
@@ -633,6 +767,13 @@ const styles = StyleSheet.create({
   editTitle: { color: '#111827', fontSize: 15, fontWeight: '900' },
   roleHelp: { color: '#6b7280', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   editActionRow: { flexDirection: 'row', gap: 8 },
+  passwordBtn: {
+    borderRadius: 999,
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  passwordText: { color: '#14532d', fontSize: 12, fontWeight: '900' },
   editBtn: {
     borderRadius: 999,
     backgroundColor: '#ecfdf5',

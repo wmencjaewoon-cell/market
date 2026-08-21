@@ -61,6 +61,7 @@ export default function CreateSellScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  
   useFocusEffect(
     useCallback(() => {
       if (params.regionChanged || params.regionName) return;
@@ -88,6 +89,7 @@ export default function CreateSellScreen() {
 
 
 
+  
   useEffect(() => {
     const init = async () => {
       if (!params.regionName) {
@@ -161,6 +163,7 @@ export default function CreateSellScreen() {
     }
   };
 
+  //사진선택
   const pickImage = async () => {
     try {
       setErrorMessage('');
@@ -194,6 +197,7 @@ export default function CreateSellScreen() {
     }
   };
 
+  //사진 업로드
   const uploadImageToStorage = async (
     listingId: number,
     uri: string,
@@ -240,6 +244,7 @@ export default function CreateSellScreen() {
     return filePath;
   };
 
+  // 임시저장
   const saveDraft = async () => {
     const draft = {
       title,
@@ -261,6 +266,7 @@ export default function CreateSellScreen() {
   };
 
 
+  // 임시저장 불러오기
   const loadDraft = async () => {
     try {
       const saved = await AsyncStorage.getItem(DRAFT_KEY);
@@ -296,6 +302,7 @@ export default function CreateSellScreen() {
 
   const MAX_DISTANCE_KM = 26;
 
+  // 대표 동네와 거래 희망 장소 간 거리 계산
   const distanceFromRegion =
     activeRegionLat != null &&
       activeRegionLng != null &&
@@ -304,9 +311,11 @@ export default function CreateSellScreen() {
       ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
       : null;
 
+      // 대표 동네와 거래 희망 장소 간 거리가 너무 먼지 확인
   const isTooFarFromRegion =
     distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
 
+  // 수량 단위 최종값 가져오기
   const getFinalQuantityUnit = () => {
     if (quantityUnit === '기타') {
       return customQuantityUnit.trim();
@@ -315,6 +324,7 @@ export default function CreateSellScreen() {
     return quantityUnit;
   };
 
+  // 판매글 등록
   const handleCreate = async () => {
     try {
       setErrorMessage('');

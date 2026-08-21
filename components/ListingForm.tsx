@@ -28,6 +28,7 @@ import {
 import { type AppPalette } from '../contexts/theme';
 import { useAppTheme } from '../hooks/use-app-theme';
 import { checkProhibitedContent } from '../lib/prohibited';
+import { getPlanLabel, getStoreSubscriptionLimits } from '../lib/storeLimits';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../lib/storeStaff';
 import { supabase } from '../lib/supabase';
 
@@ -754,6 +755,28 @@ export default function ListingForm({
       const activeStoreAccess = storeAccess || (await loadCurrentProfile());
       const canCreateAsManagedStore =
         !!activeStoreAccess?.canManageStore && !!activeStoreAccess.storeUserId;
+
+      if (canCreateAsManagedStore) {
+        const storeLimits = await getStoreSubscriptionLimits(activeStoreAccess.storeUserId);
+        const { count: currentProductCount, error: countError } = await supabase
+          .from('listings')
+          .select('id', { count: 'exact', head: true })
+          .eq('store_user_id', activeStoreAccess.storeUserId)
+          .eq('seller_type', 'store')
+          .neq('status', 'delete_pending');
+
+        if (countError) {
+          setErrorMessage(countError.message);
+          return;
+        }
+
+        if ((currentProductCount || 0) >= storeLimits.productLimit) {
+          setErrorMessage(
+            `현재 ${getPlanLabel(storeLimits.plan)} 플랜에서는 상품 등록이 ${storeLimits.productLimit}개까지 가능합니다.`
+          );
+          return;
+        }
+      }
 
       const guard = canCreateAsManagedStore
         ? await canUseApp()

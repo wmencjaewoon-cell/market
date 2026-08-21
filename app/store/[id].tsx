@@ -15,6 +15,7 @@ import { getOrCreateStoreRoom } from '../../lib/chat';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { getStoreCategoryLabel } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
+import { useAppTheme } from '../../hooks/use-app-theme';
 
 export default function StoreDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -376,14 +377,32 @@ function StoreAction({
   disabled?: boolean;
   onPress: () => void;
 }) {
+  const theme = useAppTheme();
+  const iconColor = disabled ? theme.textSubtle : theme.text;
+
   return (
     <TouchableOpacity
-      style={[styles.actionBtn, disabled && styles.actionBtnDisabled]}
+      style={[
+        styles.actionBtn,
+        {
+          backgroundColor: disabled ? theme.surfaceMuted : theme.surface,
+          borderColor: theme.border,
+        },
+      ]}
       onPress={onPress}
       disabled={disabled}
     >
-      <Ionicons name={icon} size={18} color={disabled ? '#9ca3af' : '#111827'} />
-      <Text style={[styles.actionText, disabled && styles.actionTextDisabled]}>{label}</Text>
+      <Ionicons name={icon} size={18} color={iconColor} />
+      <Text
+        style={[
+          styles.actionText,
+          {
+            color: disabled ? theme.textSubtle : theme.text,
+          },
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }

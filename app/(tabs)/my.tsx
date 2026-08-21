@@ -210,6 +210,7 @@ export default function MyScreen() {
                 <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
                 <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
                 <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                <MenuItem title="현장관리" onPress={() => router.push('/store/projects' as any)} />
                 <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
               </Section>
             ) : null}
@@ -217,6 +218,7 @@ export default function MyScreen() {
             {isActiveStoreStaff && !isStoreManager ? (
               <Section title="직원 업무">
                 <MenuItem title="배정된 견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                <MenuItem title="배정된 현장관리" onPress={() => router.push('/store/projects' as any)} />
               </Section>
             ) : null}
 
