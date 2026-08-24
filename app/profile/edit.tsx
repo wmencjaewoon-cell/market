@@ -20,6 +20,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { getOAuthProfileDefaults } from '../../lib/oauthProfile';
+import { getPersonalPhoneValidationMessage, normalizePersonalPhone } from '../../lib/phone';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { supabase } from '../../lib/supabase';
 
@@ -191,6 +192,7 @@ export default function ProfileEditScreen() {
   const hasStoreLocationParams = Boolean(params.lat && params.lng);
   const isApprovedStoreProfile =
     userType === 'store' && storeVerificationStatus === 'approved';
+  const shouldValidatePersonalPhone = userType === 'personal' && !isStaffProfile;
 
   useEffect(() => {
     if (!user) return;
@@ -607,6 +609,15 @@ export default function ProfileEditScreen() {
       }
     }
 
+    if (shouldValidatePersonalPhone) {
+      const phoneValidationMessage = getPersonalPhoneValidationMessage(phone);
+
+      if (phoneValidationMessage) {
+        setMessage(phoneValidationMessage);
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       setMessage('');
@@ -756,13 +767,16 @@ export default function ProfileEditScreen() {
         }
       }
 
+      const nextProfilePhone = shouldValidatePersonalPhone
+        ? normalizePersonalPhone(phone)
+        : phone.trim();
       const { error } = await supabase
         .from('profiles')
         .update({
           user_type: isStaffProfile ? 'staff' : 'personal',
           display_name: displayName.trim(),
           email: email.trim() || null,
-          phone: phone.trim() || null,
+          phone: nextProfilePhone || null,
           is_phone_public: false,
           avatar_path: nextAvatarPath,
           representative_name: null,
@@ -1136,8 +1150,10 @@ export default function ProfileEditScreen() {
         <TextInput
           style={styles.input}
           value={phone}
-          onChangeText={setPhone}
-          placeholder="01012345678"
+          onChangeText={(value) => {
+            setPhone(shouldValidatePersonalPhone ? normalizePersonalPhone(value).slice(0, 11) : value);
+          }}
+          placeholder={shouldValidatePersonalPhone ? '01012341234' : '01012345678'}
           placeholderTextColor={theme.textSubtle}
           keyboardType="phone-pad"
           editable={!(userType === 'store' && storeVerificationStatus === 'approved')}

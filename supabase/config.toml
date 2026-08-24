@@ -88,3 +88,9 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/send-project-invite-notification/deno.json"
 entrypoint = "./functions/send-project-invite-notification/index.ts"
+
+[functions.log-auth-activity]
+enabled = true
+verify_jwt = true
+import_map = "./functions/log-auth-activity/deno.json"
+entrypoint = "./functions/log-auth-activity/index.ts"

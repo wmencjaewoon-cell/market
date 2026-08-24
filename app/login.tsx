@@ -16,6 +16,11 @@ import {
 import { type AppPalette } from '../contexts/theme';
 import { useAppTheme } from '../hooks/use-app-theme';
 import { getOAuthProfileDefaults } from '../lib/oauthProfile';
+import {
+  getPersonalPhoneValidationMessage,
+  isValidPersonalPhone,
+  normalizePersonalPhone,
+} from '../lib/phone';
 import { supabase } from '../lib/supabase';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -200,7 +205,7 @@ const fetchExistingProfile = async (userId: string) => {
 const getFormProfileInput = () => ({
   userType,
   displayName: displayName.trim(),
-  phone: phone.trim(),
+  phone: userType === 'personal' ? normalizePersonalPhone(phone) : phone.trim(),
 });
 
 const saveProfile = async (
@@ -208,13 +213,17 @@ const saveProfile = async (
   currentUser?: User
 ) => {
   const profileUser = currentUser ?? (await getCurrentUser());
+  const nextPhone =
+    profileInput.userType === 'personal'
+      ? normalizePersonalPhone(profileInput.phone)
+      : profileInput.phone.trim();
 
   const { error } = await supabase.from('profiles').upsert({
     id: profileUser.id,
     user_type: profileInput.userType,
     display_name: profileInput.displayName,
     email: email.trim() || profileUser.email || null,
-    phone: profileInput.phone || null,
+    phone: nextPhone || null,
     is_phone_public: profileInput.userType === 'store',
     status: 'active',
     trust_points: 0,
@@ -240,8 +249,11 @@ const validateProfileInput = () => {
     return false;
   }
 
-  if (!phone.trim()) {
-    setMessage('전화번호를 입력해 주세요.');
+  const phoneValidationMessage =
+    userType === 'personal' ? getPersonalPhoneValidationMessage(phone) : !phone.trim() ? '전화번호를 입력해 주세요.' : '';
+
+  if (phoneValidationMessage) {
+    setMessage(phoneValidationMessage);
     return false;
   }
 
@@ -258,10 +270,17 @@ const getProfileInputFromMetadata = (currentUser: User) => {
     return null;
   }
 
+  if (metadataUserType === 'personal' && !isValidPersonalPhone(oauthProfile.phone)) {
+    return null;
+  }
+
   return {
     userType: metadataUserType,
     displayName: oauthProfile.displayName,
-    phone: oauthProfile.phone,
+    phone:
+      metadataUserType === 'personal'
+        ? normalizePersonalPhone(oauthProfile.phone)
+        : oauthProfile.phone,
   };
 };
 
@@ -562,7 +581,7 @@ const handleEmailAuth = async () => {
           data: {
             user_type: userType,
             display_name: displayName.trim(),
-            phone: phone.trim(),
+            phone: userType === 'personal' ? normalizePersonalPhone(phone) : phone.trim(),
             is_phone_public: userType === 'store',
           },
         },
@@ -804,9 +823,11 @@ return (
 
         <TextInput
           style={styles.input}
-          placeholder="전화번호"
+          placeholder={userType === 'personal' ? '01012341234' : '전화번호'}
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={(value) => {
+            setPhone(userType === 'personal' ? normalizePersonalPhone(value).slice(0, 11) : value);
+          }}
           keyboardType="phone-pad"
         />
       </>

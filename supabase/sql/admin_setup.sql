@@ -111,11 +111,32 @@ for select
 using (public.is_admin());
 
 drop policy if exists profiles_admin_update on public.profiles;
-create policy profiles_admin_update
-on public.profiles
-for update
-using (public.is_admin())
-with check (public.is_admin());
+
+revoke update (role) on public.profiles from anon;
+revoke update (role) on public.profiles from authenticated;
+
+create or replace function public.prevent_client_profile_role_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.role is distinct from new.role and auth.role() in ('anon', 'authenticated') then
+    raise exception 'Profile role cannot be changed from the app client.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists prevent_client_profile_role_change on public.profiles;
+create trigger prevent_client_profile_role_change
+before update on public.profiles
+for each row
+execute function public.prevent_client_profile_role_change();
+
+revoke all on function public.prevent_client_profile_role_change() from public;
 
 drop policy if exists reports_admin_select on public.reports;
 create policy reports_admin_select

@@ -23,7 +23,8 @@ type AdminTab =
   | 'users'
   | 'listings'
   | 'stores'
-  | 'estimates';
+  | 'estimates'
+  | 'security';
 
 type AdminViewMode = 'grid' | 'list';
 type DateFilter = 'all' | 'today' | '7days' | '30days';
@@ -151,6 +152,26 @@ type AdminEstimateRequest = {
   fallback_destination: string | null;
   preferred_store_user_id: string | null;
   assigned_store_user_id: string | null;
+  created_at: string;
+};
+
+type AdminAuthActivityLog = {
+  id: number;
+  user_id: string;
+  event_type: string;
+  ip_address: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  timezone: string | null;
+  platform: string | null;
+  app_version: string | null;
+  device_name: string | null;
+  os_name: string | null;
+  os_version: string | null;
+  user_agent: string | null;
   created_at: string;
 };
 
@@ -304,6 +325,23 @@ function getDateFilterLabel(filter: DateFilter) {
   return '전체 날짜';
 }
 
+function getAuthActivityEventLabel(eventType: string) {
+  if (eventType === 'login') return '로그인';
+  if (eventType === 'logout') return '로그아웃';
+  return eventType;
+}
+
+function getAuthActivityLocationText(item: AdminAuthActivityLog) {
+  const location = [item.country, item.region, item.city].filter(Boolean).join(' ');
+  if (location) return location;
+
+  if (item.latitude != null && item.longitude != null) {
+    return `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`;
+  }
+
+  return '위치 정보 없음';
+}
+
 function isListingHidden(item: AdminListing) {
   return item.status === 'hidden';
 }
@@ -330,6 +368,7 @@ export default function AdminScreen() {
   const [storeRequests, setStoreRequests] = useState<StoreVerificationRequest[]>([]);
   const [estimateRequests, setEstimateRequests] = useState<AdminEstimateRequest[]>([]);
   const [verifiedStores, setVerifiedStores] = useState<VerifiedStoreOption[]>([]);
+  const [authActivityLogs, setAuthActivityLogs] = useState<AdminAuthActivityLog[]>([]);
 
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
@@ -416,6 +455,9 @@ const goToListingDetail = (listingId: number) => {
       runExpiredListingCleanup(false),
       refreshExpiredUserRestrictions(),
     ]);
+    const authActivityRetentionStart = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     const [
       noticeResult,
@@ -425,6 +467,7 @@ const goToListingDetail = (listingId: number) => {
       storeRequestResult,
       estimateRequestResult,
       verifiedStoreResult,
+      authActivityResult,
     ] = await Promise.all([
       supabase
         .from('notices')
@@ -504,6 +547,32 @@ const goToListingDetail = (listingId: number) => {
         .eq('business_verified', true)
         .order('display_name', { ascending: true })
         .limit(80),
+      supabase
+        .from('auth_activity_logs')
+        .select(
+          [
+            'id',
+            'user_id',
+            'event_type',
+            'ip_address',
+            'country',
+            'region',
+            'city',
+            'latitude',
+            'longitude',
+            'timezone',
+            'platform',
+            'app_version',
+            'device_name',
+            'os_name',
+            'os_version',
+            'user_agent',
+            'created_at',
+          ].join(', ')
+        )
+        .gte('created_at', authActivityRetentionStart)
+        .order('created_at', { ascending: false })
+        .limit(200),
     ]);
 
     if (noticeResult.error) throw noticeResult.error;
@@ -517,6 +586,12 @@ const goToListingDetail = (listingId: number) => {
       throw estimateRequestResult.error;
     }
     if (verifiedStoreResult.error) throw verifiedStoreResult.error;
+    if (
+      authActivityResult.error &&
+      !['42P01', 'PGRST116', 'PGRST200', 'PGRST205'].includes(authActivityResult.error.code || '')
+    ) {
+      throw authActivityResult.error;
+    }
 
     const rawUsers = (userResult.data || []) as AdminUser[];
     const userIds = rawUsers.map((item) => item.id);
@@ -565,6 +640,11 @@ const goToListingDetail = (listingId: number) => {
         : ((estimateRequestResult.data || []) as AdminEstimateRequest[])
     );
     setVerifiedStores((verifiedStoreResult.data || []) as VerifiedStoreOption[]);
+    setAuthActivityLogs(
+      authActivityResult.error
+        ? []
+        : ((authActivityResult.data || []) as unknown as AdminAuthActivityLog[])
+    );
   }, [refreshExpiredUserRestrictions, runExpiredListingCleanup]);
 
   const loadAdmin = useCallback(async () => {
@@ -1079,6 +1159,7 @@ const filteredStoreRequests = useMemo(() => {
       label: '견적문의',
       value: estimateRequests.filter((item) => !item.assigned_store_user_id).length,
     },
+    { label: '접속기록', value: authActivityLogs.length },
     { label: '사용자', value: users.length },
     { label: '게시글', value: listings.length },
   ];
@@ -1124,6 +1205,7 @@ const filteredStoreRequests = useMemo(() => {
             ['reports', '신고'],
             ['stores', '가게인증'],
             ['estimates', '견적'],
+            ['security', '접속기록'],
             ['users', '사용자'],
             ['listings', '게시글'],
           ].map(([key, label]) => (
@@ -1455,6 +1537,48 @@ const filteredStoreRequests = useMemo(() => {
               );
             })}
           </ScrollView>
+        </View>
+      );
+    })}
+  </View>
+) : null}
+
+        {activeTab === 'security' ? (
+  <View>
+    <View style={styles.toolCard}>
+      <Text style={styles.toolTitle}>최근 90일 접속기록 {authActivityLogs.length}건</Text>
+      <Text style={styles.desc}>
+        IP와 위치는 서버가 받은 요청 헤더 기준입니다. 위치 헤더가 없는 접속은 IP와 기기 정보만 표시됩니다.
+      </Text>
+    </View>
+
+    {authActivityLogs.map((item) => {
+      const user = users.find((userItem) => userItem.id === item.user_id);
+      const userText = user?.display_name || user?.email || item.user_id;
+      const deviceText = [
+        item.platform,
+        item.device_name,
+        [item.os_name, item.os_version].filter(Boolean).join(' '),
+        item.app_version ? `앱 ${item.app_version}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
+      return (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{getAuthActivityEventLabel(item.event_type)}</Text>
+          <Text style={styles.desc}>{new Date(item.created_at).toLocaleString()}</Text>
+          <Text style={styles.metaText}>계정: {userText}</Text>
+          <Text style={styles.metaText}>사용자 ID: {item.user_id}</Text>
+          <Text style={styles.metaText}>IP: {item.ip_address || 'IP 정보 없음'}</Text>
+          <Text style={styles.metaText}>위치: {getAuthActivityLocationText(item)}</Text>
+          <Text style={styles.metaText}>시간대: {item.timezone || '-'}</Text>
+          <Text style={styles.metaText}>기기: {deviceText || '-'}</Text>
+          {item.user_agent ? (
+            <Text style={styles.metaText} numberOfLines={3}>
+              User-Agent: {item.user_agent}
+            </Text>
+          ) : null}
         </View>
       );
     })}
