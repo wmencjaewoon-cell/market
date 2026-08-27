@@ -856,24 +856,24 @@ function createStyles(theme: AppPalette) {
   },
 
   markerOuter: {
-  width: 38,
-  height: 38,
-  alignItems: 'center',
-  justifyContent: 'center',
-  overflow: 'visible',
-},
+    width: 72,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
 
-markerWrap: {
-  minWidth: 38,
-  height: 38,
-  paddingHorizontal: 10,
-  borderRadius: 22,
-  alignItems: 'center',
-  justifyContent: 'center',
-  borderWidth: 2,
-  borderColor: '#fff',
-  overflow: 'hidden',
-},
+  markerWrap: {
+    minWidth: 42,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    overflow: 'hidden',
+  },
 
   storeMarkerWrap: {
     backgroundColor: '#059669',
@@ -882,7 +882,7 @@ markerWrap: {
   storeMarkerHighlight: {
     backgroundColor: '#166534',
     borderColor: '#bbf7d0',
-    minWidth: 46,
+    minWidth: 54,
   },
 
   markerText: {

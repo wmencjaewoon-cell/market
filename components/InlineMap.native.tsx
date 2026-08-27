@@ -1,13 +1,26 @@
-import { View } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 
-export default function InlineMap({ latitude, longitude }: any) {
+type Props = {
+  latitude: number;
+  longitude: number;
+  onPress?: () => void;
+};
+
+export default function InlineMap({ latitude, longitude, onPress }: Props) {
   if (!latitude || !longitude) return null;
 
   return (
-    <View style={{ height: 150, borderRadius: 12, overflow: 'hidden' }}>
+    <Pressable
+      style={styles.container}
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? '지도 크게 보기' : undefined}
+    >
       <MapView
-        style={{ flex: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
         scrollEnabled={false}
         zoomEnabled={false}
         rotateEnabled={false}
@@ -22,6 +35,14 @@ export default function InlineMap({ latitude, longitude }: any) {
       >
         <Marker coordinate={{ latitude, longitude }} />
       </MapView>
-    </View>
+    </Pressable>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    height: 150,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+});

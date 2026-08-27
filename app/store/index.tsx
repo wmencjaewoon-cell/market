@@ -11,8 +11,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { PremiumStoreBadge } from '../../components/StorePlanModal';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { STORE_CATEGORY_OPTIONS, getStoreCategoryLabel } from '../../lib/storeCategories';
+import {
+  fetchStorePublicExposureMap,
+  isPremiumStoreProfile,
+  mergeStoreExposureIntoProfile,
+} from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 
 export default function StoreListScreen() {
@@ -53,7 +59,13 @@ export default function StoreListScreen() {
       return;
     }
 
-    setStores(data || []);
+    const exposureMap = await fetchStorePublicExposureMap((data || []).map((store: any) => store.id));
+
+    setStores(
+      (data || []).map((store: any) =>
+        mergeStoreExposureIntoProfile(store, exposureMap.get(store.id))
+      )
+    );
   };
 
   useEffect(() => {
@@ -159,6 +171,7 @@ export default function StoreListScreen() {
             store.avatar_path || store.avatar_url
               ? getProfileImageUrl(store.avatar_path || store.avatar_url)
               : null;
+          const isPremiumStore = isPremiumStoreProfile(store);
 
           return (
             <TouchableOpacity
@@ -180,6 +193,7 @@ export default function StoreListScreen() {
                     {store.display_name || '인증 가게'}
                   </Text>
                   <Text style={styles.verifiedBadge}>인증</Text>
+                  {isPremiumStore ? <PremiumStoreBadge /> : null}
                 </View>
 
                 <Text style={styles.meta} numberOfLines={1}>

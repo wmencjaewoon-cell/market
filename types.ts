@@ -33,6 +33,7 @@ export type Listing = {
   quantity_sold?: number;
   status: string;
   created_at: string;
+  last_bumped_at?: string | null;
   profiles?: any;
   listing_images?: any[];
   favorites_count?: number;

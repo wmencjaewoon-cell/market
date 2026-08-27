@@ -12,8 +12,14 @@ import {
   View,
 } from 'react-native';
 import { getOrCreateStoreRoom } from '../../lib/chat';
+import StorePlanModal, { PremiumStoreBadge } from '../../components/StorePlanModal';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { getStoreCategoryLabel } from '../../lib/storeCategories';
+import {
+  fetchStorePublicExposureMap,
+  isPremiumStoreProfile,
+  mergeStoreExposureIntoProfile,
+} from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../hooks/use-app-theme';
 
@@ -22,6 +28,7 @@ export default function StoreDetailScreen() {
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const loadStore = useCallback(async () => {
     if (!id) return;
@@ -32,7 +39,12 @@ export default function StoreDetailScreen() {
       .eq('id', id)
       .maybeSingle();
 
-    setProfile(profileData || null);
+    if (profileData?.user_type === 'store' && profileData?.business_verified) {
+      const exposureMap = await fetchStorePublicExposureMap([String(id)]);
+      setProfile(mergeStoreExposureIntoProfile(profileData, exposureMap.get(String(id))));
+    } else {
+      setProfile(profileData || null);
+    }
 
     const { data: listingData } = await supabase
       .from('listings')
@@ -118,6 +130,7 @@ export default function StoreDetailScreen() {
 
   const phone = String(profile?.phone || '').replace(/[^0-9+]/g, '');
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const isPremiumStore = isPremiumStoreProfile(profile);
 
   const openPhone = async () => {
     if (!phone) return;
@@ -186,6 +199,12 @@ export default function StoreDetailScreen() {
           <View style={styles.nameRow}>
             <Text style={styles.name}>{profile?.display_name || '가게'}</Text>
             {isVerifiedStore ? <Text style={styles.verifiedBadge}>인증</Text> : null}
+            {isPremiumStore ? (
+              <PremiumStoreBadge
+                label="프리미엄 인증 완료"
+                onPress={() => setPlanModalOpen(true)}
+              />
+            ) : null}
           </View>
           <Text style={styles.meta}>{profile?.store_address || '등록된 주소 없음'}</Text>
           <Text style={styles.categoryMeta}>{getStoreCategoryLabel(profile?.store_category)}</Text>
@@ -346,6 +365,11 @@ export default function StoreDetailScreen() {
           })
         )}
       </View>
+      <StorePlanModal
+        visible={planModalOpen}
+        currentPlan={isPremiumStore ? 'premium' : 'free'}
+        onClose={() => setPlanModalOpen(false)}
+      />
     </ScrollView>
   );
 }
@@ -426,7 +450,7 @@ const styles = StyleSheet.create({
   },
   avatarImage: { width: '100%', height: '100%' },
   heroText: { flex: 1 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   name: { color: '#111827', fontSize: 22, fontWeight: '900' },
   verifiedBadge: {
     backgroundColor: '#166534',

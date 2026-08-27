@@ -6,6 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Platform,
   ScrollView,
@@ -93,6 +94,8 @@ type StoreVerificationStatus =
   | 'canceled'
   | 'revoked';
 
+type BusinessCheckStatus = 'idle' | 'checking' | 'success' | 'error';
+
 type StoreVerificationRequest = {
   id: number;
   business_number: string;
@@ -165,6 +168,9 @@ export default function ProfileEditScreen() {
   const [businessNumber, setBusinessNumber] = useState('');
   const [businessVerified, setBusinessVerified] = useState(false);
   const [verifyingBusiness, setVerifyingBusiness] = useState(false);
+  const [businessCheckStatus, setBusinessCheckStatus] =
+    useState<BusinessCheckStatus>('idle');
+  const [businessCheckMessage, setBusinessCheckMessage] = useState('');
   const [representativeName, setRepresentativeName] = useState('');
   const [businessHours, setBusinessHours] = useState('');
   const [storeIntro, setStoreIntro] = useState('');
@@ -193,6 +199,44 @@ export default function ProfileEditScreen() {
   const isApprovedStoreProfile =
     userType === 'store' && storeVerificationStatus === 'approved';
   const shouldValidatePersonalPhone = userType === 'personal' && !isStaffProfile;
+  const businessCheckTone =
+    storeVerificationStatus === 'approved' || businessVerified
+      ? 'success'
+      : storeVerificationStatus === 'pending' || verifyingBusiness
+        ? 'checking'
+        : storeVerificationStatus === 'needs_more_info' || storeVerificationStatus === 'rejected'
+          ? 'error'
+          : businessCheckStatus;
+  const businessCheckText =
+    storeVerificationStatus === 'approved'
+      ? '관리자 승인으로 가게 인증이 완료되었습니다.'
+      : storeVerificationStatus === 'pending'
+        ? '제출한 사업자 정보가 관리자 검수를 기다리고 있습니다.'
+        : storeVerificationStatus === 'needs_more_info'
+          ? '사업자 정보 보완이 필요합니다. 내용을 확인하고 다시 확인해 주세요.'
+          : storeVerificationStatus === 'rejected'
+            ? '사업자 인증이 반려되었습니다. 내용을 확인하고 다시 확인해 주세요.'
+            : verifyingBusiness
+              ? '사업자등록번호를 확인 중입니다. 잠시만 기다려 주세요.'
+              : businessVerified
+                ? '사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.'
+                : businessCheckMessage || '사업자번호 1차 확인 후 인증 신청을 진행해 주세요.';
+  const businessCheckIcon: keyof typeof Ionicons.glyphMap =
+    businessCheckTone === 'success'
+      ? 'checkmark-circle'
+      : businessCheckTone === 'error'
+        ? 'alert-circle'
+        : businessCheckTone === 'checking'
+          ? 'sync-circle'
+          : 'information-circle';
+  const businessCheckIconColor =
+    businessCheckTone === 'success'
+      ? theme.successText
+      : businessCheckTone === 'error'
+        ? theme.danger
+        : businessCheckTone === 'checking'
+          ? theme.primary
+          : theme.textMuted;
 
   useEffect(() => {
     if (!user) return;
@@ -232,6 +276,8 @@ export default function ProfileEditScreen() {
       setSelectedAvatarAsset(null);
       setBusinessNumber(data.business_number || '');
       setBusinessVerified(!!data.business_verified);
+      setBusinessCheckStatus(data.business_verified ? 'success' : 'idle');
+      setBusinessCheckMessage('');
       setRepresentativeName(data.representative_name || '');
       setBusinessHours(data.business_hours || '');
       setStoreIntro(data.store_intro || '');
@@ -268,6 +314,9 @@ export default function ProfileEditScreen() {
       if (request.status === 'revoked') {
         setLatestStoreRequest(null);
         setStoreVerificationStatus('none');
+        setBusinessVerified(false);
+        setBusinessCheckStatus('idle');
+        setBusinessCheckMessage('');
         setBusinessDocumentPath(null);
         setBusinessDocumentMimeType(null);
         setBusinessDocumentName('');
@@ -483,18 +532,25 @@ export default function ProfileEditScreen() {
 
   const handleVerifyBusiness = async () => {
     if (!businessNumber.trim()) {
+      setBusinessVerified(false);
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage('사업자등록번호를 입력한 뒤 다시 확인해 주세요.');
       setMessage('사업자등록번호를 입력해 주세요.');
       return;
     }
 
     if (!isValidKoreanBusinessNumber(businessNumber)) {
       setBusinessVerified(false);
-      setMessage('유효한 사업자등록번호 형식이 아닙니다.');
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage('사업자등록번호 형식이 맞지 않습니다. 다시 확인해 주세요.');
+      setMessage('유효한 사업자등록번호 형식이 아닙니다. 다시 확인해 주세요.');
       return;
     }
 
     try {
       setVerifyingBusiness(true);
+      setBusinessCheckStatus('checking');
+      setBusinessCheckMessage('사업자등록번호를 확인 중입니다. 잠시만 기다려 주세요.');
       setMessage('');
 
       const { data, error } = await supabase.functions.invoke(
@@ -508,17 +564,23 @@ export default function ProfileEditScreen() {
 
       if (error) {
         setBusinessVerified(false);
-        setMessage(error.message);
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage(`${error.message || '사업자번호 확인에 실패했습니다.'} 다시 확인해 주세요.`);
+        setMessage(`${error.message || '사업자번호 확인에 실패했습니다.'} 다시 확인해 주세요.`);
         return;
       }
 
       if (!data?.valid) {
         setBusinessVerified(false);
-        setMessage(data?.error || '유효한 사업자등록번호가 아닙니다.');
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage(`${data?.error || '유효한 사업자등록번호가 아닙니다.'} 다시 확인해 주세요.`);
+        setMessage(`${data?.error || '유효한 사업자등록번호가 아닙니다.'} 다시 확인해 주세요.`);
         return;
       }
 
       setBusinessVerified(true);
+      setBusinessCheckStatus('success');
+      setBusinessCheckMessage('사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.');
 
       if (data?.companyName) {
         setDisplayName(data.companyName);
@@ -527,7 +589,9 @@ export default function ProfileEditScreen() {
       setMessage('사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.');
     } catch (e: any) {
       setBusinessVerified(false);
-      setMessage(e?.message || '사업자 확인 중 오류가 발생했습니다.');
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage(`${e?.message || '사업자 확인 중 오류가 발생했습니다.'} 다시 확인해 주세요.`);
+      setMessage(`${e?.message || '사업자 확인 중 오류가 발생했습니다.'} 다시 확인해 주세요.`);
     } finally {
       setVerifyingBusiness(false);
     }
@@ -576,12 +640,16 @@ export default function ProfileEditScreen() {
         ['pending', 'needs_more_info'].includes(latestStoreRequest.status);
 
       if (!businessNumber.trim()) {
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자등록번호를 입력한 뒤 다시 확인해 주세요.');
         setMessage('사업자등록번호를 입력해 주세요.');
         return;
       }
 
       if (!isValidKoreanBusinessNumber(cleanBusinessNumber)) {
-        setMessage('유효한 사업자등록번호 형식이 아닙니다.');
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자등록번호 형식이 맞지 않습니다. 다시 확인해 주세요.');
+        setMessage('유효한 사업자등록번호 형식이 아닙니다. 다시 확인해 주세요.');
         return;
       }
 
@@ -591,6 +659,8 @@ export default function ProfileEditScreen() {
       }
 
       if (!businessVerified && !canReuseBusinessCheck) {
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자번호 1차 확인을 먼저 진행해 주세요. 문제가 계속되면 다시 확인해 주세요.');
         setMessage('사업자번호 1차 확인을 먼저 진행해 주세요.');
         return;
       }
@@ -890,6 +960,8 @@ export default function ProfileEditScreen() {
             onPress={() => {
               setUserType('personal');
               setBusinessVerified(false);
+              setBusinessCheckStatus('idle');
+              setBusinessCheckMessage('');
               setBusinessNumber('');
               setRepresentativeName('');
               setBusinessHours('');
@@ -921,6 +993,8 @@ export default function ProfileEditScreen() {
               setUserType('store');
               if (storeVerificationStatus !== 'approved') {
                 setBusinessVerified(false);
+                setBusinessCheckStatus('idle');
+                setBusinessCheckMessage('');
               }
             }}
           >
@@ -959,6 +1033,8 @@ export default function ProfileEditScreen() {
               onChangeText={(text) => {
                 setBusinessNumber(text);
                 setBusinessVerified(false);
+                setBusinessCheckStatus('idle');
+                setBusinessCheckMessage('');
               }}
               placeholder="123-45-67890"
               placeholderTextColor={theme.textSubtle}
@@ -968,25 +1044,46 @@ export default function ProfileEditScreen() {
 
             {storeVerificationStatus !== 'approved' ? (
               <TouchableOpacity
-                style={styles.verifyBtn}
+                style={[styles.verifyBtn, verifyingBusiness && styles.verifyBtnDisabled]}
                 onPress={handleVerifyBusiness}
                 disabled={verifyingBusiness}
+                activeOpacity={0.86}
               >
+                {verifyingBusiness ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="search-outline" size={18} color="#fff" />
+                )}
                 <Text style={styles.verifyBtnText}>
-                  {verifyingBusiness ? '사업자 확인 중...' : '사업자번호 1차 확인'}
+                  {verifyingBusiness ? '확인 중...' : '사업자번호 1차 확인'}
                 </Text>
               </TouchableOpacity>
             ) : null}
 
-            <Text style={[styles.statusText, businessVerified && styles.successText]}>
-              {storeVerificationStatus === 'approved'
-                ? '관리자 승인으로 가게 인증이 완료되었습니다.'
-                : storeVerificationStatus === 'pending'
-                  ? '제출한 사업자 정보가 관리자 검수를 기다리고 있습니다.'
-                  : businessVerified
-                    ? '사업자번호 1차 확인 완료'
-                    : '사업자번호 1차 확인 후 인증 신청을 진행해 주세요.'}
-            </Text>
+            <View
+              style={[
+                styles.businessCheckBox,
+                businessCheckTone === 'success' && styles.businessCheckBoxSuccess,
+                businessCheckTone === 'checking' && styles.businessCheckBoxChecking,
+                businessCheckTone === 'error' && styles.businessCheckBoxError,
+              ]}
+            >
+              {verifyingBusiness ? (
+                <ActivityIndicator size="small" color={businessCheckIconColor} />
+              ) : (
+                <Ionicons name={businessCheckIcon} size={18} color={businessCheckIconColor} />
+              )}
+              <Text
+                style={[
+                  styles.businessCheckText,
+                  businessCheckTone === 'success' && styles.businessCheckTextSuccess,
+                  businessCheckTone === 'checking' && styles.businessCheckTextChecking,
+                  businessCheckTone === 'error' && styles.businessCheckTextError,
+                ]}
+              >
+                {businessCheckText}
+              </Text>
+            </View>
 
             <Text style={styles.label}>대표자명</Text>
             <TextInput
@@ -1339,15 +1436,69 @@ function createStyles(theme: AppPalette) {
   },
 
   verifyBtn: {
-    backgroundColor: theme.text,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: '#166534',
     borderRadius: 14,
     paddingVertical: 14,
-    alignItems: 'center',
+  },
+
+  verifyBtnDisabled: {
+    opacity: 0.78,
   },
 
   verifyBtnText: {
-    color: theme.background,
+    color: '#fff',
     fontWeight: '800',
+  },
+
+  businessCheckBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+
+  businessCheckBoxSuccess: {
+    borderColor: theme.successText,
+    backgroundColor: theme.successBg,
+  },
+
+  businessCheckBoxChecking: {
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
+  },
+
+  businessCheckBoxError: {
+    borderColor: theme.danger,
+    backgroundColor: theme.dangerSoft,
+  },
+
+  businessCheckText: {
+    flex: 1,
+    color: theme.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+
+  businessCheckTextSuccess: {
+    color: theme.successText,
+  },
+
+  businessCheckTextChecking: {
+    color: theme.primary,
+  },
+
+  businessCheckTextError: {
+    color: theme.danger,
   },
 
   locationBtn: {

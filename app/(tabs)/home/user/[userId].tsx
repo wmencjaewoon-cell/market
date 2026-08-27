@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import StorePlanModal, { PremiumStoreBadge } from '../../../../components/StorePlanModal';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
@@ -26,6 +27,11 @@ import {
   getSellerPoints,
 } from '../../../../lib/sellerLevel';
 import { getStoreCategoryLabel } from '../../../../lib/storeCategories';
+import {
+  fetchStorePublicExposureMap,
+  isPremiumStoreProfile,
+  mergeStoreExposureIntoProfile,
+} from '../../../../lib/storeExposure';
 import { supabase } from '../../../../lib/supabase';
 
 type ListingFilter = 'all' | 'selling' | 'done';
@@ -66,6 +72,7 @@ export default function UserProfileScreen() {
 
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
   const [listingStats, setListingStats] = useState({
     total: 0,
     selling: 0,
@@ -89,7 +96,12 @@ export default function UserProfileScreen() {
       .single();
 
     if (!error && data) {
-      setProfile(data);
+      if (data.user_type === 'store' && data.business_verified) {
+        const exposureMap = await fetchStorePublicExposureMap([userId]);
+        setProfile(mergeStoreExposureIntoProfile(data, exposureMap.get(userId)));
+      } else {
+        setProfile(data);
+      }
     }
   };
 
@@ -151,6 +163,7 @@ export default function UserProfileScreen() {
 
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const isPremiumStore = isPremiumStoreProfile(profile);
   const sellerFallbackPoints = reviewStats.count * 100;
   const sellerPoints = getSellerPoints(profile, sellerFallbackPoints);
   const sellerLevel = getSellerLevel(profile, sellerFallbackPoints);
@@ -319,8 +332,18 @@ export default function UserProfileScreen() {
           {isVerifiedStore ? '가게 판매자' : '개인 판매자'}
         </Text>
 
-        {isVerifiedStore ? (
-          <Text style={styles.verifiedText}>가게인증완료</Text>
+        {isVerifiedStore || isPremiumStore ? (
+          <View style={styles.profileBadgeRow}>
+            {isVerifiedStore ? (
+              <Text style={styles.verifiedText}>가게인증완료</Text>
+            ) : null}
+            {isPremiumStore ? (
+              <PremiumStoreBadge
+                label="프리미엄 인증 완료"
+                onPress={() => setPlanModalOpen(true)}
+              />
+            ) : null}
+          </View>
         ) : null}
 
         {isVerifiedStore ? (
@@ -537,6 +560,11 @@ export default function UserProfileScreen() {
         </View>
       </TouchableWithoutFeedback>
     </Modal>
+    <StorePlanModal
+      visible={planModalOpen}
+      currentPlan={isPremiumStore ? 'premium' : 'free'}
+      onClose={() => setPlanModalOpen(false)}
+    />
     </SafeAreaView>
   );
 }
@@ -614,7 +642,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   verifiedText: {
-    marginTop: 8,
     borderWidth: 1,
     borderColor: '#166534',
     borderRadius: 999,
@@ -625,6 +652,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     overflow: 'hidden',
+  },
+  profileBadgeRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
   },
   levelBox: {
     width: '100%',

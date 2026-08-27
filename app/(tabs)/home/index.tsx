@@ -25,6 +25,10 @@ import {
   getDistanceKm,
   saveMyRegionSettings,
 } from '../../../lib/region';
+import {
+  fetchStorePublicExposureMap,
+  mergeStoreExposureIntoProfile,
+} from '../../../lib/storeExposure';
 import { supabase } from '../../../lib/supabase';
 import { useTabRefresh } from '../../../lib/tabRefresh';
 import { Listing } from '../../../types';
@@ -63,8 +67,9 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchRegionState();
-      fetchNotificationCount();
+      void fetchListings();
+      void fetchRegionState();
+      void fetchNotificationCount();
     }, [])
   );
 
@@ -111,9 +116,7 @@ export default function HomeScreen() {
       }
     }
 
-    const { data, error } = await supabase
-      .from('listings')
-      .select(`
+    const listingSelect = `
         *,
         profiles!listings_author_id_fkey (
           id,
@@ -132,16 +135,41 @@ export default function HomeScreen() {
           image_path,
           sort_order
         )
-      `)
+      `;
+
+    let { data, error } = await supabase
+      .from('listings')
+      .select(listingSelect)
       .eq('status', 'active')
+      .order('last_bumped_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
 
+    if (error && error.message.includes('last_bumped_at')) {
+      const fallback = await supabase
+        .from('listings')
+        .select(listingSelect)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      data = fallback.data;
+      error = fallback.error;
+    }
+
     if (!error && data) {
+      const exposureMap = await fetchStorePublicExposureMap(
+        (data as any[])
+          .filter((item) => item.profiles?.user_type === 'store' && item.profiles?.business_verified)
+          .map((item) => item.author_id)
+      );
       const mapped = (data as any[])
         .filter((item) => !blockedIds.has(item.author_id))
         .filter((item) => !hiddenListingIds.has(Number(item.id)))
         .map((item) => ({
           ...item,
+          profiles: mergeStoreExposureIntoProfile(
+            item.profiles,
+            exposureMap.get(item.author_id)
+          ),
           favorites_count: item.favorites_count ?? 0,
           chats_count: item.chats_count ?? 0,
           listing_images: [...(item.listing_images || [])].sort(

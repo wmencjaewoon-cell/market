@@ -2,6 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import StorePlanModal, { PremiumStoreBadge } from '../../components/StorePlanModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
@@ -12,6 +13,11 @@ import {
   getSellerLevelTitle,
   getSellerPoints,
 } from '../../lib/sellerLevel';
+import {
+  DEFAULT_STORE_LIMITS,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
@@ -34,7 +40,9 @@ export default function MyScreen() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<any>(null);
   const [staffMembership, setStaffMembership] = useState<any | null>(null);
+  const [storeLimits, setStoreLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [companyInfoOpen, setCompanyInfoOpen] = useState(false);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -61,6 +69,17 @@ export default function MyScreen() {
         .maybeSingle();
 
       setStaffMembership(staffData || null);
+
+      const storeUserId =
+        data.user_type === 'store' && data.business_verified
+          ? user.id
+          : staffData?.store_user_id;
+
+      if (storeUserId) {
+        setStoreLimits(await getStoreSubscriptionLimits(storeUserId));
+      } else {
+        setStoreLimits(DEFAULT_STORE_LIMITS);
+      }
       return;
     }
 
@@ -88,12 +107,14 @@ export default function MyScreen() {
 
     setProfile(created);
     setStaffMembership(null);
+    setStoreLimits(DEFAULT_STORE_LIMITS);
   }, [user]);
 
   useEffect(() => {
     if (!user) {
       setProfile(null);
       setStaffMembership(null);
+      setStoreLimits(DEFAULT_STORE_LIMITS);
       return;
     }
 
@@ -127,6 +148,7 @@ export default function MyScreen() {
   const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
   const publicPhone =
     isVerifiedStore && profile?.is_phone_public ? profile?.phone : null;
+  const hasPremiumStorePlan = storeLimits.isPremium && (isVerifiedStore || isActiveStoreStaff);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -156,6 +178,10 @@ export default function MyScreen() {
             <View style={styles.profileBadgeRow}>
               {isVerifiedStore ? (
                 <Text style={styles.verifiedText}>가게인증완료</Text>
+              ) : null}
+
+              {hasPremiumStorePlan ? (
+                <PremiumStoreBadge label="프리미엄" onPress={() => setPlanModalOpen(true)} />
               ) : null}
 
               <Text
@@ -202,6 +228,13 @@ export default function MyScreen() {
 
         {user ? (
           <>
+            <Section title="일정">
+              <MenuItem
+                title={canManageStore || isActiveStoreStaff ? '업무/개인 일정표' : '내 일정표'}
+                onPress={() => router.push('/my/calendar' as any)}
+              />
+            </Section>
+
             {canManageStore ? (
               <Section title="내 가게 관리">
                 <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
@@ -301,6 +334,11 @@ export default function MyScreen() {
           </View>
         </View>
       </ScrollView>
+      <StorePlanModal
+        visible={planModalOpen}
+        currentPlan={storeLimits.plan}
+        onClose={() => setPlanModalOpen(false)}
+      />
     </SafeAreaView>
   );
 }

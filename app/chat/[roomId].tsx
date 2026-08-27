@@ -377,6 +377,18 @@ function formatAppointmentValue(date: Date) {
   return `${formatDateInput(date)} ${formatTimeInput(date)}`;
 }
 
+function getAppointmentDateFromTexts(dateText: string, timeText: string) {
+  if (!dateText || !timeText) return null;
+
+  const date = new Date(`${dateText}T${timeText}:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isPastAppointmentTimeOption(dateText: string, timeText: string, nowMs: number) {
+  const appointmentDate = getAppointmentDateFromTexts(dateText, timeText);
+  return !appointmentDate || appointmentDate.getTime() <= nowMs;
+}
+
 function getDefaultAppointmentDate(nowMs = Date.now()) {
   const date = new Date(nowMs + 60 * 60 * 1000);
   const minutes = date.getMinutes();
@@ -1168,6 +1180,31 @@ export default function ChatRoomScreen() {
 
     return options;
   }, []);
+  const availableAppointmentTimeOptions = useMemo(
+    () =>
+      appointmentTimeOptions.filter(
+        (timeOption) => !isPastAppointmentTimeOption(selectedDateText, timeOption, nowMs)
+      ),
+    [appointmentTimeOptions, nowMs, selectedDateText]
+  );
+
+  useEffect(() => {
+    if (!appointmentModalOpen || appointmentStep !== 'time') return;
+
+    if (availableAppointmentTimeOptions.length === 0) {
+      if (selectedTimeText) setSelectedTimeText('');
+      return;
+    }
+
+    if (!availableAppointmentTimeOptions.includes(selectedTimeText)) {
+      setSelectedTimeText(availableAppointmentTimeOptions[0]);
+    }
+  }, [
+    appointmentModalOpen,
+    appointmentStep,
+    availableAppointmentTimeOptions,
+    selectedTimeText,
+  ]);
 
   const hasAppointmentCompletionPromptForDate = useCallback(
     (appointmentDate: Date, sourceMessages = messages) => {
@@ -1316,6 +1353,20 @@ export default function ChatRoomScreen() {
 
     router.replace('/(tabs)/chat' as any);
   }, [prepareChatNavigation, returnTarget]);
+
+  const edgeBackSwipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(Platform.OS === 'ios')
+        .activeOffsetX(18)
+        .failOffsetY([-18, 18])
+        .onEnd((event) => {
+          if (event.translationX > 72 || event.velocityX > 650) {
+            runOnJS(handleBackPress)();
+          }
+        }),
+    [handleBackPress]
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -3531,16 +3582,7 @@ export default function ChatRoomScreen() {
 
   // 약속 날짜와 시간 선택 처리
   const getSelectedAppointmentDate = (dateText = selectedDateText, timeText = selectedTimeText) => {
-    if (!dateText || !timeText) return null;
-
-    const date = new Date(`${dateText}T${timeText}:00`);
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-
-  // 약속 시간 선택 가능 여부 판단
-  const isAppointmentTimeOptionDisabled = (timeText: string) => {
-    const appointmentDate = getSelectedAppointmentDate(selectedDateText, timeText);
-    return !appointmentDate || appointmentDate.getTime() <= nowMs;
+    return getAppointmentDateFromTexts(dateText, timeText);
   };
 
   // 약속 변경 가능 여부 판단
@@ -4675,12 +4717,25 @@ export default function ChatRoomScreen() {
     );
   };
 
-  const inputBottomPadding = keyboardVisible ? 6 : Math.max(insets.bottom, 6);
+  const chatInputBlockedByOverlay =
+    accountModalOpen ||
+    appointmentModalOpen ||
+    callMenuOpen ||
+    headerMenuOpen ||
+    imageViewerOpen ||
+    participantModalOpen ||
+    plusMenuOpen ||
+    reportModalOpen ||
+    saleCompleteModalOpen ||
+    Boolean(visibleCall);
+  const chatInputVisible = screenFocused && !chatInputBlockedByOverlay;
+  const chatKeyboardVisible = chatInputVisible && keyboardVisible;
+  const inputBottomPadding = chatKeyboardVisible ? 6 : Math.max(insets.bottom, 6);
   const inputRowEstimatedHeight = 56 + inputBottomPadding;
-  const inputOverlayBottom = keyboardVisible ? keyboardHeight : 0;
+  const inputOverlayBottom = chatKeyboardVisible ? keyboardHeight : 0;
   const listViewportBottomInset =
-    Platform.OS === 'ios'
-      ? inputRowEstimatedHeight + (keyboardVisible ? keyboardHeight : 0)
+    Platform.OS === 'ios' && chatInputVisible
+      ? inputRowEstimatedHeight + (chatKeyboardVisible ? keyboardHeight : 0)
       : 0;
   const listBottomPadding = 18;
 
@@ -4701,7 +4756,7 @@ export default function ChatRoomScreen() {
   );
 
   useEffect(() => {
-    if (!keyboardVisible) return;
+    if (!chatKeyboardVisible) return;
 
     const frameId = requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
@@ -4716,7 +4771,7 @@ export default function ChatRoomScreen() {
       cancelAnimationFrame(frameId);
       timeoutIds.forEach(clearTimeout);
     };
-  }, [keyboardHeight, keyboardVisible, listViewportBottomInset]);
+  }, [chatKeyboardVisible, keyboardHeight, listViewportBottomInset]);
 
   const chatInputRow = (
     <View
@@ -4786,7 +4841,13 @@ export default function ChatRoomScreen() {
 
   return (
     <SafeAreaView style={[styles.screen, isDarkMode && styles.screenDark]} edges={['top']}>
-      <Stack.Screen options={{ headerShown: false, gestureEnabled: false }} />
+      <Stack.Screen
+        options={{
+          headerShown: false,
+          gestureEnabled: true,
+          fullScreenGestureEnabled: true,
+        }}
+      />
       <View style={[styles.header, isDarkMode && styles.headerDark]}>
         <TouchableOpacity style={styles.headerBtn} onPress={handleBackPress}>
           <Ionicons name="chevron-back" size={24} color={backIconColor} />
@@ -5103,8 +5164,8 @@ export default function ChatRoomScreen() {
         />
       </View>
 
-      {Platform.OS === 'ios' ? (
-        screenFocused ? (
+      {chatInputVisible ? (
+        Platform.OS === 'ios' ? (
         <FullWindowOverlay>
           <View style={styles.inputWindowLayer} pointerEvents="box-none">
             <View
@@ -5120,10 +5181,16 @@ export default function ChatRoomScreen() {
             </View>
           </View>
         </FullWindowOverlay>
-        ) : null
-      ) : (
-        chatInputRow
-      )}
+        ) : (
+          chatInputRow
+        )
+      ) : null}
+
+      {Platform.OS === 'ios' ? (
+        <GestureDetector gesture={edgeBackSwipeGesture}>
+          <Reanimated.View style={styles.edgeBackSwipeZone} />
+        </GestureDetector>
+      ) : null}
 
       <Modal visible={callMenuOpen} transparent animationType="fade">
         <TouchableWithoutFeedback onPress={() => setCallMenuOpen(false)}>
@@ -5338,221 +5405,241 @@ export default function ChatRoomScreen() {
         </View>
       </Modal>
 
-      <Modal visible={appointmentModalOpen} transparent animationType="fade">
-        <TouchableWithoutFeedback onPress={() => setAppointmentModalOpen(false)}>
-          <View style={styles.centerModalOverlay}>
-            <TouchableWithoutFeedback>
-              <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.centerModalKeyboard}
-              >
-                <View style={styles.centerFormModalBox}>
-                  <Text style={styles.modalTitle}>
-                    {appointmentStep === 'date' ? '약속 날짜 선택' : '약속 시간 선택'}
+      <Modal
+        visible={appointmentModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAppointmentModalOpen(false)}
+      >
+        <View style={styles.centerModalOverlay}>
+          <Pressable
+            style={styles.modalBackdropPressTarget}
+            onPress={() => setAppointmentModalOpen(false)}
+          />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.centerModalKeyboard}
+            pointerEvents="box-none"
+          >
+            <View style={styles.centerFormModalBox}>
+              <Text style={styles.modalTitle}>
+                {appointmentStep === 'date' ? '약속 날짜 선택' : '약속 시간 선택'}
+              </Text>
+
+              {appointmentStep === 'date' ? (
+                <>
+                  <Text style={styles.modalDesc}>
+                    약속 시간 5분 전까지는 다시 약속잡기를 눌러 날짜와 시간을 바꿀 수 있습니다.
                   </Text>
 
-                  {appointmentStep === 'date' ? (
-                    <>
-                      <Text style={styles.modalDesc}>
-                        약속 시간 5분 전까지는 다시 약속잡기를 눌러 날짜와 시간을 바꿀 수 있습니다.
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={styles.appointmentDateOptions}
+                  >
+                    {appointmentDateOptions.map((option) => {
+                      const selected = selectedDateText === option.value;
+
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          style={[
+                            styles.appointmentDateBtn,
+                            selected && styles.appointmentDateBtnActive,
+                          ]}
+                          onPress={() => setSelectedDateText(option.value)}
+                        >
+                          <Text
+                            style={[
+                              styles.appointmentDateLabel,
+                              selected && styles.appointmentDateTextActive,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.appointmentDateValue,
+                              selected && styles.appointmentDateTextActive,
+                            ]}
+                          >
+                            {option.value}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <TouchableOpacity
+                    style={styles.primaryModalBtn}
+                    onPress={() => {
+                      if (!selectedDateText.trim()) {
+                        Alert.alert('날짜 선택', '날짜를 선택해 주세요.');
+                        return;
+                      }
+                      setAppointmentStep('time');
+                    }}
+                  >
+                    <Text style={styles.primaryModalBtnText}>시간 선택하기</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.modalDesc}>
+                    선택한 날짜: {selectedDateText}
+                  </Text>
+
+                  {availableAppointmentTimeOptions.length === 0 ? (
+                    <View style={styles.appointmentEmptyBox}>
+                      <Text style={styles.appointmentEmptyText}>
+                        이 날짜에는 선택 가능한 시간이 없습니다. 다른 날짜를 선택해 주세요.
                       </Text>
-
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.appointmentDateOptions}
-                      >
-                        {appointmentDateOptions.map((option) => {
-                          const selected = selectedDateText === option.value;
-
-                          return (
-                            <TouchableOpacity
-                              key={option.value}
-                              style={[
-                                styles.appointmentDateBtn,
-                                selected && styles.appointmentDateBtnActive,
-                              ]}
-                              onPress={() => setSelectedDateText(option.value)}
-                            >
-                              <Text
-                                style={[
-                                  styles.appointmentDateLabel,
-                                  selected && styles.appointmentDateTextActive,
-                                ]}
-                              >
-                                {option.label}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.appointmentDateValue,
-                                  selected && styles.appointmentDateTextActive,
-                                ]}
-                              >
-                                {option.value}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-
-                      <TouchableOpacity
-                        style={styles.primaryModalBtn}
-                        onPress={() => {
-                          if (!selectedDateText.trim()) {
-                            Alert.alert('날짜 선택', '날짜를 선택해 주세요.');
-                            return;
-                          }
-                          setAppointmentStep('time');
-                        }}
-                      >
-                        <Text style={styles.primaryModalBtnText}>시간 선택하기</Text>
-                      </TouchableOpacity>
-                    </>
+                    </View>
                   ) : (
-                    <>
-                      <Text style={styles.modalDesc}>
-                        선택한 날짜: {selectedDateText}
-                      </Text>
+                    <ScrollView
+                      style={styles.appointmentTimeScroll}
+                      contentContainerStyle={styles.appointmentTimeOptions}
+                      showsVerticalScrollIndicator
+                      keyboardShouldPersistTaps="handled"
+                      nestedScrollEnabled
+                    >
+                      {availableAppointmentTimeOptions.map((timeOption) => {
+                        const selected = selectedTimeText === timeOption;
 
-                      <ScrollView
-                        style={styles.appointmentTimeScroll}
-                        contentContainerStyle={styles.appointmentTimeOptions}
-                        showsVerticalScrollIndicator={false}
-                      >
-                        {appointmentTimeOptions.map((timeOption) => {
-                          const selected = selectedTimeText === timeOption;
-                          const disabled = isAppointmentTimeOptionDisabled(timeOption);
-
-                          return (
-                            <TouchableOpacity
-                              key={timeOption}
+                        return (
+                          <TouchableOpacity
+                            key={timeOption}
+                            style={[
+                              styles.appointmentTimeBtn,
+                              selected && styles.appointmentTimeBtnActive,
+                            ]}
+                            onPress={() => setSelectedTimeText(timeOption)}
+                          >
+                            <Text
                               style={[
-                                styles.appointmentTimeBtn,
-                                selected && styles.appointmentTimeBtnActive,
-                                disabled && styles.appointmentTimeBtnDisabled,
+                                styles.appointmentTimeText,
+                                selected && styles.appointmentTimeTextActive,
                               ]}
-                              onPress={() => {
-                                if (disabled) return;
-                                setSelectedTimeText(timeOption);
-                              }}
-                              disabled={disabled}
                             >
-                              <Text
-                                style={[
-                                  styles.appointmentTimeText,
-                                  selected && styles.appointmentTimeTextActive,
-                                  disabled && styles.appointmentTimeTextDisabled,
-                                ]}
-                              >
-                                {timeOption}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-
-                      <TouchableOpacity
-                        style={styles.primaryModalBtn}
-                        onPress={submitAppointment}
-                      >
-                        <Text style={styles.primaryModalBtnText}>
-                          {latestAppointmentDate ? '약속 변경 보내기' : '약속 보내기'}
-                        </Text>
-                      </TouchableOpacity>
-                    </>
+                              {timeOption}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
                   )}
 
                   <TouchableOpacity
-                    style={styles.secondaryModalBtn}
-                    onPress={() => {
-                      if (appointmentStep === 'time') {
-                        setAppointmentStep('date');
-                        return;
-                      }
-                      setAppointmentModalOpen(false);
-                    }}
+                    style={[
+                      styles.primaryModalBtn,
+                      availableAppointmentTimeOptions.length === 0 && styles.sendBtnDisabled,
+                    ]}
+                    onPress={submitAppointment}
+                    disabled={availableAppointmentTimeOptions.length === 0}
                   >
-                    <Text style={styles.secondaryModalBtnText}>
-                      {appointmentStep === 'time' ? '날짜 다시 입력' : '취소'}
+                    <Text style={styles.primaryModalBtnText}>
+                      {latestAppointmentDate ? '약속 변경 보내기' : '약속 보내기'}
                     </Text>
                   </TouchableOpacity>
-                </View>
-              </KeyboardAvoidingView>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+                </>
+              )}
+
+              <TouchableOpacity
+                style={styles.secondaryModalBtn}
+                onPress={() => {
+                  if (appointmentStep === 'time') {
+                    setAppointmentStep('date');
+                    return;
+                  }
+                  setAppointmentModalOpen(false);
+                }}
+              >
+                <Text style={styles.secondaryModalBtnText}>
+                  {appointmentStep === 'time' ? '날짜 다시 입력' : '취소'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
-      <Modal visible={saleCompleteModalOpen} transparent animationType="fade">
-        <TouchableWithoutFeedback
-          onPress={closeSaleCompleteModal}
-        >
-          <View style={styles.centerModalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.formModalBox}>
-                <Text style={styles.modalTitle}>
-                  {isShareListing ? '나눔 수량 선택' : '판매 수량 선택'}
+      <Modal
+        visible={saleCompleteModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeSaleCompleteModal}
+      >
+        <View style={styles.centerModalOverlay}>
+          <Pressable style={styles.modalBackdropPressTarget} onPress={closeSaleCompleteModal} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.centerModalKeyboard}
+            pointerEvents="box-none"
+          >
+            <View style={styles.formModalBox}>
+              <Text style={styles.modalTitle}>
+                {isShareListing ? '나눔 수량 선택' : '판매 수량 선택'}
+              </Text>
+              <Text style={styles.modalDesc}>
+                {isShareListing ? '나눔한' : '거래한'} 수량을 입력하면 남은 수량이 차감됩니다.
+              </Text>
+
+              <Text style={styles.stockSummaryText}>
+                남은 수량 {listingQuantityInfo.remaining}개 / 전체 {listingQuantityInfo.total}개
+              </Text>
+
+              <TextInput
+                style={styles.accountInput}
+                placeholder="1"
+                value={saleQuantityText}
+                keyboardType="number-pad"
+                onChangeText={(value) => {
+                  const onlyNumber = value.replace(/[^0-9]/g, '');
+                  setSaleQuantityText(onlyNumber);
+                }}
+              />
+
+              <TouchableOpacity
+                style={[styles.primaryModalBtn, saleCompleting && styles.sendBtnDisabled]}
+                onPress={completeSaleAndGoToReview}
+                disabled={saleCompleting}
+              >
+                <Text style={styles.primaryModalBtnText}>
+                  {saleCompleting
+                    ? '처리 중...'
+                    : `${isShareListing ? '나눔완료' : '거래완료'}하고 후기 남기기`}
                 </Text>
-                <Text style={styles.modalDesc}>
-                  {isShareListing ? '나눔한' : '거래한'} 수량을 입력하면 남은 수량이 차감됩니다.
-                </Text>
+              </TouchableOpacity>
 
-                <Text style={styles.stockSummaryText}>
-                  남은 수량 {listingQuantityInfo.remaining}개 / 전체 {listingQuantityInfo.total}개
-                </Text>
-
-                <TextInput
-                  style={styles.accountInput}
-                  placeholder="1"
-                  value={saleQuantityText}
-                  keyboardType="number-pad"
-                  onChangeText={(value) => {
-                    const onlyNumber = value.replace(/[^0-9]/g, '');
-                    setSaleQuantityText(onlyNumber);
-                  }}
-                />
-
-                <TouchableOpacity
-                  style={[styles.primaryModalBtn, saleCompleting && styles.sendBtnDisabled]}
-                  onPress={completeSaleAndGoToReview}
-                  disabled={saleCompleting}
-                >
-                  <Text style={styles.primaryModalBtnText}>
-                    {saleCompleting
-                      ? '처리 중...'
-                      : `${isShareListing ? '나눔완료' : '거래완료'}하고 후기 남기기`}
-                  </Text>
-                </TouchableOpacity>
-
-                {reviewOnlySaleId ? (
-                  <TouchableOpacity
-                    style={styles.secondaryModalBtn}
-                    onPress={() => {
-                      if (saleCompleting || !pendingReviewTargetId) return;
-
-                      const reviewTargetId = pendingReviewTargetId;
-                      const saleId = reviewOnlySaleId;
-
-                      setSaleCompleteModalOpen(false);
-                      setPendingReviewTargetId(null);
-                      setReviewOnlySaleId(null);
-                      setSaleQuantityText('1');
-                      goToReviewCreate(reviewTargetId, saleId);
-                    }}
-                  >
-                    <Text style={styles.secondaryModalBtnText}>기존 거래 후기만 남기기</Text>
-                  </TouchableOpacity>
-                ) : null}
-
+              {reviewOnlySaleId ? (
                 <TouchableOpacity
                   style={styles.secondaryModalBtn}
-                  onPress={closeSaleCompleteModal}
+                  onPress={() => {
+                    if (saleCompleting || !pendingReviewTargetId) return;
+
+                    const reviewTargetId = pendingReviewTargetId;
+                    const saleId = reviewOnlySaleId;
+
+                    setSaleCompleteModalOpen(false);
+                    setPendingReviewTargetId(null);
+                    setReviewOnlySaleId(null);
+                    setSaleQuantityText('1');
+                    goToReviewCreate(reviewTargetId, saleId);
+                  }}
                 >
-                  <Text style={styles.secondaryModalBtnText}>취소</Text>
+                  <Text style={styles.secondaryModalBtnText}>기존 거래 후기만 남기기</Text>
                 </TouchableOpacity>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.secondaryModalBtn}
+                onPress={closeSaleCompleteModal}
+              >
+                <Text style={styles.secondaryModalBtnText}>취소</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
       <Modal
         visible={imageViewerOpen}
@@ -5980,6 +6067,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.18)',
     justifyContent: 'center',
     padding: 20,
+  },
+
+  modalBackdropPressTarget: {
+    ...StyleSheet.absoluteFillObject,
   },
 
   mutedIconWrap: {
@@ -6967,6 +7058,15 @@ const styles = StyleSheet.create({
     right: 0,
   },
 
+  edgeBackSwipeZone: {
+    position: 'absolute',
+    left: 0,
+    top: 56,
+    bottom: 0,
+    width: 26,
+    zIndex: 40,
+  },
+
   plusBtn: {
     width: 42,
     height: 46,
@@ -7266,6 +7366,24 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     paddingBottom: 2,
+  },
+
+  appointmentEmptyBox: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 12,
+    paddingVertical: 18,
+  },
+
+  appointmentEmptyText: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 19,
+    textAlign: 'center',
   },
 
   appointmentTimeBtn: {

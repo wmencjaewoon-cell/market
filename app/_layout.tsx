@@ -199,7 +199,14 @@ function RootNavigator() {
 
         <Stack.Screen name="project-invite/[token]" options={{ title: '현장 초대' }} />
         <Stack.Screen name="open-chat/[id]" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="chat/[roomId]"
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
         <Stack.Screen name="my" options={{ headerShown: false }} />
         <Stack.Screen name="support" options={{ headerShown: false }} />
         <Stack.Screen

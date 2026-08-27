@@ -176,6 +176,7 @@ export default function StoreDashboardScreen() {
             <ActionButton icon="person-add-outline" label="고객관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/customers' as any)} />
             <ActionButton icon="clipboard-outline" label="견적관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/estimates' as any)} />
             <ActionButton icon="business-outline" label="현장관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/projects' as any)} />
+            <ActionButton icon="calendar-outline" label="전체 일정표" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/my/calendar' as any)} />
             <ActionButton icon="people-outline" label="직원 관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/staff' as any)} />
             <ActionButton icon="storefront-outline" label="가게 정보 수정" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />
             <ActionButton icon="flash-outline" label="오늘 가능 켜기" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />

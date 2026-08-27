@@ -640,7 +640,7 @@ const reportRoom = (room: ChatRoomListItem) => {
 };
 
 const openChatRoomFromList = (roomId: string) => {
-  router.replace({
+  router.push({
     pathname: '/chat/[roomId]',
     params: { roomId, returnTo: 'chatList' },
   } as any);

@@ -11,6 +11,10 @@ import {
 } from 'react-native';
 import MaterialCard from '../../components/MaterialCard';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  fetchStorePublicExposureMap,
+  mergeStoreExposureIntoProfile,
+} from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 
 type SalesFilter = 'all' | 'selling' | 'done' | 'hidden';
@@ -84,6 +88,11 @@ export default function MySalesScreen() {
 
     const favoriteMap = new Map<number, number>();
     const chatMap = new Map<number, number>();
+    const exposureMap = await fetchStorePublicExposureMap(
+      (data || [])
+        .filter((item: any) => item.profiles?.user_type === 'store' && item.profiles?.business_verified)
+        .map((item: any) => item.author_id)
+    );
 
     (favorites || []).forEach((row: any) => {
       favoriteMap.set(row.listing_id, (favoriteMap.get(row.listing_id) || 0) + 1);
@@ -95,6 +104,10 @@ export default function MySalesScreen() {
 
     const mapped = (data || []).map((item: any) => ({
       ...item,
+      profiles: mergeStoreExposureIntoProfile(
+        item.profiles,
+        exposureMap.get(item.author_id)
+      ),
       favorites_count: favoriteMap.get(item.id) || item.favorites_count || 0,
       chats_count: chatMap.get(item.id) || item.chats_count || 0,
       listing_images: [...(item.listing_images || [])].sort(

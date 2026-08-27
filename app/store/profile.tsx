@@ -10,10 +10,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import StorePlanModal, { PremiumStoreBadge } from '../../components/StorePlanModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { STORE_CATEGORY_SELECT_OPTIONS } from '../../lib/storeCategories';
+import {
+  DEFAULT_STORE_LIMITS,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
@@ -38,6 +44,8 @@ export default function StoreProfileScreen() {
   const [taxInvoiceAvailable, setTaxInvoiceAvailable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [storeLimits, setStoreLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!user) return;
@@ -47,11 +55,14 @@ export default function StoreProfileScreen() {
 
     if (!access.canManageStore || !access.storeProfile) {
       setProfile(null);
+      setStoreLimits(DEFAULT_STORE_LIMITS);
       return;
     }
 
     const data = access.storeProfile;
+    const limits = await getStoreSubscriptionLimits(access.storeUserId);
     setProfile(data || null);
+    setStoreLimits(limits);
     const savedCategory = data?.store_category || '';
     if (savedCategory && !STORE_CATEGORY_SELECT_OPTIONS.includes(savedCategory)) {
       setStoreCategory('기타');
@@ -131,7 +142,15 @@ export default function StoreProfileScreen() {
       ) : (
         <>
           <View style={styles.storeSummary}>
-            <Text style={styles.storeName}>{profile?.display_name || '가게'}</Text>
+            <View style={styles.storeSummaryHeader}>
+              <Text style={styles.storeName}>{profile?.display_name || '가게'}</Text>
+              {storeLimits.isPremium ? (
+                <PremiumStoreBadge
+                  label="프리미엄 인증 완료"
+                  onPress={() => setPlanModalOpen(true)}
+                />
+              ) : null}
+            </View>
             <Text style={styles.storeCategory}>
               {storeCategory === '기타'
                 ? customStoreCategory.trim() || '업종 미등록'
@@ -248,6 +267,12 @@ export default function StoreProfileScreen() {
           <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} disabled={saving}>
             <Text style={styles.saveText}>{saving ? '저장 중...' : '저장하기'}</Text>
           </TouchableOpacity>
+
+          <StorePlanModal
+            visible={planModalOpen}
+            currentPlan={storeLimits.plan}
+            onClose={() => setPlanModalOpen(false)}
+          />
         </>
       )}
     </ScrollView>
@@ -296,6 +321,12 @@ function createStyles(theme: AppPalette) {
     borderColor: theme.border,
     padding: 14,
     gap: 4,
+  },
+  storeSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   storeName: { color: theme.text, fontSize: 18, fontWeight: '900' },
   storeCategory: {
