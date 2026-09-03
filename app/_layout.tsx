@@ -56,27 +56,33 @@ function PushNotificationRegister() {
   const { isReady, user } = useAuth();
 
   useEffect(() => {
-    if (!ENABLE_PUSH_NOTIFICATIONS) return;
+    if (!isReady || !ENABLE_PUSH_NOTIFICATIONS) return;
 
     let sub: { remove: () => void } | null = null;
+    let cancelled = false;
 
     const setup = async () => {
       const {
         setupAndroidNotificationChannels,
         listenNotificationResponse,
+        handleInitialNotificationResponse,
       } = await import('../lib/notifications');
 
       await setupAndroidNotificationChannels();
 
+      if (cancelled) return;
+
       sub = listenNotificationResponse();
+      await handleInitialNotificationResponse();
     };
 
-    setup();
+    void setup();
 
     return () => {
+      cancelled = true;
       sub?.remove();
     };
-  }, []);
+  }, [isReady]);
 
   useEffect(() => {
     if (isReady && user?.id && ENABLE_PUSH_NOTIFICATIONS) {

@@ -183,6 +183,8 @@ type RoomInfo = {
     id: string;
     store_user_id?: string | null;
     assigned_staff_user_id?: string | null;
+    estimate_request_id?: number | null;
+    estimate_quote_id?: number | null;
     name: string;
     status: string | null;
     address: string | null;
@@ -993,6 +995,8 @@ export default function ChatRoomScreen() {
             id: roomInfo?.project_id || '',
             store_user_id: null,
             assigned_staff_user_id: null,
+            estimate_request_id: roomInfo?.estimate_request_id || null,
+            estimate_quote_id: roomInfo?.estimate_quote_id || null,
             name: roomInfo?.title || '현장 채팅',
             status: isCompletedWorkChat ? 'completed' : null,
             address: null,
@@ -1003,7 +1007,15 @@ export default function ChatRoomScreen() {
             daily_reports: [],
           }
         : null),
-    [isCompletedWorkChat, isProjectRoom, roomInfo?.project, roomInfo?.project_id, roomInfo?.title]
+    [
+      isCompletedWorkChat,
+      isProjectRoom,
+      roomInfo?.estimate_quote_id,
+      roomInfo?.estimate_request_id,
+      roomInfo?.project,
+      roomInfo?.project_id,
+      roomInfo?.title,
+    ]
   );
   const currentListingId = listing?.id ?? null;
   const currentListingAuthorId = listing?.author_id ?? null;
@@ -1402,6 +1414,52 @@ export default function ChatRoomScreen() {
     if (!targetUserId) return;
     prepareChatNavigation();
     router.push(`/(tabs)/home/user/${targetUserId}` as any);
+  };
+
+  const goToEstimateManagement = () => {
+    const requestId =
+      estimateRequest?.id ||
+      roomInfo?.estimate_request_id ||
+      project?.estimate_request_id ||
+      null;
+    const quoteId = roomInfo?.estimate_quote_id || project?.estimate_quote_id || null;
+    const projectId = project?.id || roomInfo?.project_id || null;
+
+    if (!requestId && !quoteId && !projectId) return false;
+
+    prepareChatNavigation();
+    router.push({
+      pathname: '/store/estimates',
+      params: {
+        ...(requestId ? { requestId: String(requestId) } : {}),
+        ...(quoteId ? { quoteId: String(quoteId) } : {}),
+        ...(projectId ? { projectId: String(projectId) } : {}),
+      },
+    } as any);
+
+    return true;
+  };
+
+  const promptEstimateManagementAfterAppointment = () => {
+    if (!isWorkChatRoom) return;
+
+    const title = isProjectRoom ? '현장 약속 전송' : '견적 약속 전송';
+    const message = '약속이 전송되었습니다.\n거래완료 대신 견적서를 작성하거나 확인할 수 있습니다.';
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (window.confirm(`${title}\n${message}`)) {
+        goToEstimateManagement();
+      }
+      return;
+    }
+
+    Alert.alert(title, message, [
+      { text: '나중에', style: 'cancel' },
+      {
+        text: '견적서 작성',
+        onPress: goToEstimateManagement,
+      },
+    ]);
   };
 
   const goToProjectManagement = (reportId?: string | null) => {
@@ -2014,6 +2072,7 @@ export default function ChatRoomScreen() {
   // 거래완료 확인 메시지 자동 전송
   useEffect(() => {
     if (!roomId || !messagesLoaded || !latestAppointmentTimestamp) return;
+    if (isWorkChatRoom) return;
     if (latestAppointmentTimestamp > nowMs) return;
 
     const appointmentDate = new Date(latestAppointmentTimestamp);
@@ -2067,6 +2126,7 @@ export default function ChatRoomScreen() {
     nowMs,
     messages.length,
     hasAppointmentCompletionPromptForDate,
+    isWorkChatRoom,
   ]);
 
   // 키보드 높이 및 표시 상태 관리
@@ -2328,6 +2388,8 @@ export default function ChatRoomScreen() {
       assigned_staff_user_id,
       name,
       status,
+      estimate_request_id,
+      estimate_quote_id,
       address,
       start_date,
       end_date,
@@ -3642,6 +3704,7 @@ export default function ChatRoomScreen() {
     }
 
     setAppointmentModalOpen(false);
+    promptEstimateManagementAfterAppointment();
   };
 
   // 약속 모달 열기 처리
@@ -3915,6 +3978,13 @@ export default function ChatRoomScreen() {
 
   // 판매 완료 처리 후 후기 작성 페이지로 이동
   const handleReview = async () => {
+    if (isWorkChatRoom) {
+      if (!goToEstimateManagement()) {
+        showChatAlert('견적서 작성', '연결된 견적서를 찾지 못했습니다.');
+      }
+      return;
+    }
+
     if (!user?.id) {
       showChatAlert('후기 보내기', '로그인이 필요합니다.');
       return;
@@ -4401,6 +4471,13 @@ export default function ChatRoomScreen() {
   ) => {
     if (!roomId) return;
 
+    if (isWorkChatRoom) {
+      if (!goToEstimateManagement()) {
+        showChatAlert('견적서 작성', '연결된 견적서를 찾지 못했습니다.');
+      }
+      return;
+    }
+
     if (hasAppointmentCompletionResponseForDate(appointmentDate, messages, user?.id)) {
       showChatAlert('응답 완료', '이미 이 약속에 대한 응답이 완료되었습니다.');
       return;
@@ -4561,7 +4638,7 @@ export default function ChatRoomScreen() {
     const imageItems = parseImageMessage(item.message);
     const isImageMessage = imageItems.length > 0;
     const placeMessage = parsePlaceMessage(item.message);
-    const appointmentCompletionDate = item.message.startsWith(
+    const appointmentCompletionDate = !isWorkChatRoom && item.message.startsWith(
       APPOINTMENT_COMPLETION_PROMPT_PREFIX
     )
       ? parseAppointmentCompletionDate(item.message)
@@ -5790,9 +5867,11 @@ export default function ChatRoomScreen() {
                     <Text style={styles.menuText}>참여자 보기</Text>
                   </TouchableOpacity>
                 ) : null}
-                <TouchableOpacity style={styles.menuItem} onPress={handleHeaderReview}>
-                  <Text style={styles.menuText}>후기 보내기</Text>
-                </TouchableOpacity>
+                {!isWorkChatRoom && listing ? (
+                  <TouchableOpacity style={styles.menuItem} onPress={handleHeaderReview}>
+                    <Text style={styles.menuText}>후기 보내기</Text>
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity style={styles.menuItem} onPress={handleBlock}>
                   <Text style={styles.menuText}>차단하기</Text>
                 </TouchableOpacity>

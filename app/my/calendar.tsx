@@ -18,7 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
-import { saveCalendarWidgetSnapshot } from '../../lib/calendarWidget';
+import {
+  saveCalendarWidgetSnapshot,
+  type CalendarWidgetSnapshot,
+  type CalendarWidgetSnapshotEvent,
+} from '../../lib/calendarWidget';
 import { getMyStoreAccessContext, type StoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
@@ -73,6 +77,123 @@ const VIEW_MODES: { key: CalendarViewMode; label: string }[] = [
 ];
 const HOURS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
 const MINUTES = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'));
+const KOREAN_PUBLIC_HOLIDAYS_BY_YEAR: Record<number, { date: string; name: string }[]> = {
+  2026: [
+    { date: '2026-01-01', name: '신정' },
+    { date: '2026-02-16', name: '설날 연휴' },
+    { date: '2026-02-17', name: '설날' },
+    { date: '2026-02-18', name: '설날 연휴' },
+    { date: '2026-03-01', name: '삼일절' },
+    { date: '2026-03-02', name: '삼일절 대체공휴일' },
+    { date: '2026-05-01', name: '노동절' },
+    { date: '2026-05-05', name: '어린이날' },
+    { date: '2026-05-24', name: '부처님오신날' },
+    { date: '2026-05-25', name: '부처님오신날 대체공휴일' },
+    { date: '2026-06-03', name: '지방선거일' },
+    { date: '2026-06-06', name: '현충일' },
+    { date: '2026-07-17', name: '제헌절' },
+    { date: '2026-08-15', name: '광복절' },
+    { date: '2026-08-17', name: '광복절 대체공휴일' },
+    { date: '2026-09-24', name: '추석 연휴' },
+    { date: '2026-09-25', name: '추석' },
+    { date: '2026-09-26', name: '추석 연휴' },
+    { date: '2026-10-03', name: '개천절' },
+    { date: '2026-10-05', name: '개천절 대체공휴일' },
+    { date: '2026-10-09', name: '한글날' },
+    { date: '2026-12-25', name: '기독탄신일' },
+  ],
+  2027: [
+    { date: '2027-01-01', name: '신정' },
+    { date: '2027-02-06', name: '설날 연휴' },
+    { date: '2027-02-07', name: '설날' },
+    { date: '2027-02-08', name: '설날 연휴' },
+    { date: '2027-02-09', name: '설날 대체공휴일' },
+    { date: '2027-03-01', name: '삼일절' },
+    { date: '2027-05-01', name: '노동절' },
+    { date: '2027-05-03', name: '노동절 대체공휴일' },
+    { date: '2027-05-05', name: '어린이날' },
+    { date: '2027-05-13', name: '부처님오신날' },
+    { date: '2027-06-06', name: '현충일' },
+    { date: '2027-07-17', name: '제헌절' },
+    { date: '2027-07-19', name: '제헌절 대체공휴일' },
+    { date: '2027-08-15', name: '광복절' },
+    { date: '2027-08-16', name: '광복절 대체공휴일' },
+    { date: '2027-09-14', name: '추석 연휴' },
+    { date: '2027-09-15', name: '추석' },
+    { date: '2027-09-16', name: '추석 연휴' },
+    { date: '2027-10-03', name: '개천절' },
+    { date: '2027-10-04', name: '개천절 대체공휴일' },
+    { date: '2027-10-09', name: '한글날' },
+    { date: '2027-10-11', name: '한글날 대체공휴일' },
+    { date: '2027-12-25', name: '기독탄신일' },
+    { date: '2027-12-27', name: '기독탄신일 대체공휴일' },
+  ],
+  2028: [
+    { date: '2028-01-01', name: '신정' },
+    { date: '2028-01-26', name: '설날 연휴' },
+    { date: '2028-01-27', name: '설날' },
+    { date: '2028-01-28', name: '설날 연휴' },
+    { date: '2028-03-01', name: '삼일절' },
+    { date: '2028-04-12', name: '국회의원 선거일' },
+    { date: '2028-05-01', name: '노동절' },
+    { date: '2028-05-02', name: '부처님오신날' },
+    { date: '2028-05-05', name: '어린이날' },
+    { date: '2028-06-06', name: '현충일' },
+    { date: '2028-07-17', name: '제헌절' },
+    { date: '2028-08-15', name: '광복절' },
+    { date: '2028-10-02', name: '추석 연휴' },
+    { date: '2028-10-03', name: '추석/개천절' },
+    { date: '2028-10-04', name: '추석 연휴' },
+    { date: '2028-10-05', name: '추석 대체공휴일' },
+    { date: '2028-10-09', name: '한글날' },
+    { date: '2028-12-25', name: '기독탄신일' },
+  ],
+  2029: [
+    { date: '2029-01-01', name: '신정' },
+    { date: '2029-02-12', name: '설날 연휴' },
+    { date: '2029-02-13', name: '설날' },
+    { date: '2029-02-14', name: '설날 연휴' },
+    { date: '2029-03-01', name: '삼일절' },
+    { date: '2029-05-01', name: '노동절' },
+    { date: '2029-05-05', name: '어린이날' },
+    { date: '2029-05-07', name: '어린이날 대체공휴일' },
+    { date: '2029-05-20', name: '부처님오신날' },
+    { date: '2029-05-21', name: '부처님오신날 대체공휴일' },
+    { date: '2029-06-06', name: '현충일' },
+    { date: '2029-07-17', name: '제헌절' },
+    { date: '2029-08-15', name: '광복절' },
+    { date: '2029-09-21', name: '추석 연휴' },
+    { date: '2029-09-22', name: '추석' },
+    { date: '2029-09-23', name: '추석 연휴' },
+    { date: '2029-09-24', name: '추석 대체공휴일' },
+    { date: '2029-10-03', name: '개천절' },
+    { date: '2029-10-09', name: '한글날' },
+    { date: '2029-12-25', name: '기독탄신일' },
+  ],
+  2030: [
+    { date: '2030-01-01', name: '신정' },
+    { date: '2030-02-02', name: '설날 연휴' },
+    { date: '2030-02-03', name: '설날' },
+    { date: '2030-02-04', name: '설날 연휴' },
+    { date: '2030-02-05', name: '설날 대체공휴일' },
+    { date: '2030-03-01', name: '삼일절' },
+    { date: '2030-04-03', name: '대통령 선거일' },
+    { date: '2030-05-01', name: '노동절' },
+    { date: '2030-05-05', name: '어린이날' },
+    { date: '2030-05-06', name: '어린이날 대체공휴일' },
+    { date: '2030-05-09', name: '부처님오신날' },
+    { date: '2030-06-06', name: '현충일' },
+    { date: '2030-06-12', name: '지방선거일' },
+    { date: '2030-07-17', name: '제헌절' },
+    { date: '2030-08-15', name: '광복절' },
+    { date: '2030-09-11', name: '추석 연휴' },
+    { date: '2030-09-12', name: '추석' },
+    { date: '2030-09-13', name: '추석 연휴' },
+    { date: '2030-10-03', name: '개천절' },
+    { date: '2030-10-09', name: '한글날' },
+    { date: '2030-12-25', name: '기독탄신일' },
+  ],
+};
 
 function formatYmd(date: Date) {
   const year = date.getFullYear();
@@ -211,6 +332,30 @@ function getEventKindLabel(kind: CalendarEventKind) {
   return '개인';
 }
 
+function getKoreanPublicHolidaysForMonth(month: string) {
+  const year = Number(month.slice(0, 4));
+  const holidays = KOREAN_PUBLIC_HOLIDAYS_BY_YEAR[year] || [];
+
+  return holidays.filter((holiday) => holiday.date.startsWith(month));
+}
+
+function isKoreanPublicHoliday(dateText?: string | null) {
+  if (!dateText || !isValidYmd(dateText)) return false;
+  const year = Number(dateText.slice(0, 4));
+  const holidays = KOREAN_PUBLIC_HOLIDAYS_BY_YEAR[year] || [];
+
+  return holidays.some((holiday) => holiday.date === dateText);
+}
+
+function isSundayDate(dateText?: string | null) {
+  if (!dateText || !isValidYmd(dateText)) return false;
+  return parseYmd(dateText).getDay() === 0;
+}
+
+function isRestDate(dateText?: string | null) {
+  return isSundayDate(dateText) || isKoreanPublicHoliday(dateText);
+}
+
 function getScheduleStatusLabel(status?: string | null) {
   if (status === 'in_progress') return '진행';
   if (status === 'done') return '완료';
@@ -227,12 +372,14 @@ function getCalendarEventWidgetTitle(event: CalendarEvent) {
   return [event.customerName, event.location, event.title].filter(Boolean).join(' · ');
 }
 
-function mapCalendarEventForWidget(event: CalendarEvent) {
+function mapCalendarEventForWidget(event: CalendarEvent): CalendarWidgetSnapshotEvent {
   return {
     id: event.id,
     kind: event.kind,
     title: getCalendarEventWidgetTitle(event),
     subtitle: event.projectName || formatEventRange(event),
+    projectName: event.projectName || '',
+    workTitle: event.title || '',
     timeText: getEventTimeText(event),
     startDate: event.startDate,
     endDate: event.endDate || event.startDate,
@@ -240,7 +387,7 @@ function mapCalendarEventForWidget(event: CalendarEvent) {
   };
 }
 
-function makeCalendarWidgetSnapshot(events: CalendarEvent[]) {
+function makeCalendarWidgetSnapshot(events: CalendarEvent[]): CalendarWidgetSnapshot {
   const today = getTodayYmd();
   const monthStart = formatYmd(new Date(parseYmd(today).getFullYear(), parseYmd(today).getMonth(), 1));
   const monthEnd = formatYmd(new Date(parseYmd(today).getFullYear(), parseYmd(today).getMonth() + 1, 0));
@@ -262,6 +409,7 @@ function makeCalendarWidgetSnapshot(events: CalendarEvent[]) {
     updatedAt: new Date().toISOString(),
     events: monthEvents.slice(0, 120).map(mapCalendarEventForWidget),
     agendaEvents: agendaEvents.map(mapCalendarEventForWidget),
+    holidays: getKoreanPublicHolidaysForMonth(month),
   };
 }
 
@@ -617,7 +765,7 @@ export default function CalendarScreen() {
       );
     }
 
-    const nextEvents = [
+    const nextEvents: CalendarEvent[] = [
       ...buildProjectEvents((projectResult.data || []) as any[], access, user.id),
       ...buildEstimateEvents((estimateResult.data || []) as any[], access, user.id),
       ...buildPersonalEvents(personalResult.error ? [] : (personalResult.data || [])),
@@ -1116,8 +1264,8 @@ export default function CalendarScreen() {
 
         <View style={styles.calendarBox}>
           <View style={styles.weekdayRow}>
-            {WEEKDAYS.map((day) => (
-              <Text key={day} style={styles.weekdayText}>{day}</Text>
+            {WEEKDAYS.map((day, index) => (
+              <Text key={day} style={[styles.weekdayText, index === 0 && styles.restDayText]}>{day}</Text>
             ))}
           </View>
           {calendarWeeks.map((week, weekIndex) => (
@@ -1126,6 +1274,7 @@ export default function CalendarScreen() {
                 const dateText = cell.dateText;
                 const active = !!dateText && dateText === selectedDate;
                 const isToday = !!dateText && dateText === today;
+                const isRest = isRestDate(dateText);
                 const dayEvents = dateText
                   ? filteredEvents.filter((event) => dateInEvent(dateText, event)).slice(0, 4)
                   : [];
@@ -1137,6 +1286,7 @@ export default function CalendarScreen() {
                       styles.dayCell,
                       !dateText && styles.emptyDayCell,
                       active && styles.dayCellActive,
+                      active && isRest && styles.dayCellRestActive,
                     ]}
                     disabled={!dateText}
                     onPress={() => dateText && selectDate(dateText)}
@@ -1146,7 +1296,9 @@ export default function CalendarScreen() {
                       style={[
                         styles.dayText,
                         isToday && styles.todayDayText,
+                        isRest && styles.restDayText,
                         active && styles.dayTextActive,
+                        active && isRest && styles.dayTextRestActive,
                       ]}
                     >
                       {cell.day || ''}
@@ -1261,8 +1413,8 @@ export default function CalendarScreen() {
 
               <View style={styles.formCalendarBox}>
                 <View style={styles.weekdayRow}>
-                  {WEEKDAYS.map((day) => (
-                    <Text key={day} style={styles.weekdayText}>{day}</Text>
+                  {WEEKDAYS.map((day, index) => (
+                    <Text key={day} style={[styles.weekdayText, index === 0 && styles.restDayText]}>{day}</Text>
                   ))}
                 </View>
                 {formCalendarWeeks.map((week, weekIndex) => (
@@ -1274,6 +1426,7 @@ export default function CalendarScreen() {
                       const rangeEnd = personalForm.endDate || personalForm.startDate;
                       const inRange = !!dateText && dateText >= personalForm.startDate && dateText <= rangeEnd;
                       const active = isStart || (!personalForm.sameDay && isEnd);
+                      const isRest = isRestDate(dateText);
 
                       return (
                         <TouchableOpacity
@@ -1283,6 +1436,7 @@ export default function CalendarScreen() {
                             !dateText && styles.emptyDayCell,
                             inRange && !active && styles.formDayCellInRange,
                             active && styles.formDayCellActive,
+                            active && isRest && styles.dayCellRestActive,
                           ]}
                           disabled={!dateText}
                           onPress={() => dateText && selectPersonalFormDate(dateText)}
@@ -1291,7 +1445,9 @@ export default function CalendarScreen() {
                           <Text
                             style={[
                               styles.formDayText,
+                              isRest && styles.restDayText,
                               active && styles.formDayTextActive,
+                              active && isRest && styles.dayTextRestActive,
                             ]}
                           >
                             {cell.day || ''}
@@ -1647,6 +1803,9 @@ function createStyles(theme: AppPalette) {
     dayCellActive: {
       backgroundColor: theme.primarySoft,
     },
+    dayCellRestActive: {
+      backgroundColor: theme.danger,
+    },
     dayText: {
       color: theme.text,
       fontSize: 13,
@@ -1656,8 +1815,14 @@ function createStyles(theme: AppPalette) {
       color: theme.primary,
       fontWeight: '900',
     },
+    restDayText: {
+      color: theme.danger,
+    },
     dayTextActive: {
       color: theme.text,
+    },
+    dayTextRestActive: {
+      color: '#ffffff',
     },
     dayDots: {
       minHeight: 8,

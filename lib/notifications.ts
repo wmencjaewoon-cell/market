@@ -171,86 +171,167 @@ export async function setupAndroidNotificationChannels() {
   });
 }
 
+type NotificationRouteData = {
+  type?: string;
+  roomId?: string;
+  listingId?: number | string;
+  estimateRequestId?: number | string;
+  projectId?: string;
+  projectMemberId?: string;
+  inviteToken?: string;
+  staffMemberId?: string;
+};
+
+const handledNotificationResponseKeys = new Set<string>();
+
+function getNotificationResponseKey(response: Notifications.NotificationResponse) {
+  const request = response.notification.request;
+  const data = request.content.data as NotificationRouteData | undefined;
+
+  return [
+    request.identifier,
+    response.actionIdentifier,
+    data?.type,
+    data?.roomId,
+    data?.listingId,
+    data?.estimateRequestId,
+    data?.projectId,
+    data?.inviteToken,
+    request.content.title,
+    request.content.body,
+  ]
+    .filter((value) => value !== undefined && value !== null && value !== '')
+    .join(':');
+}
+
+function openListingPost(listingId: number | string) {
+  const normalizedListingId = String(listingId).trim();
+  if (!normalizedListingId) return false;
+
+  router.push(`/(tabs)/home/post/${normalizedListingId}` as any);
+  return true;
+}
+
+function clearHandledNotificationResponse() {
+  try {
+    if (Platform.OS === 'web') return;
+
+    Notifications.clearLastNotificationResponse();
+  } catch (e) {
+    console.log('알림 응답 정리 실패:', e);
+  }
+}
+
+function routeNotificationData(data?: NotificationRouteData | null) {
+  if (data?.type === 'chat' && data?.roomId) {
+    router.push(`/chat/${data.roomId}` as any);
+    return true;
+  }
+
+  if (data?.type === 'review') {
+    if (data.roomId) {
+      router.push(`/chat/${data.roomId}` as any);
+      return true;
+    }
+
+    if (data.listingId) {
+      return openListingPost(data.listingId);
+    }
+  }
+
+  if (
+    (data?.type === 'keyword_listing' ||
+      data?.type === 'favorite_listing_updated') &&
+    data?.listingId
+  ) {
+    return openListingPost(data.listingId);
+  }
+
+  if (data?.type === 'estimate_request') {
+    if (data.estimateRequestId) {
+      router.push(`/store/estimates?requestId=${data.estimateRequestId}` as any);
+      return true;
+    }
+
+    router.push('/store/estimates' as any);
+    return true;
+  }
+
+  if (data?.type === 'project_invite') {
+    if (data.inviteToken) {
+      router.push(`/project-invite/${data.inviteToken}` as any);
+      return true;
+    }
+
+    if (data.projectId) {
+      router.push(`/store/projects?projectId=${data.projectId}` as any);
+      return true;
+    }
+  }
+
+  if (
+    (
+      data?.type === 'project_schedule_created' ||
+      data?.type === 'project_schedule_updated' ||
+      data?.type === 'project_daily_report_created'
+    ) &&
+    data.roomId
+  ) {
+    router.push(`/chat/${data.roomId}` as any);
+    return true;
+  }
+
+  if (data?.type === 'staff_password_reset_request') {
+    router.push('/store/staff' as any);
+    return true;
+  }
+
+  return false;
+}
+
+function handleNotificationResponse(response: Notifications.NotificationResponse) {
+  const responseKey = getNotificationResponseKey(response);
+
+  if (responseKey && handledNotificationResponseKeys.has(responseKey)) {
+    return false;
+  }
+
+  const data = response.notification.request.content.data as
+    | NotificationRouteData
+    | undefined;
+  const didRoute = routeNotificationData(data);
+
+  if (didRoute && responseKey) {
+    handledNotificationResponseKeys.add(responseKey);
+  }
+
+  if (didRoute) {
+    clearHandledNotificationResponse();
+  }
+
+  return didRoute;
+}
+
 export function listenNotificationResponse() {
   const subscription = Notifications.addNotificationResponseReceivedListener(
     (response) => {
-      const data = response.notification.request.content.data as {
-        type?: string;
-        roomId?: string;
-        listingId?: number | string;
-        estimateRequestId?: number | string;
-        projectId?: string;
-        projectMemberId?: string;
-        inviteToken?: string;
-        staffMemberId?: string;
-      };
-
-      if (data?.type === 'chat' && data?.roomId) {
-        router.push(`/chat/${data.roomId}` as any);
-        return;
-      }
-
-      if (data?.type === 'review') {
-        if (data.roomId) {
-          router.push(`/chat/${data.roomId}` as any);
-          return;
-        }
-
-        if (data.listingId) {
-          router.push(`/(tabs)/home/post/${data.listingId}` as any);
-          return;
-        }
-      }
-
-      if (data?.type === 'keyword_listing' && data?.listingId) {
-        router.push(`/(tabs)/home/post/${data.listingId}` as any);
-      }
-
-      if (data?.type === 'favorite_listing_updated' && data?.listingId) {
-        router.push(`/(tabs)/home/post/${data.listingId}` as any);
-        return;
-      }
-
-      if (data?.type === 'estimate_request') {
-        if (data.estimateRequestId) {
-          router.push(`/store/estimates?requestId=${data.estimateRequestId}` as any);
-          return;
-        }
-
-        router.push('/store/estimates' as any);
-        return;
-      }
-
-      if (data?.type === 'project_invite') {
-        if (data.inviteToken) {
-          router.push(`/project-invite/${data.inviteToken}` as any);
-          return;
-        }
-
-        if (data.projectId) {
-          router.push(`/store/projects?projectId=${data.projectId}` as any);
-          return;
-        }
-      }
-
-      if (
-        (
-          data?.type === 'project_schedule_created' ||
-          data?.type === 'project_schedule_updated' ||
-          data?.type === 'project_daily_report_created'
-        ) &&
-        data.roomId
-      ) {
-        router.push(`/chat/${data.roomId}` as any);
-        return;
-      }
-
-      if (data?.type === 'staff_password_reset_request') {
-        router.push('/store/staff' as any);
-        return;
-      }
+      handleNotificationResponse(response);
     }
   );
 
   return subscription;
+}
+
+export async function handleInitialNotificationResponse() {
+  try {
+    if (Platform.OS === 'web') return false;
+
+    const response = Notifications.getLastNotificationResponse();
+    if (!response) return false;
+
+    return handleNotificationResponse(response);
+  } catch (e) {
+    console.log('초기 알림 이동 처리 실패:', e);
+    return false;
+  }
 }

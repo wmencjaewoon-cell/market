@@ -633,14 +633,19 @@ export default function MapTabScreen() {
       {selectedStore ? (
         <View style={styles.bottomCard}>
           <View style={styles.cardTopRow}>
-            <Text
-              style={[
-                styles.storeBadge,
-                shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
-              ]}
-            >
-              {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
-            </Text>
+            <View style={styles.storeBadgeRow}>
+              <Text
+                style={[
+                  styles.storeBadge,
+                  shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
+                ]}
+              >
+                {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
+              </Text>
+              {selectedStore.is_premium ? (
+                <Text style={styles.premiumStoreBadge}>프리미엄</Text>
+              ) : null}
+            </View>
             <TouchableOpacity onPress={() => setSelectedStore(null)}>
               <Text style={styles.closeText}>닫기</Text>
             </TouchableOpacity>
@@ -744,14 +749,21 @@ export default function MapTabScreen() {
                       </View>
 
                       <View style={styles.groupInfo}>
-                        <Text
-                          style={[
-                            styles.storeGroupBadge,
-                            shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
-                          ]}
-                        >
-                          {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
-                        </Text>
+                        <View style={styles.storeGroupBadgeRow}>
+                          <Text
+                            style={[
+                              styles.storeGroupBadge,
+                              shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
+                            ]}
+                          >
+                            {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
+                          </Text>
+                          {store.is_premium ? (
+                            <Text style={[styles.premiumStoreBadge, styles.premiumStoreGroupBadge]}>
+                              프리미엄
+                            </Text>
+                          ) : null}
+                        </View>
                         <Text style={styles.groupTitle} numberOfLines={1}>
                           {store.display_name || '가게'}
                         </Text>
@@ -916,6 +928,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
+  storeBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+    marginBottom: 8,
+  },
   storeBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#166534',
@@ -926,7 +945,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     fontSize: 12,
     fontWeight: '800',
-    marginBottom: 8,
+  },
+  premiumStoreBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#047857',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '900',
   },
   recommendedStoreBadge: {
     backgroundColor: '#14532d',
@@ -1034,7 +1063,17 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     fontSize: 11,
     fontWeight: '700',
+  },
+  storeGroupBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
     marginBottom: 8,
+  },
+  premiumStoreGroupBadge: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   groupTitle: {
     fontSize: 15,

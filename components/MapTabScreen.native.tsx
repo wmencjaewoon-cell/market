@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
+  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -70,9 +71,85 @@ type StoreGroupedMarker = {
 
 type MapLayer = 'listings' | 'stores';
 
+type MapSize = {
+  width: number;
+  height: number;
+};
+
+type AndroidMapMarker =
+  | {
+      type: 'listing';
+      key: string;
+      label: string;
+      backgroundColor: string;
+      highlighted: boolean;
+      x: number;
+      y: number;
+      group: GroupedMarker;
+    }
+  | {
+      type: 'store';
+      key: string;
+      label: string;
+      backgroundColor: string;
+      highlighted: boolean;
+      x: number;
+      y: number;
+      group: StoreGroupedMarker;
+    };
+
+const DEFAULT_MAP_REGION: Region = {
+  latitude: 37.5665,
+  longitude: 126.978,
+  latitudeDelta: 0.2,
+  longitudeDelta: 0.2,
+};
+
 function roundCoord(value: number, precision = 3) {
   const factor = Math.pow(10, precision);
   return Math.round(value * factor) / factor;
+}
+
+function getClusterPrecision(region: Region) {
+  const delta = Math.max(region.latitudeDelta, region.longitudeDelta);
+
+  if (delta >= 1.2) return 1;
+  if (delta >= 0.011) return 2;
+  if (delta >= 0.018) return 3;
+  if (delta >= 0.006) return 4;
+  return 5;
+}
+
+function averageCoordinate<T>(
+  items: T[],
+  getLatitude: (item: T) => number,
+  getLongitude: (item: T) => number
+) {
+  const count = Math.max(items.length, 1);
+
+  return {
+    latitude: items.reduce((sum, item) => sum + getLatitude(item), 0) / count,
+    longitude: items.reduce((sum, item) => sum + getLongitude(item), 0) / count,
+  };
+}
+
+function projectCoordinateToPoint(
+  coordinate: { latitude: number; longitude: number },
+  region: Region,
+  mapSize: MapSize
+) {
+  if (mapSize.width <= 0 || mapSize.height <= 0) return null;
+
+  const leftLongitude = region.longitude - region.longitudeDelta / 2;
+  const topLatitude = region.latitude + region.latitudeDelta / 2;
+  const x = ((coordinate.longitude - leftLongitude) / region.longitudeDelta) * mapSize.width;
+  const y = ((topLatitude - coordinate.latitude) / region.latitudeDelta) * mapSize.height;
+
+  if (x < -90 || x > mapSize.width + 90 || y < -90 || y > mapSize.height + 90) {
+    return null;
+  }
+
+  return { x, y };
 }
 
 function getDailyStoreExposureScore(storeId: string) {
@@ -115,8 +192,9 @@ export default function MapTabScreen() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [storeGroupModalOpen, setStoreGroupModalOpen] = useState(false);
   const [showHint, setShowHint] = useState(true);
-  const [tracksMarkerViewChanges, setTracksMarkerViewChanges] = useState(true);
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_MAP_REGION);
+  const [mapSize, setMapSize] = useState<MapSize>({ width: 0, height: 0 });
 
   useEffect(() => {
     fetchListings();
@@ -284,10 +362,11 @@ export default function MapTabScreen() {
 
   const groupedMarkers = useMemo<GroupedMarker[]>(() => {
     const map = new Map<string, ListingMapItem[]>();
+    const precision = getClusterPrecision(mapRegion);
 
     filteredItems.forEach((item) => {
-      const lat = roundCoord(item.latitude, 3);
-      const lng = roundCoord(item.longitude, 3);
+      const lat = roundCoord(item.latitude, precision);
+      const lng = roundCoord(item.longitude, precision);
       const key = `${lat},${lng}`;
 
       const bucket = map.get(key) || [];
@@ -295,20 +374,29 @@ export default function MapTabScreen() {
       map.set(key, bucket);
     });
 
-    return Array.from(map.entries()).map(([key, bucket]) => ({
-      key,
-      latitude: bucket[0].latitude,
-      longitude: bucket[0].longitude,
-      items: bucket,
-    }));
-  }, [filteredItems]);
+    return Array.from(map.entries()).map(([key, bucket]) => {
+      const coordinate = averageCoordinate(
+        bucket,
+        (item) => item.latitude,
+        (item) => item.longitude
+      );
+
+      return {
+        key,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        items: bucket,
+      };
+    });
+  }, [filteredItems, mapRegion]);
 
   const groupedStoreMarkers = useMemo<StoreGroupedMarker[]>(() => {
     const map = new Map<string, StoreMapItem[]>();
+    const precision = getClusterPrecision(mapRegion);
 
     filteredStores.forEach((store) => {
-      const lat = roundCoord(store.store_latitude, 3);
-      const lng = roundCoord(store.store_longitude, 3);
+      const lat = roundCoord(store.store_latitude, precision);
+      const lng = roundCoord(store.store_longitude, precision);
       const key = `${lat},${lng}`;
 
       const bucket = map.get(key) || [];
@@ -316,25 +404,33 @@ export default function MapTabScreen() {
       map.set(key, bucket);
     });
 
-    return Array.from(map.entries()).map(([key, bucket]) => ({
-      key,
-      latitude: bucket[0].store_latitude,
-      longitude: bucket[0].store_longitude,
-      items: bucket,
-    }));
-  }, [filteredStores]);
+    return Array.from(map.entries()).map(([key, bucket]) => {
+      const coordinate = averageCoordinate(
+        bucket,
+        (store) => store.store_latitude,
+        (store) => store.store_longitude
+      );
+
+      return {
+        key,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        items: bucket,
+      };
+    });
+  }, [filteredStores, mapRegion]);
 
   const activeCoordinates = useMemo(() => {
     return activeLayer === 'stores'
-      ? groupedStoreMarkers.map((item) => ({
-          latitude: item.latitude,
-          longitude: item.longitude,
+      ? filteredStores.map((store) => ({
+          latitude: store.store_latitude,
+          longitude: store.store_longitude,
         }))
-      : groupedMarkers.map((item) => ({
+      : filteredItems.map((item) => ({
           latitude: item.latitude,
           longitude: item.longitude,
         }));
-  }, [activeLayer, groupedMarkers, groupedStoreMarkers]);
+  }, [activeLayer, filteredItems, filteredStores]);
 
   useEffect(() => {
     if (!mapRef.current || activeCoordinates.length === 0) return;
@@ -357,29 +453,15 @@ export default function MapTabScreen() {
     return () => clearTimeout(timer);
   }, [activeCoordinates]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-
-    setTracksMarkerViewChanges(true);
-
-    const timer = setTimeout(() => {
-      setTracksMarkerViewChanges(false);
-    }, 900);
-
-    return () => clearTimeout(timer);
-  }, [activeCoordinates]);
-
-  const initialRegion: Region = {
-    latitude: 37.5665,
-    longitude: 126.978,
-    latitudeDelta: 0.2,
-    longitudeDelta: 0.2,
-  };
-
   function getCategoryLabel(category: ListingMapItem['category']) {
     if (category === 'trade') return '판매';
     if (category === 'share') return '나눔';
     return '구해요';
+  }
+
+  function getMarkerCategoryLabel(category: ListingMapItem['category']) {
+    if (category === 'want') return '구함';
+    return getCategoryLabel(category);
   }
 
   const getCategoryColor = (category: ListingMapItem['category']) => {
@@ -387,6 +469,115 @@ export default function MapTabScreen() {
     if (category === 'share') return '#16a34a';
     return '#d97706';
   };
+
+  const renderListingMarkerContent = (label: string, backgroundColor: string) => {
+    return (
+      <View collapsable={false} style={styles.markerOuter}>
+        <View
+          collapsable={false}
+          style={[
+            styles.markerWrap,
+            { backgroundColor },
+          ]}
+        >
+          <Text style={styles.markerText}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderStoreMarkerContent = (label: string, highlighted: boolean) => {
+    return (
+      <View collapsable={false} style={styles.markerOuter}>
+        <View
+          collapsable={false}
+          style={[
+            styles.markerWrap,
+            styles.storeMarkerWrap,
+            highlighted && styles.storeMarkerHighlight,
+          ]}
+        >
+          <Text style={styles.markerText}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  const renderAndroidMarkerContent = (label: string, backgroundColor: string, highlighted = false) => {
+    return (
+      <View style={styles.markerOuter}>
+        <View
+          style={[
+            styles.markerWrap,
+            { backgroundColor },
+            highlighted && styles.storeMarkerHighlight,
+          ]}
+        >
+          <Text style={styles.markerText} numberOfLines={1} allowFontScaling={false}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  const androidMapMarkers = useMemo<AndroidMapMarker[]>(() => {
+    if (Platform.OS !== 'android') return [];
+
+    if (activeLayer === 'stores') {
+      return groupedStoreMarkers.flatMap((group) => {
+        const single = group.items.length === 1;
+        const first = group.items[0];
+        const highlighted = group.items.some((store) => store.map_highlight);
+        const recommended = single && shouldShowRecommendedStore(first);
+        const point = projectCoordinateToPoint(
+          { latitude: group.latitude, longitude: group.longitude },
+          mapRegion,
+          mapSize
+        );
+
+        if (!point) return [];
+
+        return [{
+          type: 'store' as const,
+          key: `android-store-${group.key}`,
+          label: single ? (recommended ? '추천' : '가게') : String(group.items.length),
+          backgroundColor: highlighted ? '#166534' : '#059669',
+          highlighted,
+          x: point.x,
+          y: point.y,
+          group,
+        }];
+      });
+    }
+
+    return groupedMarkers.flatMap((group) => {
+      const single = group.items.length === 1;
+      const first = group.items[0];
+      const point = projectCoordinateToPoint(
+        { latitude: group.latitude, longitude: group.longitude },
+        mapRegion,
+        mapSize
+      );
+
+      if (!point) return [];
+
+      return [{
+        type: 'listing' as const,
+        key: `android-listing-${group.key}`,
+        label: single ? getMarkerCategoryLabel(first.category) : String(group.items.length),
+        backgroundColor: single ? getCategoryColor(first.category) : '#166534',
+        highlighted: false,
+        x: point.x,
+        y: point.y,
+        group,
+      }];
+    });
+  }, [activeLayer, groupedMarkers, groupedStoreMarkers, mapRegion, mapSize]);
 
   const getListingImageUrl = (item: ListingMapItem) => {
     const imagePath = item.listing_images?.[0]?.image_path;
@@ -442,6 +633,24 @@ export default function MapTabScreen() {
     );
   };
 
+  const handleMapLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+
+    setMapSize((prev) => {
+      if (prev.width === width && prev.height === height) return prev;
+      return { width, height };
+    });
+  };
+
+  const handleRegionChange = (region: Region) => {
+    if (Platform.OS !== 'android') return;
+    setMapRegion(region);
+  };
+
+  const handleRegionChangeComplete = (region: Region) => {
+    setMapRegion(region);
+  };
+
   const handleSearchChange = (value: string) => {
     const blockedKeyword = checkProhibitedContent(value);
 
@@ -466,13 +675,18 @@ export default function MapTabScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
-        initialRegion={initialRegion}
+        initialRegion={DEFAULT_MAP_REGION}
+        onLayout={handleMapLayout}
+        onRegionChange={handleRegionChange}
+        onRegionChangeComplete={handleRegionChangeComplete}
       >
-        {activeLayer === 'listings' &&
+        {Platform.OS !== 'android' && activeLayer === 'listings' &&
           groupedMarkers.map((group) => {
             const single = group.items.length === 1;
             const first = group.items[0];
             const color = getCategoryColor(first.category);
+            const label = single ? getMarkerCategoryLabel(first.category) : String(group.items.length);
+            const backgroundColor = single ? color : '#166534';
 
             return (
               <Marker
@@ -481,30 +695,20 @@ export default function MapTabScreen() {
                   latitude: group.latitude,
                   longitude: group.longitude,
                 }}
-                tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
+                tracksViewChanges={false}
                 onPress={() => handleMarkerPress(group)}
               >
-                <View collapsable={false} style={styles.markerOuter}>
-                  <View
-                    style={[
-                      styles.markerWrap,
-                      { backgroundColor: single ? color : theme.text },
-                    ]}
-                  >
-                    <Text style={styles.markerText}>
-                      {single ? getCategoryLabel(first.category) : String(group.items.length)}
-                    </Text>
-                  </View>
-                </View>
+                {renderListingMarkerContent(label, backgroundColor)}
               </Marker>
             );
           })}
-        {activeLayer === 'stores' &&
+        {Platform.OS !== 'android' && activeLayer === 'stores' &&
           groupedStoreMarkers.map((group) => {
             const single = group.items.length === 1;
             const first = group.items[0];
             const highlighted = group.items.some((store) => store.map_highlight);
             const recommended = single && shouldShowRecommendedStore(first);
+            const label = single ? (recommended ? '추천' : '가게') : String(group.items.length);
 
             return (
               <Marker
@@ -513,26 +717,43 @@ export default function MapTabScreen() {
                   latitude: group.latitude,
                   longitude: group.longitude,
                 }}
-                tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
+                tracksViewChanges={false}
                 onPress={() => handleStoreMarkerPress(group)}
               >
-                <View collapsable={false} style={styles.markerOuter}>
-                  <View
-                    style={[
-                      styles.markerWrap,
-                      styles.storeMarkerWrap,
-                      highlighted && styles.storeMarkerHighlight,
-                    ]}
-                  >
-                    <Text style={styles.markerText}>
-                      {single ? (recommended ? '추천' : '가게') : String(group.items.length)}
-                    </Text>
-                  </View>
-                </View>
+                {renderStoreMarkerContent(label, highlighted)}
               </Marker>
             );
           })}
       </MapView>
+
+      {Platform.OS === 'android' ? (
+        <View pointerEvents="box-none" style={styles.androidMarkerLayer}>
+          {androidMapMarkers.map((marker) => (
+            <Pressable
+              key={marker.key}
+              hitSlop={8}
+              pointerEvents="auto"
+              style={[
+                styles.androidMarkerPressable,
+                {
+                  left: marker.x - 36,
+                  top: marker.y - 26,
+                },
+              ]}
+              onPress={() => {
+                if (marker.type === 'listing') {
+                  handleMarkerPress(marker.group);
+                  return;
+                }
+
+                handleStoreMarkerPress(marker.group);
+              }}
+            >
+              {renderAndroidMarkerContent(marker.label, marker.backgroundColor, marker.highlighted)}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       <View style={[styles.searchBox, { top: Math.max(insets.top + 8, 14) }]}>
         <TextInput
@@ -643,14 +864,19 @@ export default function MapTabScreen() {
       {selectedStore ? (
         <View style={styles.bottomCard}>
           <View style={styles.cardTopRow}>
-            <Text
-              style={[
-                styles.storeBadge,
-                shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
-              ]}
-            >
-              {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
-            </Text>
+            <View style={styles.storeBadgeRow}>
+              <Text
+                style={[
+                  styles.storeBadge,
+                  shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
+                ]}
+              >
+                {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
+              </Text>
+              {selectedStore.is_premium ? (
+                <Text style={styles.premiumStoreBadge}>프리미엄</Text>
+              ) : null}
+            </View>
 
             <TouchableOpacity onPress={() => setSelectedStore(null)}>
               <Text style={styles.closeText}>닫기</Text>
@@ -755,14 +981,21 @@ export default function MapTabScreen() {
                       </View>
 
                       <View style={styles.groupInfo}>
-                        <Text
-                          style={[
-                            styles.storeGroupBadge,
-                            shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
-                          ]}
-                        >
-                          {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
-                        </Text>
+                        <View style={styles.storeGroupBadgeRow}>
+                          <Text
+                            style={[
+                              styles.storeGroupBadge,
+                              shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
+                            ]}
+                          >
+                            {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
+                          </Text>
+                          {store.is_premium ? (
+                            <Text style={[styles.premiumStoreBadge, styles.premiumStoreGroupBadge]}>
+                              프리미엄
+                            </Text>
+                          ) : null}
+                        </View>
                         <Text style={styles.groupTitle} numberOfLines={1}>
                           {store.display_name || '가게'}
                         </Text>
@@ -894,6 +1127,18 @@ function createStyles(theme: AppPalette) {
     includeFontPadding: false,
   },
 
+  androidMarkerLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  androidMarkerPressable: {
+    position: 'absolute',
+    width: 72,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   bottomHint: {
     position: 'absolute',
     left: 16,
@@ -968,6 +1213,13 @@ function createStyles(theme: AppPalette) {
     fontWeight: '700',
     marginBottom: 10,
   },
+  storeBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+    marginBottom: 10,
+  },
   storeBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#166534',
@@ -978,7 +1230,17 @@ function createStyles(theme: AppPalette) {
     overflow: 'hidden',
     fontSize: 12,
     fontWeight: '800',
-    marginBottom: 10,
+  },
+  premiumStoreBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#047857',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '900',
   },
   recommendedStoreBadge: {
     backgroundColor: '#14532d',
@@ -1085,7 +1347,17 @@ function createStyles(theme: AppPalette) {
     overflow: 'hidden',
     fontSize: 11,
     fontWeight: '700',
+  },
+  storeGroupBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
     marginBottom: 8,
+  },
+  premiumStoreGroupBadge: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   groupTitle: {
     fontSize: 15,

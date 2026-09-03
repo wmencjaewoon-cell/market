@@ -5,10 +5,17 @@ export type CalendarWidgetSnapshotEvent = {
   kind: 'project' | 'estimate' | 'report' | 'personal';
   title: string;
   subtitle: string;
+  projectName?: string;
+  workTitle?: string;
   timeText: string;
   startDate: string;
   endDate: string;
   url: string;
+};
+
+export type CalendarWidgetSnapshotHoliday = {
+  date: string;
+  name: string;
 };
 
 export type CalendarWidgetSnapshot = {
@@ -18,6 +25,7 @@ export type CalendarWidgetSnapshot = {
   updatedAt: string;
   events: CalendarWidgetSnapshotEvent[];
   agendaEvents: CalendarWidgetSnapshotEvent[];
+  holidays: CalendarWidgetSnapshotHoliday[];
 };
 
 type CalendarWidgetNativeModule = {
