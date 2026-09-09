@@ -1,3 +1,4 @@
+// 알림 목록 화면: 푸시/앱 내부 알림을 조회하고 알림 payload에 맞는 화면으로 이동한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -175,9 +176,7 @@ export default function NotificationsScreen() {
       setItems((prev) =>
         prev.map((item) => (item.read_at ? item : { ...item, read_at: readAt }))
       );
-    } catch (e: any) {
-      console.log('전체 읽음 처리 실패:', e);
-      showAlert('읽음 처리 실패', e?.message || '알림을 읽음 처리하지 못했습니다.');
+    } catch (e: any) {      showAlert('읽음 처리 실패', e?.message || '알림을 읽음 처리하지 못했습니다.');
     } finally {
       setBulkAction(null);
     }
@@ -194,9 +193,7 @@ export default function NotificationsScreen() {
     try {
       await deleteAllNotifications();
       setItems([]);
-    } catch (e: any) {
-      console.log('전체 알림 삭제 실패:', e);
-      showAlert('삭제 실패', e?.message || '알림을 모두 삭제하지 못했습니다.');
+    } catch (e: any) {      showAlert('삭제 실패', e?.message || '알림을 모두 삭제하지 못했습니다.');
     } finally {
       setBulkAction(null);
     }

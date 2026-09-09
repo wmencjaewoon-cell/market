@@ -2,7 +2,7 @@
   "expo": {
     "name": "인테리어마켓",
     "slug": "interior-market",
-    "version": "1.4.2",
+    "version": "1.4.3",
     "orientation": "portrait",  
     "icon": "./assets/images/interior-market.jpg",
     "scheme": "interiormarket",
@@ -13,17 +13,16 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-mark.png",
+          "image": "./assets/images/interior-market.jpg",
           "imageWidth": 168,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#fff8ec",
           "dark": {
-            "image": "./assets/images/splash-mark.png",
-            "backgroundColor": "#000000"
+            "image": "./assets/images/interior-market.jpg",
+            "backgroundColor": "#0f1115"
           }
         }
-      ],
-      "./plugins/withSplashIdentity"
+      ]
     ],
     "androidNavigationBar": {
       "backgroundColor": "#0f1115",
@@ -49,7 +48,7 @@
     },
     "android": {
       "googleServicesFile": "./google-services.json",
-      "softwareKeyboardLayoutMode": "resize",
+      "softwareKeyboardLayoutMode": "pan",
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
@@ -85,7 +84,7 @@
       },
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",
-        "foregroundImage": "./assets/images/android-splash-foreground.png"
+        "foregroundImage": "./assets/images/interior-market.jpg"
       },
       "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,

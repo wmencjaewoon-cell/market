@@ -158,11 +158,6 @@ serve(async (req) => {
       .from("auth_activity_logs")
       .delete()
       .lt("created_at", retentionCutoff);
-
-    if (cleanupError) {
-      console.log("오래된 접속기록 정리 실패:", cleanupError.message);
-    }
-
     const { error: insertError } = await adminClient
       .from("auth_activity_logs")
       .insert({
@@ -188,9 +183,7 @@ serve(async (req) => {
     }
 
     return jsonResponse({ ok: true });
-  } catch (error) {
-    console.log("접속기록 저장 실패:", error);
-    return errorResponse(
+  } catch (error) {    return errorResponse(
       "접속기록 저장 중 오류가 발생했습니다.",
       500,
       error instanceof Error ? error.message : error

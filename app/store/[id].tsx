@@ -1,3 +1,4 @@
+// 가게 상세 화면: 공개 가게 프로필, 프리미엄/광고 배지, 전화/길찾기/채팅 진입을 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -12,16 +13,25 @@ import {
   View,
 } from 'react-native';
 import { getOrCreateStoreRoom } from '../../lib/chat';
-import StorePlanModal, { PremiumStoreBadge } from '../../components/StorePlanModal';
+import StorePlanModal, { LocalAdStoreBadge, PremiumStoreBadge } from '../../components/StorePlanModal';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { getStoreCategoryLabel } from '../../lib/storeCategories';
 import {
+  canShowStoreNotice,
   fetchStorePublicExposureMap,
+  hasLocalAdStoreProfile,
   isPremiumStoreProfile,
   mergeStoreExposureIntoProfile,
 } from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 import { useAppTheme } from '../../hooks/use-app-theme';
+
+function formatStoreAddress(address?: string | null, detailAddress?: string | null) {
+  return [address, detailAddress]
+    .map((value) => (value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
 
 export default function StoreDetailScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -91,9 +101,7 @@ export default function StoreDetailScreen() {
       .order('created_at', { ascending: false })
       .limit(20);
 
-    if (reviewError) {
-      console.log('가게 후기 조회 실패:', reviewError);
-      setReviews([]);
+    if (reviewError) {      setReviews([]);
       return;
     }
 
@@ -131,6 +139,9 @@ export default function StoreDetailScreen() {
   const phone = String(profile?.phone || '').replace(/[^0-9+]/g, '');
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
   const isPremiumStore = isPremiumStoreProfile(profile);
+  const hasLocalAd = hasLocalAdStoreProfile(profile);
+  const shouldShowStoreNotice = canShowStoreNotice(profile);
+  const storeDisplayAddress = formatStoreAddress(profile?.store_address, profile?.store_detail_address);
 
   const openPhone = async () => {
     if (!phone) return;
@@ -147,7 +158,7 @@ export default function StoreDetailScreen() {
         params: {
           lat: String(profile.store_latitude),
           lng: String(profile.store_longitude),
-          region: profile.store_address || profile.display_name || '가게 위치',
+          region: storeDisplayAddress || profile.display_name || '가게 위치',
           title: profile.display_name || '가게 위치',
         },
       } as any);
@@ -199,6 +210,9 @@ export default function StoreDetailScreen() {
           <View style={styles.nameRow}>
             <Text style={styles.name}>{profile?.display_name || '가게'}</Text>
             {isVerifiedStore ? <Text style={styles.verifiedBadge}>인증</Text> : null}
+            {hasLocalAd ? (
+              <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} />
+            ) : null}
             {isPremiumStore ? (
               <PremiumStoreBadge
                 label="프리미엄 인증 완료"
@@ -206,7 +220,7 @@ export default function StoreDetailScreen() {
               />
             ) : null}
           </View>
-          <Text style={styles.meta}>{profile?.store_address || '등록된 주소 없음'}</Text>
+          <Text style={styles.meta}>{storeDisplayAddress || '등록된 주소 없음'}</Text>
           <Text style={styles.categoryMeta}>{getStoreCategoryLabel(profile?.store_category)}</Text>
           <Text style={styles.meta}>{profile?.store_business_hours || '영업시간 미등록'}</Text>
         </View>
@@ -235,7 +249,7 @@ export default function StoreDetailScreen() {
         {profile?.store_today_available ? <Text style={styles.badge}>오늘 가능</Text> : null}
       </View>
 
-      {profile?.store_notice ? (
+      {shouldShowStoreNotice && profile?.store_notice ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>가게 공지</Text>
           <Text style={styles.bodyText}>{profile.store_notice}</Text>
@@ -367,7 +381,10 @@ export default function StoreDetailScreen() {
       </View>
       <StorePlanModal
         visible={planModalOpen}
-        currentPlan={isPremiumStore ? 'premium' : 'free'}
+        currentPlan={profile?.store_subscription_plan || (isPremiumStore ? 'premium' : 'free')}
+        isPremium={isPremiumStore}
+        hasLocalAd={hasLocalAd}
+        mode="public"
         onClose={() => setPlanModalOpen(false)}
       />
     </ScrollView>

@@ -1,3 +1,4 @@
+// 채팅 목록 화면: 일반 채팅, 견적 채팅, 현장 채팅을 한 리스트에 노출하고 숨김/완료 정렬을 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -203,9 +204,7 @@ export default function ChatScreen() {
       .select('room_id')
       .eq('user_id', user.id);
 
-    if (memberError) {
-      console.log('내 채팅방 멤버 조회 실패:', memberError);
-      return;
+    if (memberError) {      return;
     }
 
     const roomIds = (memberRows || []).map((row: any) => row.room_id);
@@ -294,15 +293,8 @@ export default function ChatScreen() {
 
     if (fetchSeq !== fetchSeqRef.current) return;
 
-    if (roomResult.error) {
-      console.log('채팅방 조회 실패:', roomResult.error);
-      return;
+    if (roomResult.error) {      return;
     }
-
-    if (blockResult.error) {
-      console.log('채팅 목록 차단 사용자 조회 실패:', blockResult.error);
-    }
-
     const muteMap = new Map(
       (settingResult.data || []).map((row: any) => [row.room_id, row.muted])
     );
@@ -344,11 +336,6 @@ export default function ChatScreen() {
         .from('profiles')
         .select('id, display_name')
         .in('id', targetIds);
-
-      if (targetProfileError) {
-        console.log('채팅 상대 프로필 조회 실패:', targetProfileError);
-      }
-
       (targetProfiles || []).forEach((profile: any) => {
         if (profile.id) {
           targetNameMap.set(profile.id, profile.display_name || '상대방');
@@ -442,9 +429,7 @@ export default function ChatScreen() {
     if (fetchSeq === fetchSeqRef.current) {
       setRooms(roomsWithUnread);
     }
-  } catch (e) {
-    console.log('채팅방 목록 불러오기 실패:', e);
-  } finally {
+  } catch {  } finally {
     if (fetchSeq === fetchSeqRef.current) {
       setRefreshing(false);
     }
@@ -569,9 +554,7 @@ const toggleMuteRoom = async (room: ChatRoomListItem) => {
     { onConflict: 'room_id,user_id' }
   );
 
-  if (error) {
-    console.log('알림 설정 실패:', error);
-    Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
+  if (error) {    Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
     return;
   }
 
@@ -601,9 +584,7 @@ const toggleHideRoom = async (room: ChatRoomListItem) => {
 
   setMenuRoom(null);
 
-  if (error) {
-    console.log('채팅 숨김 설정 실패:', error);
-    Alert.alert(
+  if (error) {    Alert.alert(
       '채팅 숨김 실패',
       error.message.includes('hidden') || error.message.includes('schema cache')
         ? 'Supabase에 최신 채팅 숨김 SQL을 먼저 실행해 주세요.'
@@ -676,9 +657,7 @@ const blockRoomUser = async (room: ChatRoomListItem) => {
 
   setMenuRoom(null);
 
-  if (error) {
-    console.log('채팅 목록 차단 실패:', error);
-    showChatListAlert(
+  if (error) {    showChatListAlert(
       '차단 실패',
       error.message.includes('user_blocks')
         ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -707,9 +686,7 @@ const exitRoom = (room: ChatRoomListItem) => {
           user_id: user.id,
         });
 
-        if (error) {
-          console.log('채팅방 나가기 실패:', error);
-          Alert.alert('오류', '채팅방을 나가지 못했습니다.');
+        if (error) {          Alert.alert('오류', '채팅방을 나가지 못했습니다.');
           return;
         }
 

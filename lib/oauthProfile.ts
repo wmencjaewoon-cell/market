@@ -1,3 +1,4 @@
+// OAuth 프로필 정규화: 카카오/애플/기타 provider metadata에서 기본 프로필 값을 뽑는다.
 import type { User } from '@supabase/supabase-js';
 
 type MetadataValue = string | number | boolean | null | undefined | MetadataObject;

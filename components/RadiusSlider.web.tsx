@@ -1,3 +1,4 @@
+// 웹 반경 슬라이더 fallback: DOM input range를 React Native Web 안에서 사용한다.
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 

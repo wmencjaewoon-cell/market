@@ -1,3 +1,4 @@
+// 나눔 글 작성 화면: 무료 나눔 게시글 등록과 키워드 알림 발송을 담당한다.
 import { sendKeywordAlertsForListing } from '@/lib/listingNotifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -140,9 +141,7 @@ export default function CreateShareScreen() {
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   // 대표 동네와 거래 희망 장소 간 거리 계산

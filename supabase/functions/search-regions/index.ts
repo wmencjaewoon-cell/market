@@ -66,11 +66,7 @@ serve(async (req) => {
       },
     });
 
-    const kakaoText = await kakaoRes.text();
-    console.log("kakao status:", kakaoRes.status);
-    console.log("kakao response:", kakaoText);
-
-    if (!kakaoRes.ok) {
+    const kakaoText = await kakaoRes.text();    if (!kakaoRes.ok) {
       return new Response(
         JSON.stringify({
           error: "Kakao API error",
@@ -116,8 +112,6 @@ serve(async (req) => {
       }
     );
   } catch (e) {
-    console.log("search-regions error:", e);
-
     return new Response(
       JSON.stringify({
         error: e instanceof Error ? e.message : "Unknown error",

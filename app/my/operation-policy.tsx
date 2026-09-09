@@ -1,3 +1,4 @@
+// 운영정책 화면: 서비스 운영 기준과 제재/신고 정책을 정적 콘텐츠로 제공한다.
 import type { ReactNode } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 

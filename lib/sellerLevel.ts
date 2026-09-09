@@ -1,3 +1,4 @@
+// 판매자 레벨 규칙: 후기/거래 활동 점수를 LV 표시용 값으로 변환한다.
 export const MAX_SELLER_LEVEL = 100;
 export const SELLER_LEVEL_POINTS = 100;
 export const TRADE_COMPLETED_POINTS = 10;

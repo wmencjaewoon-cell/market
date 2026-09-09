@@ -1,3 +1,4 @@
+// 중복 터치 방지 훅: 느린 저장/지도/모달 액션이 여러 번 실행되지 않도록 막는다.
 import { useCallback, useEffect, useRef } from 'react';
 
 type MaybePromise<T> = T | Promise<T>;

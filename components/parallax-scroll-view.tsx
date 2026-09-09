@@ -1,3 +1,4 @@
+// Expo 템플릿 패럴랙스 스크롤 컴포넌트. 서비스 화면에서 쓰는지 확인 후 유지 여부를 결정한다.
 import type { PropsWithChildren, ReactElement } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {

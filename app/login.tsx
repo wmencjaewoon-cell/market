@@ -1,3 +1,5 @@
+// 로그인/회원가입 화면: 이메일, OAuth, Apple 로그인과 초기 프로필 생성을 담당한다.
+// 인증 콜백이나 세션 갱신 로직을 바꿀 때 AuthContext와 함께 확인해야 한다.
 import type { User } from '@supabase/supabase-js';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
@@ -105,8 +107,6 @@ const goNext = () => {
 };
 
 const createSessionFromUrl = async (url: string) => {
-console.log('callback url:', url);
-
 const parsedUrl = new URL(url);
 
 const searchParams = parsedUrl.searchParams;
@@ -363,9 +363,6 @@ try {
   setDeletionPendingProfile(null);
 
   const redirectTo = getOAuthRedirectTo();
-
-  console.log('redirectTo:', redirectTo);
-
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,
     options: {
@@ -406,9 +403,6 @@ try {
 if (event.origin !== window.location.origin) return;
 
 const messageData = event.data;
-
-console.log('oauth popup message:', messageData);
-
 if (!messageData) return;
 
 if (messageData.type === 'SUPABASE_OAUTH_CALLBACK_ERROR') {
@@ -462,8 +456,6 @@ try {
 
   // 모바일 앱에서는 기존처럼 WebBrowser.openAuthSessionAsync 사용
   const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-  console.log('auth result:', result);
-
   if (result.type !== 'success') {
     setMessage(`${socialProviderLabel[provider]} 로그인이 완료되지 않았습니다.`);
     return;
@@ -477,8 +469,6 @@ try {
     goNext();
   }
 } catch (e: any) {
-  console.log(`${socialProviderLabel[provider]} 로그인 오류:`, e);
-
   const errorMessage = e?.message || '';
 
   if (
@@ -543,8 +533,6 @@ const handleAppleLogin = async () => {
       goNext();
     }
   } catch (e: any) {
-    console.log('Apple 로그인 오류:', e);
-
     if (e?.code === 'ERR_REQUEST_CANCELED') {
       setMessage('Apple 로그인이 취소되었습니다.');
     } else {

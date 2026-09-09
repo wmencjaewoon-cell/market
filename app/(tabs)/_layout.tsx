@@ -1,3 +1,4 @@
+// 하단 탭 레이아웃: 홈/지도/채팅/내정보 탭, 채팅 배지, 탭 재선택 새로고침을 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -24,9 +25,7 @@ export default function TabsLayout() {
     try {
       const count = await getUnreadChatCount();
       setChatBadge(count);
-    } catch (e) {
-      console.log('채팅 배지 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   useEffect(() => {

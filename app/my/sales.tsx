@@ -1,3 +1,4 @@
+// 판매내역 화면: 내가 올린 게시글의 판매 상태를 관리한다.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -64,9 +65,7 @@ export default function MySalesScreen() {
       .eq('author_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.log('판매관리 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const listingIds = (data || []).map((item) => item.id);
@@ -155,9 +154,7 @@ export default function MySalesScreen() {
       }
 
       setItems((prev) => prev.filter((item) => item.id !== id));
-    } catch (e: any) {
-      console.log('삭제 실패:', e);
-      Alert.alert('삭제 실패', e?.message || '게시글을 삭제하지 못했습니다.');
+    } catch (e: any) {      Alert.alert('삭제 실패', e?.message || '게시글을 삭제하지 못했습니다.');
     }
   };
 
@@ -194,9 +191,7 @@ export default function MySalesScreen() {
         .eq('id', item.id)
         .eq('author_id', user.id);
 
-      if (error) {
-        console.log(`${title} 실패:`, error);
-        Alert.alert(
+      if (error) {        Alert.alert(
           `${title} 실패`,
           error.message.includes('listing_hidden_previous_status')
             ? 'Supabase SQL 설정이 필요합니다. listing_owner_visibility.sql을 실행해 주세요.'

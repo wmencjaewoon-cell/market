@@ -1,29 +1,34 @@
+// 가게 요금제 안내 모달과 배지: 무료/베이직/프리미엄/지역광고 노출 문구를 한 곳에서 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type AppPalette } from '../contexts/theme';
 import { useAppTheme } from '../hooks/use-app-theme';
 
 type StorePlanId = 'free' | 'basic' | 'premium' | 'local_ad';
+type StorePlanModalMode = 'owner' | 'public';
 
 type StorePlanModalProps = {
   visible: boolean;
   currentPlan?: string | null;
+  isPremium?: boolean;
+  hasLocalAd?: boolean;
+  mode?: StorePlanModalMode;
   onClose: () => void;
 };
 
-const STORE_PLAN_OPTIONS: Array<{
+const STORE_PLAN_OPTIONS: {
   id: StorePlanId;
   name: string;
   price: string;
   description: string;
   features: string[];
-}> = [
+}[] = [
   {
     id: 'free',
     name: '기본',
     price: '월 0원',
     description: '부담 없이 시작하는 가게용 플랜',
-    features: ['상품 5개 등록', '기본 가게 프로필', '기본 지도 노출', '채팅 문의 가능'],
+    features: ['상품 10개 등록', '기본 가게 프로필', '기본 지도 노출', '채팅 문의 가능'],
   },
   {
     id: 'basic',
@@ -37,7 +42,7 @@ const STORE_PLAN_OPTIONS: Array<{
     name: '프리미엄',
     price: '월 33,000원',
     description: '문의와 노출을 더 적극적으로 받는 가게용 플랜',
-    features: ['상품 50개 등록', '추천 가게 노출', '지도 강조 마커', '상세 문의 통계', '긴급 자재 요청 우선 알림'],
+    features: ['상품 50개 등록', '추천 가게 노출', '지도 강조 마커', '오늘 가능 배지 강조', '상세 문의 통계', '상품 복사 등록', '가게 공지 상단 표시'],
   },
   {
     id: 'local_ad',
@@ -45,6 +50,35 @@ const STORE_PLAN_OPTIONS: Array<{
     price: '월 55,000원 ~ 110,000원',
     description: '프리미엄과 별도로 판매할 지역 상단 노출 상품',
     features: ['지역 홈 상단 노출', '카테고리 상단 노출', '추천 가게 고정', '지도 강조 표시', '월간 문의 리포트'],
+  },
+];
+
+const PUBLIC_STORE_BENEFITS: {
+  id: 'premium' | 'local_ad';
+  title: string;
+  description: string;
+  features: string[];
+}[] = [
+  {
+    id: 'premium',
+    title: '프리미엄 인증 가게',
+    description: '인증 완료 후 공개 화면에서 더 신뢰 있게 보이는 가게입니다.',
+    features: [
+      '가게 인증 완료 표시',
+      '추천 가게 영역에 노출될 수 있음',
+      '지도에서 더 잘 보이도록 강조될 수 있음',
+      '오늘 가능 정보와 공지를 제공할 수 있음',
+    ],
+  },
+  {
+    id: 'local_ad',
+    title: '지역광고 가게',
+    description: '현재 지역에서 더 잘 보이도록 광고 노출이 적용된 가게입니다.',
+    features: [
+      '지역 화면에서 광고 표시 가능',
+      '가게찾기와 지도에서 강조될 수 있음',
+      '주변 가게가 많을 때 더 눈에 띄게 표시될 수 있음',
+    ],
   },
 ];
 
@@ -86,9 +120,51 @@ export function PremiumStoreBadge({
   return <View style={styles.premiumBadge}>{content}</View>;
 }
 
-export default function StorePlanModal({ visible, currentPlan, onClose }: StorePlanModalProps) {
+export function LocalAdStoreBadge({
+  label = '지역광고',
+  onPress,
+}: {
+  label?: string;
+  onPress?: () => void;
+}) {
   const theme = useAppTheme();
   const styles = createStyles(theme);
+  const content = (
+    <>
+      <Ionicons name="megaphone" size={13} color="#fff" />
+      <Text style={styles.localAdBadgeText}>{label}</Text>
+    </>
+  );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity style={styles.localAdBadge} onPress={onPress} activeOpacity={0.85}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return <View style={styles.localAdBadge}>{content}</View>;
+}
+
+export default function StorePlanModal({
+  visible,
+  currentPlan,
+  isPremium,
+  hasLocalAd = false,
+  mode = 'owner',
+  onClose,
+}: StorePlanModalProps) {
+  const theme = useAppTheme();
+  const styles = createStyles(theme);
+  const activeBasePlan = currentPlan || 'free';
+  const showPublicView = mode === 'public';
+  const hasPremiumBenefit =
+    isPremium ?? (activeBasePlan === 'premium' || activeBasePlan === 'partner');
+  const visiblePublicBenefits = PUBLIC_STORE_BENEFITS.filter((benefit) => {
+    if (benefit.id === 'premium') return hasPremiumBenefit;
+    return hasLocalAd;
+  });
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -96,44 +172,91 @@ export default function StorePlanModal({ visible, currentPlan, onClose }: StoreP
         <Pressable style={styles.sheet}>
           <View style={styles.headerRow}>
             <View>
-              <Text style={styles.modalTitle}>가게 요금제</Text>
-              <Text style={styles.modalSubtitle}>현재 이벤트 기간에는 인증 완료 가게에 프리미엄이 적용됩니다.</Text>
+              <Text style={styles.modalTitle}>
+                {showPublicView ? '가게 인증 안내' : '가게 요금제'}
+              </Text>
+              <Text style={styles.modalSubtitle}>
+                {showPublicView
+                  ? '이 가게에 공개적으로 적용된 인증과 노출 기능만 안내합니다.'
+                  : '현재 이벤트 기간에는 인증 완료 가게에 프리미엄이 적용됩니다.'}
+              </Text>
             </View>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <Ionicons name="close" size={20} color={theme.text} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.planList}>
-            {STORE_PLAN_OPTIONS.map((plan) => {
-              const selected = plan.id === (currentPlan || 'free');
-
-              return (
-                <TouchableOpacity
-                  key={plan.id}
-                  style={[styles.planRow, selected && styles.planRowActive]}
-                  onPress={showStorePlanEventNotice}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.planHeader}>
-                    <View style={styles.planNameRow}>
-                      <Text style={styles.planName}>{plan.name}</Text>
-                      {selected ? <Text style={styles.currentBadge}>현재</Text> : null}
+          {showPublicView ? (
+            <View style={styles.planList}>
+              {(visiblePublicBenefits.length > 0
+                ? visiblePublicBenefits
+                : [
+                    {
+                      id: 'premium' as const,
+                      title: '인증 가게',
+                      description: '사업자 정보를 확인한 가게입니다.',
+                      features: ['가게 인증 완료 표시', '기본 가게 프로필 제공', '채팅 문의 가능'],
+                    },
+                  ]).map((benefit) => (
+                    <View key={benefit.id} style={styles.planRow}>
+                      <View style={styles.publicBenefitHeader}>
+                        <Ionicons
+                          name={benefit.id === 'local_ad' ? 'megaphone' : 'shield-checkmark'}
+                          size={18}
+                          color={theme.primary}
+                        />
+                        <Text style={styles.planName}>{benefit.title}</Text>
+                      </View>
+                      <Text style={styles.planDescription}>{benefit.description}</Text>
+                      <View style={styles.featureList}>
+                        {benefit.features.map((feature) => (
+                          <Text key={feature} style={styles.featureText}>
+                            {feature}
+                          </Text>
+                        ))}
+                      </View>
                     </View>
-                    <Text style={styles.planPrice}>{plan.price}</Text>
-                  </View>
-                  <Text style={styles.planDescription}>{plan.description}</Text>
-                  <View style={styles.featureList}>
-                    {plan.features.map((feature) => (
-                      <Text key={feature} style={styles.featureText}>
-                        {feature}
-                      </Text>
-                    ))}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                  ))}
+            </View>
+          ) : (
+            <View style={styles.planList}>
+              {STORE_PLAN_OPTIONS.map((plan) => {
+                const selected =
+                  plan.id === 'local_ad'
+                    ? hasLocalAd
+                    : plan.id === activeBasePlan;
+
+                return (
+                  <TouchableOpacity
+                    key={plan.id}
+                    style={[styles.planRow, selected && styles.planRowActive]}
+                    onPress={showStorePlanEventNotice}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.planHeader}>
+                      <View style={styles.planNameRow}>
+                        <Text style={styles.planName}>{plan.name}</Text>
+                        {selected ? (
+                          <Text style={styles.currentBadge}>
+                            {plan.id === 'local_ad' ? '사용중' : '현재'}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text style={styles.planPrice}>{plan.price}</Text>
+                    </View>
+                    <Text style={styles.planDescription}>{plan.description}</Text>
+                    <View style={styles.featureList}>
+                      {plan.features.map((feature) => (
+                        <Text key={feature} style={styles.featureText}>
+                          {feature}
+                        </Text>
+                      ))}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -208,6 +331,11 @@ function createStyles(theme: AppPalette) {
       alignItems: 'center',
       gap: 6,
     },
+    publicBenefitHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+    },
     planName: {
       color: theme.text,
       fontSize: 16,
@@ -259,6 +387,20 @@ function createStyles(theme: AppPalette) {
       paddingVertical: 4,
     },
     premiumBadgeText: {
+      color: '#fff',
+      fontSize: 11,
+      fontWeight: '900',
+    },
+    localAdBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      borderRadius: 999,
+      backgroundColor: '#14532d',
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+    },
+    localAdBadgeText: {
       color: '#fff',
       fontSize: 11,
       fontWeight: '900',

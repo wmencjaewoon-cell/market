@@ -1,3 +1,5 @@
+// 견적/고객관리 화면: 견적문의 목록, 견적서 작성/저장/PDF, 현장 전환을 처리한다.
+// 견적 원본 요청과 업체가 작성하는 견적서는 분리되어 있으므로 저장 테이블을 섞지 않는다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import { requireOptionalNativeModule } from 'expo-modules-core';
@@ -290,6 +292,10 @@ async function readUploadBody(uri: string) {
   return decode(base64);
 }
 
+/**
+ * 견적 완료/삭제처럼 연결 데이터가 같이 바뀌는 작업 전에 확인을 받는다.
+ * web은 Alert 버튼 스타일을 쓸 수 없으므로 window.confirm으로 같은 boolean 계약을 맞춘다.
+ */
 function confirmEstimateLifecycleAction(title: string, message: string, confirmText: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return Promise.resolve(window.confirm(`${title}\n${message}`));
@@ -306,6 +312,9 @@ function confirmEstimateLifecycleAction(title: string, message: string, confirmT
 export default function StoreEstimatesScreen() {
   const { user } = useAuth();
   const params = useLocalSearchParams<{ requestId?: string; quoteId?: string; projectId?: string }>();
+
+  // 이 화면은 대표/직원/현장 참여자가 모두 들어올 수 있다.
+  // `effectiveStoreId`는 실제 견적서가 귀속되는 가게 id이고, readOnly는 협력업체/고객 조회용 진입을 구분한다.
   const [effectiveStoreId, setEffectiveStoreId] = useState<string | null>(null);
   const [isStoreOwner, setIsStoreOwner] = useState(false);
   const [canAssignStaff, setCanAssignStaff] = useState(false);
@@ -314,10 +323,16 @@ export default function StoreEstimatesScreen() {
   const [activeStaffMembership, setActiveStaffMembership] = useState<any | null>(null);
   const [limits, setLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [staffMembers, setStaffMembers] = useState<any[]>([]);
+
+  // 요청 원본, 가게별 상태, 견적서, 첨부파일을 requestId 기준 map으로 들고 간다.
+  // 목록과 상세가 같은 화면에 있어서 row 하나를 수정한 뒤 부분 갱신하기 쉽도록 분리했다.
   const [requests, setRequests] = useState<any[]>([]);
   const [statusRows, setStatusRows] = useState<Record<number, any>>({});
   const [quoteRows, setQuoteRows] = useState<Record<number, any>>({});
   const [attachmentRows, setAttachmentRows] = useState<Record<number, any[]>>({});
+
+  // 사용자가 입력 중인 견적서 값은 저장 전 draft로 유지한다.
+  // title/address를 빈칸으로 지우고 다시 입력하는 중에 서버값으로 복구되지 않게 draft를 별도 관리한다.
   const [quoteDrafts, setQuoteDrafts] = useState<Record<number, any>>({});
   const [addressDrafts, setAddressDrafts] = useState<Record<number, string>>({});
   const [filter, setFilter] = useState<EstimateFilter>('new');
@@ -333,6 +348,14 @@ export default function StoreEstimatesScreen() {
   const [completingEstimateId, setCompletingEstimateId] = useState<number | null>(null);
   const [deletingEstimateId, setDeletingEstimateId] = useState<number | null>(null);
 
+  /**
+   * 견적관리 화면에 필요한 원본 요청, 상태 row, 견적서 row, 첨부파일을 한 번에 구성한다.
+   *
+   * 진입 경로에 따라 동작이 달라진다.
+   * - 일반 가게 진입: 해당 가게로 들어온 최근 문의 목록을 보여준다.
+   * - requestId/quoteId 진입: 알림이나 채팅에서 특정 견적 상세를 바로 연다.
+   * - projectId 진입: 현장에서 견적서 보기를 누른 경우라서 협력업체/고객은 readOnly로 본다.
+   */
   const loadEstimates = useCallback(async () => {
     if (!user) return;
 
@@ -349,17 +372,14 @@ export default function StoreEstimatesScreen() {
     let nextEstimateReadOnly = false;
     let nextLinkedProjectId: string | null = null;
 
+    // 현장 화면에서 들어온 경우, 현장 row가 어느 가게의 어떤 견적과 연결되는지 먼저 찾는다.
+    // 이 값을 기준으로 requestId/quoteId를 보정해야 현장과 견적서가 서로 다른 row를 보지 않는다.
     if (requestedProjectId) {
       const { data: linkedProject, error: linkedProjectError } = await supabase
         .from('store_projects')
         .select('id, store_user_id, estimate_request_id, estimate_quote_id')
         .eq('id', requestedProjectId)
         .maybeSingle();
-
-      if (linkedProjectError) {
-        console.log('연결 현장 견적 접근 확인 실패:', linkedProjectError);
-      }
-
       if (linkedProject?.id) {
         nextLinkedProjectId = linkedProject.id;
         nextEffectiveStoreId = linkedProject.store_user_id || nextEffectiveStoreId;
@@ -372,17 +392,13 @@ export default function StoreEstimatesScreen() {
       }
     }
 
+    // quoteId만 들어온 deep link는 requestId를 알 수 없으므로 견적서 row에서 역조회한다.
     if (!requestedRequestId && requestedQuoteId) {
       const { data: quoteLookup, error: quoteLookupError } = await supabase
         .from('estimate_quotes')
         .select('estimate_request_id, store_user_id')
         .eq('id', requestedQuoteId)
         .maybeSingle();
-
-      if (quoteLookupError) {
-        console.log('견적서 연결 문의 조회 실패:', quoteLookupError);
-      }
-
       if (quoteLookup?.estimate_request_id) {
         requestedRequestId = Number(quoteLookup.estimate_request_id);
         nextEffectiveStoreId = quoteLookup.store_user_id || nextEffectiveStoreId;
@@ -392,6 +408,7 @@ export default function StoreEstimatesScreen() {
     const hasRequestedEstimate =
       (Number.isFinite(requestedRequestId) && requestedRequestId > 0) ||
       (Number.isFinite(requestedQuoteId) && requestedQuoteId > 0);
+    const shouldShowStoreEstimateInbox = !nextEstimateReadOnly && !hasRequestedEstimate;
 
     setIsStoreOwner(verifiedOwner);
     setCanAssignStaff(access.canManageStore && !nextEstimateReadOnly);
@@ -418,6 +435,8 @@ export default function StoreEstimatesScreen() {
       : await getStoreSubscriptionLimits(nextEffectiveStoreId);
     setLimits(nextLimits);
 
+    // 담당자 배정 select는 대표/매니저만 전체 직원을 보고,
+    // 일반 직원은 자기 멤버십만 사용한다. readOnly 사용자는 직원 목록을 볼 필요가 없다.
     if (!nextEstimateReadOnly && access.canManageStore) {
       const { data: staffData } = await supabase
         .from('store_staff_members')
@@ -454,15 +473,21 @@ export default function StoreEstimatesScreen() {
 
     if (Number.isFinite(requestedRequestId) && requestedRequestId > 0) {
       requestQuery = requestQuery.eq('id', requestedRequestId);
-    } else if (nextLimits.estimateRecentLimit != null && !hasRequestedEstimate) {
+    } else if (shouldShowStoreEstimateInbox) {
+      requestQuery = requestQuery.or(
+        `assigned_store_user_id.eq.${nextEffectiveStoreId},preferred_store_user_id.eq.${nextEffectiveStoreId}`
+      );
+    }
+
+    // 무료/베이직 제한은 여기서 목록 조회량을 줄이는 UI 제한이다.
+    // 서버 RLS/RPC 제한과 함께 사용해야 하며, 클라이언트 limit만 보안 기준으로 보면 안 된다.
+    if (nextLimits.estimateRecentLimit != null && !hasRequestedEstimate) {
       requestQuery = requestQuery.limit(nextLimits.estimateRecentLimit);
     }
 
     const { data: requestData, error } = await requestQuery;
 
-    if (error) {
-      console.log('견적문의 조회 실패:', error);
-      setRequests([]);
+    if (error) {      setRequests([]);
       setStatusRows({});
       setQuoteRows({});
       setAttachmentRows({});
@@ -538,6 +563,8 @@ export default function StoreEstimatesScreen() {
       nextRequests.map((request: any) => [Number(request.id), request.address || ''])
     );
 
+    // 서버 row를 화면 입력 draft로 변환한다.
+    // 금액 input은 문자열이어야 사용자가 중간에 지우거나 쉼표 없는 값을 입력할 수 있다.
     setStatusRows(nextStatuses);
     setQuoteRows(nextQuotes);
     setAttachmentRows(nextAttachments);
@@ -573,6 +600,7 @@ export default function StoreEstimatesScreen() {
     void loadEstimates();
   }, [loadEstimates]);
 
+  // 알림이나 현장 화면에서 requestId/quoteId로 들어온 경우 목록 첫 화면을 건너뛰고 해당 상세를 연다.
   useEffect(() => {
     const requestedRequestId = Number(params.requestId || 0);
     if (Number.isFinite(requestedRequestId) && requestedRequestId > 0) {
@@ -598,6 +626,12 @@ export default function StoreEstimatesScreen() {
     estimateReadOnly || isStoreOwner || (!!activeStaffMembership && !!effectiveStoreId);
   const canEditEstimate = canUseEstimates && !estimateReadOnly;
 
+  /**
+   * 견적문의 목록 필터링이다.
+   *
+   * 상태 필터, 날짜 필터, 검색어를 동시에 적용한다. 검색 대상에는 제목/지역/주소/희망일정뿐 아니라
+   * 신청자 이름/전화번호와 로그인 profile의 이름/전화번호도 포함해서 실제 업무에서 찾기 쉽게 한다.
+   */
   const filteredRequests = useMemo(() => {
     const keyword = searchKeyword.trim().toLowerCase();
     const selectedDate = dateFilter.trim();
@@ -635,6 +669,7 @@ export default function StoreEstimatesScreen() {
     });
   }, [dateFilter, filter, requests, searchKeyword, statusRows]);
 
+  // 상태 탭 배지에 표시할 건수를 계산한다. 상태 row가 아직 없으면 신규문의로 본다.
   const statusCounts = useMemo(() => {
     return requests.reduce<Record<string, number>>((acc, item) => {
       const status = statusRows[Number(item.id)]?.status || 'new';
@@ -644,6 +679,8 @@ export default function StoreEstimatesScreen() {
     }, {});
   }, [requests, statusRows]);
 
+  // 상세가 선택되면 목록 대신 해당 견적 하나만 렌더링한다.
+  // 뒤로가기를 누르면 selectedRequestId만 비워 다시 목록으로 돌아간다.
   const visibleRequests = useMemo(() => {
     if (!selectedRequestId) return filteredRequests;
     return requests.filter((item) => Number(item.id) === selectedRequestId);
@@ -654,6 +691,13 @@ export default function StoreEstimatesScreen() {
     return message.includes(functionName) || message.includes('schema cache');
   };
 
+  /**
+   * 견적서 변경사항을 연결된 현장 summary에 반영한다.
+   *
+   * 견적서가 현장 전환된 뒤에도 금액, 제목, 담당자, 메모를 수정할 수 있다.
+   * 이때 현장관리 목록/상세/채팅 헤더가 예전 견적 정보를 계속 보여주지 않도록
+   * 서버 RPC로 동기화하고, RPC가 아직 배포되지 않은 개발 DB에서는 fallback update를 수행한다.
+   */
   const syncLinkedProjectFromQuote = async (quote: any, request: any) => {
     if (estimateReadOnly || !quote?.id) return;
 
@@ -666,9 +710,6 @@ export default function StoreEstimatesScreen() {
     if (!isMissingRpcError(syncError, 'sync_project_from_estimate_quote')) {
       throw syncError;
     }
-
-    console.log('연결 현장 견적 동기화 함수가 아직 DB schema cache에 없습니다:', syncError);
-
     const { error: fallbackError } = await supabase
       .from('store_projects')
       .update({
@@ -687,6 +728,13 @@ export default function StoreEstimatesScreen() {
     }
   };
 
+  /**
+   * 견적 제목을 요청/견적서/현장/채팅방에 같이 반영한다.
+   *
+   * 사용자는 "견적서 제목" 하나를 수정한다고 느끼지만 실제 DB에는
+   * estimate_requests, estimate_quotes, store_projects, chat_rooms가 따로 존재한다.
+   * 제목 동기화 RPC가 이 네 군데를 맞춰주며, 없을 때는 최소 요청/현장 row만 fallback으로 맞춘다.
+   */
   const syncEstimateProjectTitle = async (requestId: number, title: string, quoteId?: number | null) => {
     if (!effectiveStoreId || estimateReadOnly) return;
 
@@ -704,8 +752,6 @@ export default function StoreEstimatesScreen() {
     }
 
     if (titleSyncError) {
-      console.log('견적/현장 제목 동기화 함수가 아직 DB schema cache에 없습니다:', titleSyncError);
-
       const { error: requestError } = await supabase
         .from('estimate_requests')
         .update({
@@ -783,6 +829,13 @@ export default function StoreEstimatesScreen() {
     }));
   };
 
+  /**
+   * 화면 draft를 `estimate_quotes` row로 저장하거나 갱신한다.
+   *
+   * 잔금은 총액 - 계약금 - 중도금으로 계산한 값을 같이 저장한다.
+   * 저장 성공 뒤에는 제목 동기화와 현장 summary 동기화를 이어서 실행해
+   * 견적관리, 현장관리, 채팅방 제목/금액이 같은 값을 보게 만든다.
+   */
   const upsertQuoteDraft = async (requestId: number) => {
     if (!user || !effectiveStoreId || estimateReadOnly) {
       throw new Error('견적 저장 권한이 없습니다.');
@@ -977,6 +1030,13 @@ export default function StoreEstimatesScreen() {
     }
   };
 
+  /**
+   * 현재 견적서를 PDF로 저장/공유한다.
+   *
+   * 먼저 draft를 저장해서 최신 금액/메모/추가공사내역을 확정한 뒤,
+   * 문의 사진과 견적 첨부파일을 signed/public URL로 변환해 HTML에 크게 넣는다.
+   * native에서는 expo-print로 PDF 파일을 만들고 expo-sharing으로 저장/공유한다.
+   */
   const downloadQuotePdf = async (requestId: number) => {
     if (!user || !effectiveStoreId || downloadingEstimateId === requestId) return;
 
@@ -1104,6 +1164,10 @@ export default function StoreEstimatesScreen() {
     }));
   };
 
+  /**
+   * 견적문의 주소 입력 draft를 갱신한다.
+   * 서버 저장은 `saveRequestAddress`에서만 해서 사용자가 수정 중인 값을 바로 DB에 쓰지 않는다.
+   */
   const updateAddressDraft = (requestId: number, value: string) => {
     setAddressDrafts((prev) => ({
       ...prev,
@@ -1111,6 +1175,12 @@ export default function StoreEstimatesScreen() {
     }));
   };
 
+  /**
+   * 가게/담당자가 견적문의 주소를 수정해 저장한다.
+   *
+   * 고객이 보낸 원본 주소가 비어 있거나 상담 후 주소가 바뀐 경우를 보정하기 위한 기능이다.
+   * 연결된 현장이 있으면 견적서 동기화 함수를 다시 호출해 현장관리 주소도 따라 바뀌게 한다.
+   */
   const saveRequestAddress = async (requestId: number) => {
     if (!user || !effectiveStoreId || estimateReadOnly || savingId === requestId) return;
 
@@ -1177,6 +1247,9 @@ export default function StoreEstimatesScreen() {
       const quote = quoteRows[requestId]?.id
         ? quoteRows[requestId]
         : await upsertQuoteDraft(requestId);
+
+      // 첨부파일은 견적서가 먼저 있어야 quote_id로 묶을 수 있다.
+      // 아직 저장하지 않은 견적이라면 이 시점에 draft를 저장해 quote row를 만든다.
       const mimeType = file.mimeType || getMimeFromName(file.name);
       const extension = getExtensionFromMime(mimeType);
       const baseFileName = sanitizeFileName(
@@ -1222,6 +1295,10 @@ export default function StoreEstimatesScreen() {
     }
   };
 
+  /**
+   * 파일 앱/문서 picker에서 PDF 견적서를 첨부한다.
+   * 직접 작성한 견적 외에 업체가 보유한 외부 PDF도 같은 quote attachment로 관리한다.
+   */
   const pickQuotePdf = async (requestId: number) => {
     if (estimateReadOnly || uploadingAttachmentId === requestId) return;
 
@@ -1242,6 +1319,10 @@ export default function StoreEstimatesScreen() {
     });
   };
 
+  /**
+   * 사진 앨범에서 견적 관련 이미지를 여러 장 첨부한다.
+   * 촬영 견적서, 자재 사진, 현장 사진을 PDF 다운로드 시 함께 크게 보여주기 위해 사용한다.
+   */
   const pickQuoteImages = async (requestId: number) => {
     if (estimateReadOnly || uploadingAttachmentId === requestId) return;
 
@@ -1276,6 +1357,10 @@ export default function StoreEstimatesScreen() {
     }
   };
 
+  /**
+   * 카메라로 견적 관련 사진을 촬영해서 첨부한다.
+   * native 전용 경로지만 web에서도 함수가 호출되지 않게 버튼 조건에서 막는다.
+   */
   const takeQuotePhoto = async (requestId: number) => {
     if (estimateReadOnly || uploadingAttachmentId === requestId) return;
 
@@ -1306,6 +1391,10 @@ export default function StoreEstimatesScreen() {
     });
   };
 
+  /**
+   * 저장된 견적 첨부파일을 연다.
+   * Supabase Storage signed URL은 짧게 발급해서 링크가 오래 노출되지 않게 한다.
+   */
   const openQuoteAttachment = async (attachment: any) => {
     if (!attachment?.file_path) return;
 
@@ -1326,6 +1415,10 @@ export default function StoreEstimatesScreen() {
     await Linking.openURL(data.signedUrl);
   };
 
+  /**
+   * 견적문의와 연결된 업무 채팅방을 연다.
+   * 방 생성/멤버 동기화는 서버 RPC가 담당하고, 앱은 반환된 room id로 이동만 한다.
+   */
   const openEstimateChat = async (requestId: number) => {
     if (!effectiveStoreId || openingChatId === requestId) return;
 
@@ -1354,6 +1447,13 @@ export default function StoreEstimatesScreen() {
     }
   };
 
+  /**
+   * 견적서를 현장으로 전환한다.
+   *
+   * 이미 전환된 견적은 새 현장을 만들지 않고 기존 현장 상세로 이동한다.
+   * 새로 전환할 때는 quote row를 최신으로 저장한 뒤 RPC가 고객/주소/금액/담당자를 복사해
+   * store_projects row를 만들고, 이어서 현장 채팅방도 보장한다.
+   */
   const convertToProject = async (requestId: number) => {
     if (!effectiveStoreId || convertingProjectId === requestId) return;
 
@@ -1398,11 +1498,6 @@ export default function StoreEstimatesScreen() {
         const { error: chatSyncError } = await supabase.rpc('ensure_project_chat_room', {
           p_project_id: data.id,
         });
-
-        if (chatSyncError) {
-          console.log('현장 전환 채팅방 연결 실패:', chatSyncError);
-        }
-
         router.push({
           pathname: '/store/projects',
           params: { projectId: data.id },

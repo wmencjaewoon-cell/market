@@ -1,3 +1,4 @@
+// 탭 새로고침 이벤트 버스: 같은 탭을 다시 누르거나 저장 후 목록을 갱신할 때 사용한다.
 import { useEffect, useRef } from 'react';
 
 export type RefreshableTab = 'home' | 'map' | 'chat' | 'my';

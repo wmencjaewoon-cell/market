@@ -1,3 +1,5 @@
+// 게시글 작성/수정 공용 폼: 개인 글과 가게 상품 등록이 공유하는 핵심 입력/업로드 로직이다.
+// 상품 한도, 위치 선택, 임시저장, 키워드 알림을 바꿀 때 이 파일을 함께 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode } from 'base64-arraybuffer';
@@ -408,9 +410,7 @@ export default function ListingForm({
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   const saveDraft = async () => {
@@ -499,9 +499,7 @@ export default function ListingForm({
       }
 
       return true;
-    } catch (e) {
-      console.log('임시저장 불러오기 실패:', e);
-      return false;
+    } catch {      return false;
     }
   };
 
@@ -680,7 +678,11 @@ export default function ListingForm({
     return null;
   };
 
-  const buildListingPayload = (authorId?: string, forceStoreSeller = false) => {
+  const buildListingPayload = (
+    authorId?: string,
+    forceStoreSeller = false,
+    canUseTodayBadge = true
+  ) => {
     const quantityTotal = Number(quantityText);
     const rawQuantityRemaining = isEdit
       ? Number(quantityRemainingText)
@@ -698,6 +700,7 @@ export default function ListingForm({
     const storeUserId = storeSeller
       ? authorId || managedStoreUserId || post?.store_user_id || post?.author_id
       : null;
+    const canExposeTodayBadge = !storeSeller || canUseTodayBadge;
 
     return {
       ...(authorId ? { author_id: authorId } : {}),
@@ -713,8 +716,8 @@ export default function ListingForm({
       detail_location: detailLocation.trim() || null,
       description: description.trim() || null,
       urgent: !isWant && urgent,
-      available_now: !isWant && availableNow,
-      available_today: !isWant && availableToday,
+      available_now: !isWant && canExposeTodayBadge && availableNow,
+      available_today: !isWant && canExposeTodayBadge && availableToday,
       pickup_available: storeSeller ? pickupAvailable : false,
       delivery_available: storeSeller ? deliveryAvailable : false,
       card_available: storeSeller ? cardAvailable : false,
@@ -755,9 +758,11 @@ export default function ListingForm({
       const activeStoreAccess = storeAccess || (await loadCurrentProfile());
       const canCreateAsManagedStore =
         !!activeStoreAccess?.canManageStore && !!activeStoreAccess.storeUserId;
+      let activeStoreLimits = null as Awaited<ReturnType<typeof getStoreSubscriptionLimits>> | null;
 
       if (canCreateAsManagedStore) {
         const storeLimits = await getStoreSubscriptionLimits(activeStoreAccess.storeUserId);
+        activeStoreLimits = storeLimits;
         const { count: currentProductCount, error: countError } = await supabase
           .from('listings')
           .select('id', { count: 'exact', head: true })
@@ -793,7 +798,13 @@ export default function ListingForm({
 
       const { data: inserted, error } = await supabase
         .from('listings')
-        .insert(buildListingPayload(authorId, canCreateAsManagedStore))
+        .insert(
+          buildListingPayload(
+            authorId,
+            canCreateAsManagedStore,
+            activeStoreLimits?.canTodayBadge ?? true
+          )
+        )
         .select()
         .single();
 
@@ -824,9 +835,7 @@ export default function ListingForm({
       await AsyncStorage.removeItem(draftKey);
       setSuccessMessage(`${categoryLabel} 글이 등록되었습니다.`);
       router.replace(createRedirectTo as any);
-    } catch (e: any) {
-      console.log('등록 실패:', e);
-      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
+    } catch (e: any) {      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }
@@ -855,7 +864,18 @@ export default function ListingForm({
         return;
       }
 
-      const payload = buildListingPayload();
+      const editStoreUserId =
+        post.seller_type === 'store' || post.store_user_id
+          ? post.store_user_id || post.author_id
+          : null;
+      const editStoreLimits = editStoreUserId
+        ? await getStoreSubscriptionLimits(editStoreUserId)
+        : null;
+      const payload = buildListingPayload(
+        undefined,
+        false,
+        editStoreLimits?.canTodayBadge ?? true
+      );
       const priceChanged = post.price_text !== payload.price_text;
       const contentChanged =
         post.category !== payload.category ||
@@ -929,9 +949,7 @@ export default function ListingForm({
       setSuccessMessage('게시글이 수정되었습니다.');
       await AsyncStorage.removeItem(draftKey);
       router.replace(`/(tabs)/home/post/${post.id}` as any);
-    } catch (e: any) {
-      console.log('수정 실패:', e);
-      setErrorMessage(e?.message || '게시글을 수정하지 못했습니다.');
+    } catch (e: any) {      setErrorMessage(e?.message || '게시글을 수정하지 못했습니다.');
     } finally {
       setSubmitting(false);
     }

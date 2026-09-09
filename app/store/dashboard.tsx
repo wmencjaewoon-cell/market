@@ -1,3 +1,4 @@
+// 가게 대시보드: 가게센터의 빠른 작업, 통계 요약, 구독 제한 상태를 보여주는 첫 화면이다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';

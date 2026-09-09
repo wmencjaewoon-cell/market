@@ -141,11 +141,6 @@ serve(async (req) => {
         .select("staff_user_id, role, status")
         .eq("store_user_id", storeUserId)
         .eq("status", "active");
-
-      if (staffError) {
-        console.log("견적문의 담당자 알림 대상 조회 실패:", staffError);
-      }
-
       (staffRows || []).forEach((staff: any) => {
         const staffUserId = staff?.staff_user_id;
         const isManager = staff?.role === "manager";
@@ -161,11 +156,6 @@ serve(async (req) => {
         .select("id")
         .eq("role", "admin")
         .or("status.is.null,status.neq.blocked");
-
-      if (adminError) {
-        console.log("견적문의 관리자 알림 대상 조회 실패:", adminError);
-      }
-
       (adminProfiles || []).forEach((profile: any) => {
         if (profile?.id) recipientIds.add(profile.id);
       });
@@ -265,18 +255,6 @@ serve(async (req) => {
     });
 
     const pushData = await pushRes.json();
-
-    console.log(
-      "send-estimate-request-notification result",
-      JSON.stringify({
-        requestId,
-        recipients,
-        tokenCount: tokens.length,
-        expoStatus: pushRes.status,
-        pushData,
-      })
-    );
-
     return jsonResponse({ ok: true, count: recipients.length, pushData });
   } catch (error) {
     return errorResponse(String(error), 500);

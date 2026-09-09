@@ -1,3 +1,4 @@
+// 가게 상품 등록 라우트: 가게 권한과 상품 등록 한도를 확인한 뒤 ListingForm으로 위임한다.
 import { Stack } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';

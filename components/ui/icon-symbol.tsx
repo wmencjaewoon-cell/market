@@ -1,4 +1,4 @@
-// Fallback for using MaterialIcons on Android and web.
+// Android/web 아이콘 fallback: iOS SF Symbols 이름을 MaterialIcons로 매핑한다.
 
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { SymbolWeight, SymbolViewProps } from 'expo-symbols';

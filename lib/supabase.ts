@@ -1,3 +1,4 @@
+// Supabase 클라이언트 초기화: 모바일은 AsyncStorage, 웹은 기본 storage를 사용한다.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupportedStorage } from '@supabase/supabase-js';
 import { Platform } from 'react-native';

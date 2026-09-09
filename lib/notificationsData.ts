@@ -1,3 +1,4 @@
+// 알림 데이터 헬퍼: 내 알림 목록 조회와 읽음 처리를 담당한다.
 import { supabase } from './supabase';
 
 export async function fetchMyNotifications() {

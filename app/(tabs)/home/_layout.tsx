@@ -1,3 +1,4 @@
+// 홈 스택 레이아웃: 홈 하위 화면의 공통 헤더와 뒤로가기 버튼을 정의한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router } from 'expo-router';
 import { TouchableOpacity } from 'react-native';

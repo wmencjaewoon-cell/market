@@ -1,3 +1,4 @@
+// 공지 상세 화면: 관리자 공지의 본문과 작성일을 보여준다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
@@ -68,9 +69,7 @@ export default function NoticeDetailScreen() {
         .eq('is_published', true)
         .maybeSingle();
 
-      if (error) {
-        console.log('공지사항 상세 조회 실패:', error);
-        setNotFound(true);
+      if (error) {        setNotFound(true);
         setLoading(false);
         return;
       }
@@ -108,9 +107,7 @@ export default function NoticeDetailScreen() {
       }
 
       await Linking.openURL(url);
-    } catch (error) {
-      console.log('공지 링크 열기 실패:', error);
-      Alert.alert('링크 열기', '링크를 열지 못했습니다.');
+    } catch {      Alert.alert('링크 열기', '링크를 열지 못했습니다.');
     }
   };
 

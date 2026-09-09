@@ -169,22 +169,6 @@ serve(async (req) => {
       acc[platform] = (acc[platform] || 0) + 1;
       return acc;
     }, {});
-
-    console.log(
-      'send-review-notification expo result',
-      JSON.stringify({
-        reviewId,
-        listingId,
-        saleId,
-        roomId,
-        targetUserId,
-        tokenCount: tokens.length,
-        tokenPlatformCounts,
-        expoStatus: pushRes.status,
-        pushData,
-      })
-    );
-
     return new Response(JSON.stringify({ ok: true, pushData }), {
       headers: {
         ...corsHeaders,

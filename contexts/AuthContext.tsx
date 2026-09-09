@@ -62,9 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try {
           const { unregisterPushToken } = await import('../lib/notifications');
           await unregisterPushToken();
-        } catch (error) {
-          console.log('로그아웃 푸시 토큰 정리 실패:', error);
-        }
+        } catch {        }
 
         setSession(null);
 

@@ -1,3 +1,4 @@
+// 키워드 알림 설정 화면: 관심 키워드를 등록하고 새 게시글 알림 매칭에 사용한다.
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { type AppPalette } from '../../contexts/theme';

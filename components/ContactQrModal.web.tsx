@@ -1,3 +1,4 @@
+// 웹 QR 모달: 딥링크 URL을 QR 코드로 보여주고 사용자가 모바일에서 열 수 있게 한다.
 import {
     Modal,
     StyleSheet,

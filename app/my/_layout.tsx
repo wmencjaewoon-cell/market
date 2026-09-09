@@ -1,3 +1,4 @@
+// 내정보 하위 스택 레이아웃: 설정/알림/정책 화면의 공통 헤더와 뒤로가기를 정의한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack } from 'expo-router';
 import { TouchableOpacity } from 'react-native';

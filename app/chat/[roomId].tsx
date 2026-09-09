@@ -1,3 +1,5 @@
+// 채팅방 화면: 일반 거래 채팅, 견적 채팅, 현장 채팅, 읽음 수, 통화, 일정/보고서 패널을 모두 처리한다.
+// 기능이 많으므로 새 업무 데이터는 채팅 테이블에 소유시키지 말고 견적/현장 테이블에 연결한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode } from 'base64-arraybuffer';
@@ -747,13 +749,7 @@ function ChatThumbnailImage({ image }: { image: ChatImageItem }) {
         if (!useOriginal && image.thumbnailUrl !== image.url) {
           setUseOriginal(true);
           return;
-        }
-
-        console.log('채팅 썸네일 로드 실패:', {
-          uri,
-          error: e.nativeEvent.error,
-        });
-      }}
+        }      }}
     />
   );
 }
@@ -879,7 +875,6 @@ function ZoomableChatImage({
           style={[styles.fullImage, animatedStyle]}
           resizeMode="contain"
           resizeMethod="resize"
-          onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
         />
       </Reanimated.View>
     </GestureDetector>
@@ -900,10 +895,19 @@ export default function ChatRoomScreen() {
   const isDarkMode = theme.scheme === 'dark';
   const backIconColor = isDarkMode ? '#fff' : theme.text;
   const insets = useSafeAreaInsets();
+
+  // FlatList와 입력창 ref는 키보드가 열릴 때 마지막 메시지를 보이게 하거나,
+  // 전송 후 스크롤을 끝으로 보내는 데 사용한다.
   const flatListRef = useRef<FlatList>(null);
   const messageInputRef = useRef<TextInput>(null);
+
+  // 메시지 영역 터치가 "탭"인지 "스크롤"인지 구분한다.
+  // 카톡처럼 스와이프로 대화내용을 훑을 때는 키보드를 유지하고, 빈 영역을 탭했을 때만 키보드를 닫는다.
   const messageTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const messageTouchMovedRef = useRef(false);
+
+  // 통화(WebRTC)는 비동기 이벤트가 많아서 ref로 중복 처리와 후보 큐를 관리한다.
+  // state로 두면 렌더 타이밍 때문에 같은 ICE candidate를 두 번 넣는 문제가 생길 수 있다.
   const initialReportWarningRunningRef = useRef(false);
   const appointmentCompletionPromptRunningRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -916,9 +920,13 @@ export default function ChatRoomScreen() {
   const [isMuted, setIsMuted] = useState(false);
 
 
+  // roomInfo는 채팅방 메타, 게시글, 견적문의, 현장, 참여자 목록을 한 번에 담는 화면의 원본 데이터다.
   const [roomInfo, setRoomInfo] = useState<RoomInfo | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoaded, setMessagesLoaded] = useState(false);
+
+  // reads는 단체방 읽음 숫자 계산에 쓰는 전체 read receipt 목록이다.
+  // 메시지마다 "아직 안 읽은 사람 수"를 계산할 때 sender를 제외한 참여자 수에서 읽은 사람 수를 뺀다.
   const [reads, setReads] = useState<MessageRead[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -979,6 +987,13 @@ export default function ChatRoomScreen() {
   const [workPanelCollapsed, setWorkPanelCollapsed] = useState(false);
 
   const listing = roomInfo?.listing;
+  /**
+   * 채팅방 타입 분기다.
+   *
+   * 일반 게시글 채팅, 가게 문의 채팅, 견적 채팅, 현장 채팅이 같은 UI 파일을 공유한다.
+   * 업무 데이터의 주인은 estimate_requests/store_projects이고 chat_rooms는 연결 포인터만 가진다.
+   * 그래서 room_type과 연결 id를 먼저 보고 어떤 패널/버튼/완료 흐름을 보여줄지 결정한다.
+   */
   const isProjectRoom =
     !!roomInfo?.project || !!roomInfo?.project_id || roomInfo?.room_type === 'project';
   const estimateRequest = roomInfo?.estimateRequest || null;
@@ -1036,6 +1051,12 @@ export default function ChatRoomScreen() {
     ));
   }, [project, user?.id]);
   const canWriteProjectReports = canReadInternalProjectReports;
+  /**
+   * 현장 채팅 안에서 보여줄 일일보고서 목록이다.
+   *
+   * 고객은 `customer_visible` 보고서만 보고, 가게 관계자/담당 직원/협력업체는 내부 보고서까지 본다.
+   * 여기서 필터가 틀리면 내부 메모나 사진이 고객에게 노출될 수 있으므로 RLS와 함께 가장 중요한 보호선이다.
+   */
   const visibleProjectReports = useMemo(() => {
     return (project?.daily_reports || []).filter(
       (report) => canReadInternalProjectReports || !!report.customer_visible
@@ -1052,6 +1073,13 @@ export default function ChatRoomScreen() {
       ['owner', 'manager'].includes(member.role || '')
     ));
   }, [project, user?.id]);
+  /**
+   * 현재 채팅방 참여자 목록을 만든다.
+   *
+   * `chat_room_members`는 실제 채팅방 입장 권한의 기준이고,
+   * `project_members`는 현장 역할/초대상태/회사명/전화번호를 보강하는 기준이다.
+   * 내보낸 참여자는 과거 메시지 기록에는 남아야 하지만 현재 참여자 보기와 unread count에서는 제외한다.
+   */
   const chatParticipants = useMemo<ChatParticipantItem[]>(() => {
     const roomMemberIds = Array.from(
       new Set(
@@ -1110,7 +1138,13 @@ export default function ChatRoomScreen() {
     user?.id,
   ]);
   const chatParticipantCount = roomInfo ? chatParticipants.length : 0;
+
+  // 업무 채팅이나 3명 이상 단체방은 말풍선 위에 보낸 사람 이름을 표시한다.
+  // 같은 사람이 같은 날짜에 연속으로 보낸 메시지는 카카오톡처럼 이름을 한 번만 보여준다.
   const shouldShowSenderNames = isWorkChatRoom || chatParticipantCount > 2;
+
+  // 업무 패널의 날짜 칩에서 선택한 날짜에 해당하는 현장 일정만 추린다.
+  // 기간 일정은 시작일~종료일 범위 안의 모든 날짜에서 보이게 한다.
   const selectedProjectSchedules = useMemo(() => {
     if (!project?.project_schedules) return [];
 
@@ -1294,17 +1328,29 @@ export default function ChatRoomScreen() {
       : `${visibleCallLabel} 연결됨`;
   const returnTarget = Array.isArray(returnTo) ? returnTo[0] : returnTo;
 
+  /**
+   * 채팅 입력 키보드를 명시적으로 닫는다.
+   * Android/iOS 키보드 이벤트가 늦게 들어오는 경우가 있어 local state도 함께 초기화한다.
+   */
   const dismissChatKeyboard = useCallback(() => {
     Keyboard.dismiss();
     setKeyboardVisible(false);
     setKeyboardHeight(0);
   }, []);
 
+  /**
+   * 채팅방에서 다른 화면으로 이동하기 전 공통 정리 함수다.
+   * 키보드와 입력 도구를 닫지 않으면 현장관리/견적관리 화면 위에 입력줄이 남아 보일 수 있다.
+   */
   const prepareChatNavigation = useCallback(() => {
     dismissChatKeyboard();
     setScreenFocused(false);
   }, [dismissChatKeyboard]);
 
+  /**
+   * 메시지 목록 터치 시작 위치를 저장한다.
+   * touch end에서 이동 거리가 거의 없으면 "탭"으로 보고 키보드를 닫는다.
+   */
   const handleMessageListTouchStart = useCallback((event: GestureResponderEvent) => {
     messageTouchStartRef.current = {
       x: event.nativeEvent.pageX,
@@ -1313,6 +1359,10 @@ export default function ChatRoomScreen() {
     messageTouchMovedRef.current = false;
   }, []);
 
+  /**
+   * 메시지 목록을 스크롤한 것인지 판단한다.
+   * 8px 이상 움직이면 사용자가 대화내용을 훑는 중이므로 키보드를 유지한다.
+   */
   const handleMessageListTouchMove = useCallback((event: GestureResponderEvent) => {
     const start = messageTouchStartRef.current;
     if (!start) return;
@@ -1325,6 +1375,10 @@ export default function ChatRoomScreen() {
     }
   }, []);
 
+  /**
+   * 메시지 목록을 탭했을 때만 키보드를 닫는다.
+   * 스크롤 gesture 후에는 카톡처럼 키보드가 그대로 남아 있어야 한다.
+   */
   const handleMessageListTouchEnd = useCallback(() => {
     if (keyboardVisible && !messageTouchMovedRef.current) {
       dismissChatKeyboard();
@@ -1350,6 +1404,13 @@ export default function ChatRoomScreen() {
     }, [dismissChatKeyboard])
   );
 
+  /**
+   * 헤더 뒤로가기, iOS edge swipe, Android 물리 뒤로가기가 모두 타는 공통 경로다.
+   *
+   * 채팅목록에서 들어온 방은 stack 상태와 관계없이 채팅탭으로 replace한다.
+   * 현장관리나 알림에서 들어온 경우는 가능한 한 이전 화면으로 돌아가고,
+   * 더 이상 뒤로 갈 곳이 없으면 채팅탭으로 보낸다.
+   */
   const handleBackPress = useCallback(() => {
     prepareChatNavigation();
 
@@ -1366,6 +1427,10 @@ export default function ChatRoomScreen() {
     router.replace('/(tabs)/chat' as any);
   }, [prepareChatNavigation, returnTarget]);
 
+  /**
+   * native-stack의 기본 swipe가 막히는 화면에서 쓰는 iOS edge swipe 보조 gesture다.
+   * Android는 물리 뒤로가기만 처리하고 이 gesture는 비활성화한다.
+   */
   const edgeBackSwipeGesture = useMemo(
     () =>
       Gesture.Pan()
@@ -1416,6 +1481,10 @@ export default function ChatRoomScreen() {
     router.push(`/(tabs)/home/user/${targetUserId}` as any);
   };
 
+  /**
+   * 현재 업무 채팅과 연결된 견적관리 화면으로 이동한다.
+   * 현장 채팅이라도 estimate_request_id/estimate_quote_id를 같이 넘겨 같은 견적서를 보게 한다.
+   */
   const goToEstimateManagement = () => {
     const requestId =
       estimateRequest?.id ||
@@ -1440,6 +1509,10 @@ export default function ChatRoomScreen() {
     return true;
   };
 
+  /**
+   * 업무 채팅에서 약속잡기를 보낸 뒤 거래완료 대신 견적서 작성으로 안내한다.
+   * 일반 중고거래 채팅만 거래완료/후기 흐름으로 이어진다.
+   */
   const promptEstimateManagementAfterAppointment = () => {
     if (!isWorkChatRoom) return;
 
@@ -1462,6 +1535,10 @@ export default function ChatRoomScreen() {
     ]);
   };
 
+  /**
+   * 현재 현장 채팅과 연결된 현장관리 상세로 이동한다.
+   * reportId를 넘기면 현장 화면에서 해당 일일보고서 상세를 바로 열 수 있다.
+   */
   const goToProjectManagement = (reportId?: string | null) => {
     if (!project?.id) return;
     prepareChatNavigation();
@@ -1475,6 +1552,10 @@ export default function ChatRoomScreen() {
     } as any);
   };
 
+  /**
+   * 채팅방 상단 "일일보고서" 버튼에서 현장관리의 보고서 작성 폼으로 바로 이동한다.
+   * focus 값은 같은 action을 연속으로 눌러도 route param 변경으로 인식시키기 위한 timestamp다.
+   */
   const goToProjectDailyReport = () => {
     if (!project?.id) return;
     prepareChatNavigation();
@@ -1506,11 +1587,7 @@ export default function ChatRoomScreen() {
       .order('created_at', { ascending: false })
       .limit(1);
 
-    if (error) {
-      if (!String(error.message || '').includes('chat_call_sessions')) {
-        console.log('통화 세션 조회 실패:', error);
-      }
-      return;
+    if (error) {      return;
     }
 
     const latestCall = ((data || [])[0] || null) as ChatCallSession | null;
@@ -1529,9 +1606,7 @@ export default function ChatRoomScreen() {
       if (typeof manager.stopRingtone === 'function') {
         manager.stopRingtone();
       }
-    } catch (error) {
-      console.log('통화 연결음/벨소리 종료 실패:', error);
-    }
+    } catch {    }
   }, []);
 
   // 통화 연결 정리
@@ -1540,9 +1615,7 @@ export default function ChatRoomScreen() {
 
     try {
       peerConnectionRef.current?.close();
-    } catch (error) {
-      console.log('통화 연결 정리 실패:', error);
-    }
+    } catch {    }
 
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -1564,9 +1637,7 @@ export default function ChatRoomScreen() {
 
     try {
       InCallManager.stop();
-    } catch (error) {
-      console.log('통화 오디오 매니저 종료 실패:', error);
-    }
+    } catch {    }
   }, [stopCallSound]);
 
   // 통화용 로컬 미디어 스트림 가져오기
@@ -1622,12 +1693,7 @@ export default function ChatRoomScreen() {
         call_id: callId,
         user_id: user.id,
         candidate,
-      });
-
-      if (error) {
-        console.log('ICE 후보 저장 실패:', error);
-      }
-    },
+      });    },
     [user]
   );
 
@@ -1641,9 +1707,7 @@ export default function ChatRoomScreen() {
     for (const item of queued) {
       try {
         await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(item.candidate));
-      } catch (error) {
-        console.log('대기 ICE 후보 적용 실패:', error);
-      }
+      } catch {      }
     }
   }, []);
 
@@ -1665,9 +1729,7 @@ export default function ChatRoomScreen() {
         await peerConnectionRef.current.addIceCandidate(
           new RTCIceCandidate(candidateRow.candidate)
         );
-      } catch (error) {
-        console.log('원격 ICE 후보 적용 실패:', error);
-      }
+      } catch {      }
     },
     [user]
   );
@@ -1692,9 +1754,7 @@ export default function ChatRoomScreen() {
             manager.startRingtone();
           }
         }
-      } catch (error) {
-        console.log('통화 연결음/벨소리 시작 실패:', error);
-      }
+      } catch {      }
     },
     [user?.id]
   );
@@ -1743,9 +1803,7 @@ export default function ChatRoomScreen() {
         .eq('call_id', callId)
         .order('created_at', { ascending: true });
 
-      if (error) {
-        console.log('ICE 후보 조회 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       for (const candidate of (data || []) as ChatCallIceCandidate[]) {
@@ -1869,9 +1927,7 @@ export default function ChatRoomScreen() {
         if (!hasPermission || cancelled) return;
 
         await getLocalCallStream('video');
-      } catch (error) {
-        console.log('영상통화 수신 미리보기 준비 실패:', error);
-      }
+      } catch {      }
     };
 
     void preparePreview();
@@ -1972,9 +2028,7 @@ export default function ChatRoomScreen() {
         );
         remoteDescriptionSetRef.current = true;
         await flushQueuedIceCandidates();
-      } catch (error) {
-        console.log('통화 answer 적용 실패:', error);
-        Alert.alert('통화 연결 실패', '상대방 응답을 연결하지 못했습니다.');
+      } catch {        Alert.alert('통화 연결 실패', '상대방 응답을 연결하지 못했습니다.');
       }
     };
 
@@ -2009,9 +2063,7 @@ export default function ChatRoomScreen() {
       setTimeout(() => {
         applyCallSpeakerMode(callSpeakerOn);
       }, 300);
-    } catch (error) {
-      console.log('통화 오디오 매니저 시작 실패:', error);
-    }
+    } catch {    }
 
     return () => {
       try {
@@ -2024,9 +2076,7 @@ export default function ChatRoomScreen() {
         }
 
         InCallManager.stop();
-      } catch (error) {
-        console.log('통화 오디오 매니저 종료 실패:', error);
-      }
+      } catch {      }
     };
   }, [visibleCall?.id, startCallSound, stopCallSound]);
   // 통화 시작 시 연결음/벨소리 종료
@@ -2042,9 +2092,7 @@ export default function ChatRoomScreen() {
 
     try {
       InCallManager.setMicrophoneMute(callMicMuted);
-    } catch (error) {
-      console.log('마이크 상태 변경 실패:', error);
-    }
+    } catch {    }
   }, [visibleCall?.id, callMicMuted]);
 
   // 통화 중 스피커 모드 적용
@@ -2093,9 +2141,7 @@ export default function ChatRoomScreen() {
 
         if (cancelled) return;
 
-        if (error) {
-          console.log('거래완료 확인 메시지 조회 실패:', error);
-          return;
+        if (error) {          return;
         }
 
         const currentMessages = (data || []) as ChatMessage[];
@@ -2107,9 +2153,7 @@ export default function ChatRoomScreen() {
         await sendMessage(roomId, makeAppointmentCompletionPrompt(appointmentDate), {
           skipProhibitedCheck: true,
         });
-      } catch (error) {
-        console.log('거래완료 확인 메시지 전송 실패:', error);
-      } finally {
+      } catch {      } finally {
         appointmentCompletionPromptRunningRef.current = false;
       }
     };
@@ -2291,9 +2335,7 @@ export default function ChatRoomScreen() {
         .select('id, display_name, phone, is_phone_public, user_type, business_verified, account, trust_points, trust_level')
         .in('id', uniqueUserIds);
 
-      if (error) {
-        console.log('채팅 사용자 프로필 조회 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       mergeParticipantProfiles(data || []);
@@ -2308,9 +2350,7 @@ export default function ChatRoomScreen() {
       .eq('id', targetId)
       .maybeSingle();
 
-    if (error) {
-      console.log('상대방 프로필 조회 실패:', error);
-      setChatTargetProfile(null);
+    if (error) {      setChatTargetProfile(null);
       return;
     }
 
@@ -2339,11 +2379,6 @@ export default function ChatRoomScreen() {
       .select('reports_count')
       .eq('id', targetId)
       .maybeSingle();
-
-    if (profileError) {
-      console.log('상대방 신고수 프로필 조회 실패:', profileError);
-    }
-
     let reportCount = Number(profile?.reports_count ?? 0);
 
     const { count, error: reportCountError } = await supabase
@@ -2351,9 +2386,7 @@ export default function ChatRoomScreen() {
       .select('id', { count: 'exact', head: true })
       .eq('target_user_id', targetId);
 
-    if (reportCountError) {
-      console.log('상대방 신고수 조회 실패:', reportCountError);
-    } else if (typeof count === 'number') {
+    if (reportCountError) {    } else if (typeof count === 'number') {
       reportCount = Math.max(reportCount, count);
     }
 
@@ -2361,6 +2394,13 @@ export default function ChatRoomScreen() {
   };
 
   // 채팅방 정보 조회
+  /**
+   * 채팅방 메타 정보를 조회한다.
+   *
+   * chat_rooms 자체 row뿐 아니라 연결된 게시글, 견적문의, 현장, 현장 일정,
+   * 일일보고서, 참여자 row까지 한 번에 가져온다. 채팅방 헤더/업무 패널/참여자 보기/읽음 숫자가
+   * 모두 이 데이터에 기대므로 select 컬럼을 바꿀 때는 관련 UI도 같이 확인해야 한다.
+   */
   const fetchRoomInfo = async () => {
     if (!roomId) return;
 
@@ -2465,9 +2505,7 @@ export default function ChatRoomScreen() {
       .eq('id', roomId)
       .single();
 
-    if (error) {
-      console.log('채팅방 정보 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const listingData: any = data?.listings;
@@ -2491,15 +2529,15 @@ export default function ChatRoomScreen() {
       (a: any, b: any) => String(b.report_date).localeCompare(String(a.report_date))
     );
 
+    // 참여자 이름/전화번호는 chat_room_members에는 없어서 profiles를 별도 조회한다.
+    // 이 map은 단체방 sender name, 참여자 모달, 통화 대상 표시에 함께 사용된다.
     if (roomMemberIds.length > 0) {
       const { data: participantProfiles, error: participantProfileError } = await supabase
         .from('profiles')
         .select('id, display_name, phone, is_phone_public, user_type, business_verified, account, trust_points, trust_level')
         .in('id', roomMemberIds);
 
-      if (participantProfileError) {
-        console.log('채팅 참여자 프로필 조회 실패:', participantProfileError);
-        setParticipantProfileMap({});
+      if (participantProfileError) {        setParticipantProfileMap({});
       } else {
         mergeParticipantProfiles(participantProfiles || []);
       }
@@ -2562,11 +2600,6 @@ export default function ChatRoomScreen() {
       .select('display_name, reports_count')
       .eq('id', targetId)
       .maybeSingle();
-
-    if (profileError) {
-      console.log('신고 경고 프로필 조회 실패:', profileError);
-    }
-
     let reportCount = Number(profile?.reports_count ?? 0);
 
     const { count, error: reportCountError } = await supabase
@@ -2574,9 +2607,7 @@ export default function ChatRoomScreen() {
       .select('id', { count: 'exact', head: true })
       .eq('target_user_id', targetId);
 
-    if (reportCountError) {
-      console.log('신고 경고 신고횟수 조회 실패:', reportCountError);
-    } else if (typeof count === 'number') {
+    if (reportCountError) {    } else if (typeof count === 'number') {
       reportCount = Math.max(reportCount, count);
     }
 
@@ -2611,9 +2642,7 @@ export default function ChatRoomScreen() {
 
     try {
       return (await AsyncStorage.getItem(key)) === '1';
-    } catch (error) {
-      console.log('거래 주의 숨김 상태 조회 실패:', error);
-      return false;
+    } catch {      return false;
     }
   };
 
@@ -2624,9 +2653,7 @@ export default function ChatRoomScreen() {
 
     try {
       await AsyncStorage.setItem(key, '1');
-    } catch (error) {
-      console.log('거래 주의 숨김 상태 저장 실패:', error);
-    }
+    } catch {    }
   };
 
   // 초기 거래 주의 표시 상태 조회
@@ -2636,9 +2663,7 @@ export default function ChatRoomScreen() {
 
     try {
       return (await AsyncStorage.getItem(key)) === '1';
-    } catch (error) {
-      console.log('초기 거래 주의 표시 상태 조회 실패:', error);
-      return false;
+    } catch {      return false;
     }
   };
 
@@ -2649,9 +2674,7 @@ export default function ChatRoomScreen() {
 
     try {
       await AsyncStorage.setItem(key, '1');
-    } catch (error) {
-      console.log('초기 거래 주의 표시 상태 저장 실패:', error);
-    }
+    } catch {    }
   };
 
   // 메시지별 거래 주의 표시 상태 조회
@@ -2661,9 +2684,7 @@ export default function ChatRoomScreen() {
 
     try {
       return (await AsyncStorage.getItem(key)) === '1';
-    } catch (error) {
-      console.log('메시지 거래 주의 표시 상태 조회 실패:', error);
-      return false;
+    } catch {      return false;
     }
   };
 
@@ -2674,9 +2695,7 @@ export default function ChatRoomScreen() {
 
     try {
       await AsyncStorage.setItem(key, '1');
-    } catch (error) {
-      console.log('메시지 거래 주의 표시 상태 저장 실패:', error);
-    }
+    } catch {    }
   };
 
   // 거래 주의 관련 메시지 판단
@@ -2809,6 +2828,10 @@ export default function ChatRoomScreen() {
   };
 
   // 메시지 조회
+  /**
+   * 채팅 메시지를 created_at 순서로 읽는다.
+   * 렌더링에서 날짜 구분선과 연속 말풍선 묶음을 계산하므로 오래된 순서가 유지되어야 한다.
+   */
   const fetchMessages = async () => {
     if (!roomId) return;
 
@@ -2820,9 +2843,7 @@ export default function ChatRoomScreen() {
       .eq('room_id', roomId)
       .order('created_at', { ascending: true });
 
-    if (error) {
-      console.log('메시지 조회 실패:', error);
-      setMessagesLoaded(true);
+    if (error) {      setMessagesLoaded(true);
       return;
     }
 
@@ -2847,6 +2868,10 @@ export default function ChatRoomScreen() {
   };
 
   // 메시지 읽음 조회
+  /**
+   * 현재 방의 모든 메시지 읽음 row를 조회한다.
+   * 단체방의 숫자 1/2 표시는 이 데이터와 현재 참여자 목록을 조합해 계산한다.
+   */
   const fetchReads = async () => {
     if (!roomId) return;
 
@@ -2867,25 +2892,29 @@ export default function ChatRoomScreen() {
       .select('*')
       .in('message_id', ids);
 
-    if (error) {
-      console.log('읽음 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setReads((data || []) as MessageRead[]);
   };
 
-  // 메시지 읽음 처리
+  /**
+   * 현재 사용자의 읽음 처리를 안전하게 실행한다.
+   * 실패해도 채팅방 자체는 계속 써야 하므로 오류를 화면 blocking으로 올리지 않고 로그만 남긴다.
+   */
   const markAsReadSafe = async () => {
     try {
       if (!roomId) return;
       await markMessagesAsRead(roomId);
-    } catch (e) {
-      console.log('읽음 처리 실패:', e);
-    }
+    } catch {    }
   };
 
-  // 메시지 전송 처리
+  /**
+   * 텍스트 메시지를 전송한다.
+   *
+   * 입력창은 즉시 비워 반응성을 높이고, 실제 말풍선 추가는 Supabase realtime INSERT 이벤트에 맡긴다.
+   * 이렇게 해야 내 메시지도 상대 메시지도 같은 경로로 들어와 읽음/정렬/날짜 구분 로직이 일관된다.
+   */
   const sendTextMessage = async (messageText: string) => {
   if (!roomId || sending || !user) return;
 
@@ -2902,19 +2931,16 @@ export default function ChatRoomScreen() {
   try {
     setSending(true);
 
-    // 입력창은 바로 비우기
+    // 입력창은 바로 비운다. 전송 실패 시 catch에서 원문을 복구한다.
     setText('');
 
-    // DB에만 저장
-    // 화면 표시는 Supabase realtime INSERT 구독에서 자동으로 들어오게 둠
+    // DB에만 저장한다. 화면 표시는 Supabase realtime INSERT 구독에서 자동으로 들어오게 둔다.
     await sendMessage(roomId, messageText);
 
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     });
   } catch (e) {
-    console.log('메시지 전송 실패:', e);
-
     showChatAlert(
       '메시지 전송 실패',
       e instanceof Error ? e.message : '메시지를 보내지 못했습니다.'
@@ -2928,7 +2954,10 @@ export default function ChatRoomScreen() {
 };
 
 
-// 메시지 전송 버튼 처리
+  /**
+   * 전송 버튼 핸들러다.
+   * 첫 메시지에는 신고/주의 안내가 먼저 뜰 수 있어, 사용자가 확인한 뒤 실제 전송 함수로 이어진다.
+   */
   const onSend = async () => {
     if (!roomId || !text.trim() || sending) return;
 
@@ -2953,9 +2982,7 @@ export default function ChatRoomScreen() {
 
     try {
       prepared = await prepareChatImageForUpload(asset);
-    } catch (error) {
-      console.log('채팅 이미지 변환 실패:', error);
-      Alert.alert('오류', '사진을 전송하기 좋은 크기로 변환하지 못했습니다.');
+    } catch {      Alert.alert('오류', '사진을 전송하기 좋은 크기로 변환하지 못했습니다.');
       return null;
     }
 
@@ -3001,9 +3028,7 @@ export default function ChatRoomScreen() {
 
         fileData = decoded;
       }
-    } catch (error) {
-      console.log('채팅 이미지 읽기 실패:', error);
-      Alert.alert('오류', '사진 데이터를 읽지 못했습니다.');
+    } catch {      Alert.alert('오류', '사진 데이터를 읽지 못했습니다.');
       return null;
     }
 
@@ -3013,9 +3038,7 @@ export default function ChatRoomScreen() {
         contentType,
       });
 
-    if (uploadError) {
-      console.log('채팅 이미지 업로드 실패:', uploadError);
-      Alert.alert('오류', '사진을 업로드하지 못했습니다.');
+    if (uploadError) {      Alert.alert('오류', '사진을 업로드하지 못했습니다.');
       return null;
     }
 
@@ -3071,9 +3094,7 @@ export default function ChatRoomScreen() {
         .eq('id', targetUserId)
         .maybeSingle();
 
-      if (error) {
-        console.log('전화번호 조회 실패:', error);
-        Alert.alert('전화하기', '전화번호를 확인하지 못했습니다.');
+      if (error) {        Alert.alert('전화하기', '전화번호를 확인하지 못했습니다.');
         return;
       }
 
@@ -3100,9 +3121,7 @@ export default function ChatRoomScreen() {
       }
 
       await Linking.openURL(url);
-    } catch (e) {
-      console.log('전화 앱 열기 실패:', e);
-      Alert.alert('오류', '전화 앱을 열지 못했습니다.');
+    } catch {      Alert.alert('오류', '전화 앱을 열지 못했습니다.');
     }
   };
 
@@ -3166,9 +3185,7 @@ export default function ChatRoomScreen() {
           skipProhibitedCheck: true,
         }
       );
-    } catch (error) {
-      console.log('통화 상태 메시지 전송 실패:', error);
-    }
+    } catch {    }
   };
 
   // 통화 시작 처리
@@ -3224,9 +3241,7 @@ export default function ChatRoomScreen() {
       .select('*')
       .single();
 
-    if (error) {
-      console.log('통화 요청 생성 실패:', error);
-      Alert.alert(
+    if (error) {      Alert.alert(
         '통화 요청 실패',
         error.message.includes('chat_call_sessions')
           ? 'Supabase에 chat_calls.sql을 먼저 적용해 주세요.'
@@ -3264,9 +3279,7 @@ export default function ChatRoomScreen() {
       .select('*')
       .single();
 
-    if (offerError) {
-      console.log('통화 offer 저장 실패:', offerError);
-      cleanupCallMedia();
+    if (offerError) {      cleanupCallMedia();
       Alert.alert('통화 요청 실패', '통화 연결 정보를 저장하지 못했습니다.');
       return;
     }
@@ -3318,9 +3331,7 @@ export default function ChatRoomScreen() {
           .eq('id', call.id)
           .single();
 
-        if (latestError) {
-          console.log('통화 offer 조회 실패:', latestError);
-          Alert.alert('통화 연결 실패', '통화 요청 정보를 확인하지 못했습니다.');
+        if (latestError) {          Alert.alert('통화 연결 실패', '통화 요청 정보를 확인하지 못했습니다.');
           return;
         }
 
@@ -3357,9 +3368,7 @@ export default function ChatRoomScreen() {
         .select('*')
         .single();
 
-      if (error) {
-        console.log('통화 상태 변경 실패:', error);
-        Alert.alert('통화', '통화 상태를 변경하지 못했습니다.');
+      if (error) {        Alert.alert('통화', '통화 상태를 변경하지 못했습니다.');
         return;
       }
 
@@ -3386,9 +3395,7 @@ export default function ChatRoomScreen() {
     if (!localStreamRef.current && visibleCall) {
       try {
         await getLocalCallStream(visibleCall.call_type);
-      } catch (error) {
-        console.log('마이크 제어용 스트림 준비 실패:', error);
-      }
+      } catch {      }
     }
 
     localStreamRef.current?.getAudioTracks().forEach((track) => {
@@ -3399,9 +3406,7 @@ export default function ChatRoomScreen() {
 
     try {
       InCallManager.setMicrophoneMute(nextMuted);
-    } catch (error) {
-      console.log('마이크 음소거 변경 실패:', error);
-    }
+    } catch {    }
   };
 
   // 통화 카메라 전환
@@ -3411,9 +3416,7 @@ export default function ChatRoomScreen() {
     if (!localStreamRef.current) {
       try {
         await getLocalCallStream('video');
-      } catch (error) {
-        console.log('카메라 전환용 스트림 준비 실패:', error);
-        Alert.alert('카메라 전환', '카메라를 준비하지 못했습니다.');
+      } catch {        Alert.alert('카메라 전환', '카메라를 준비하지 못했습니다.');
         return;
       }
     }
@@ -3459,12 +3462,7 @@ export default function ChatRoomScreen() {
       const { error } = await supabase
         .from('chat_call_sessions')
         .update({ [column]: cameraOff })
-        .eq('id', call.id);
-
-      if (error) {
-        console.log('카메라 꺼짐 상태 저장 실패:', error);
-      }
-    },
+        .eq('id', call.id);    },
     [user, visibleCall]
   );
 
@@ -3475,9 +3473,7 @@ export default function ChatRoomScreen() {
     if (!localStreamRef.current) {
       try {
         await getLocalCallStream('video');
-      } catch (error) {
-        console.log('카메라 제어용 스트림 준비 실패:', error);
-        Alert.alert('카메라', '카메라를 준비하지 못했습니다.');
+      } catch {        Alert.alert('카메라', '카메라를 준비하지 못했습니다.');
         return;
       }
     }
@@ -3494,13 +3490,9 @@ export default function ChatRoomScreen() {
         }
 
         track.enabled = nextTrackEnabled;
-      } catch (error) {
-        console.log('카메라 상태 변경 실패:', error);
-        try {
+      } catch {        try {
           track.enabled = nextTrackEnabled;
-        } catch (fallbackError) {
-          console.log('카메라 상태 재변경 실패:', fallbackError);
-        }
+        } catch (fallbackError) {        }
       }
     });
 
@@ -3521,15 +3513,8 @@ export default function ChatRoomScreen() {
       InCallManager.setSpeakerphoneOn(speakerOn);
 
       if (typeof manager.chooseAudioRoute === 'function') {
-        manager.chooseAudioRoute(route).catch((error: unknown) => {
-          console.log('통화 오디오 라우트 변경 실패:', error);
-        });
-      }
-
-      console.log('통화 스피커 라우팅 변경:', speakerOn ? 'speaker' : 'bluetooth/earpiece');
-    } catch (error) {
-      console.log('스피커폰 변경 실패:', error);
-    }
+        manager.chooseAudioRoute(route).catch((error: unknown) => {        });
+      }    } catch {    }
   };
 
   // 통화 스피커 모드 토글
@@ -3780,9 +3765,7 @@ export default function ChatRoomScreen() {
 
     const { error } = await supabase.from('profiles').update({ account }).eq('id', user.id);
 
-    if (error) {
-      console.log('계좌 저장 실패:', error);
-      Alert.alert('오류', '계좌번호를 저장하지 못했습니다.');
+    if (error) {      Alert.alert('오류', '계좌번호를 저장하지 못했습니다.');
       return;
     }
 
@@ -3839,9 +3822,7 @@ export default function ChatRoomScreen() {
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      console.log('판매 기록 확인 실패:', error);
-      return null;
+    if (error) {      return null;
     }
 
     return data as { id: number; created_at: string } | null;
@@ -3859,9 +3840,7 @@ export default function ChatRoomScreen() {
       .eq('target_user_id', reviewTargetId)
       .maybeSingle();
 
-    if (error) {
-      console.log('판매 후기 확인 실패:', error);
-      return false;
+    if (error) {      return false;
     }
 
     return Boolean(data);
@@ -3903,17 +3882,7 @@ export default function ChatRoomScreen() {
           .eq('reviewer_id', user.id)
           .eq('target_user_id', targetUserId)
           .maybeSingle(),
-      ]);
-
-    if (otherError) {
-      console.log('상대 후기 조회 실패:', otherError);
-    }
-
-    if (myError) {
-      console.log('내 후기 조회 실패:', myError);
-    }
-
-    setCounterpartReview((otherReview || null) as TradeReviewPreview | null);
+      ]);    setCounterpartReview((otherReview || null) as TradeReviewPreview | null);
     setMyReciprocalReview((myReview || null) as TradeReviewPreview | null);
   }, [
     currentListingAuthorId,
@@ -4097,9 +4066,7 @@ export default function ChatRoomScreen() {
         p_room_id: roomId,
       });
 
-      if (error) {
-        console.log(`채팅 ${isShareListing ? '나눔' : '판매'} 처리 실패:`, error);
-        Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
+      if (error) {        Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
         return;
       }
 
@@ -4155,9 +4122,7 @@ export default function ChatRoomScreen() {
       }
     );
 
-    if (error) {
-      console.log('차단 실패:', error);
-      Alert.alert(
+    if (error) {      Alert.alert(
         '오류',
         error.message.includes('user_blocks')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -4178,9 +4143,7 @@ export default function ChatRoomScreen() {
       .eq('id', targetId)
       .maybeSingle();
 
-    if (error) {
-      console.log('신고 대상 닉네임 조회 실패:', error);
-      return '상대방';
+    if (error) {      return '상대방';
     }
 
     return data?.display_name || '상대방';
@@ -4237,9 +4200,7 @@ export default function ChatRoomScreen() {
       content: reportContent.trim(),
     });
 
-    if (error) {
-      console.log('신고 실패:', error);
-      Alert.alert('오류', '신고를 접수하지 못했습니다.');
+    if (error) {      Alert.alert('오류', '신고를 접수하지 못했습니다.');
       return;
     }
 
@@ -4284,9 +4245,7 @@ export default function ChatRoomScreen() {
       }
     );
 
-    if (error) {
-      console.log('알림 설정 실패:', error);
-      Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
+    if (error) {      Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
       return;
     }
 
@@ -4386,9 +4345,7 @@ export default function ChatRoomScreen() {
               );
               await fetchRoomInfo();
               Alert.alert('참여자 내보내기', '참여자를 내보냈습니다.');
-            } catch (error: any) {
-              console.log('채팅 참여자 내보내기 실패:', error);
-              Alert.alert(
+            } catch (error: any) {              Alert.alert(
                 '참여자 내보내기 실패',
                 error?.message || '참여자를 내보내지 못했습니다.'
               );
@@ -4419,9 +4376,7 @@ export default function ChatRoomScreen() {
             user_id: user.id,
           });
 
-          if (error) {
-            console.log('채팅방 나가기 실패:', error);
-            Alert.alert('오류', '채팅방을 나가지 못했습니다.');
+          if (error) {            Alert.alert('오류', '채팅방을 나가지 못했습니다.');
             return;
           }
 
@@ -4439,9 +4394,17 @@ export default function ChatRoomScreen() {
 
 
 
+  /**
+   * 말풍선 옆에 표시할 "아직 안 읽은 사람 수"를 계산한다.
+   *
+   * 카카오톡 단체방처럼 보낸 사람을 제외한 현재 참여자 수를 기준으로 한다.
+   * 과거에 내보낸 참여자는 chat_room_members 기록이 남아 있어도 `chatParticipants`에서 제외되어
+   * 더 이상 읽음 숫자에 포함되지 않는다.
+   */
   const getUnreadCount = (messageId: string, senderId: string) => {
     if (!user) return 0;
 
+    // 참여자 목록이 아직 계산되기 전에는 raw room members를 fallback으로 사용한다.
     const roomMemberIds = new Set(
       (roomInfo?.members || [])
         .map((member) => member.user_id)
@@ -4526,9 +4489,7 @@ export default function ChatRoomScreen() {
         }
 
         await Linking.openURL(url);
-      } catch (error) {
-        console.log('링크 열기 실패:', error);
-        showChatAlert('링크 열기 실패', '링크를 여는 중 오류가 발생했습니다.');
+      } catch {        showChatAlert('링크 열기 실패', '링크를 여는 중 오류가 발생했습니다.');
       }
     };
 
@@ -4624,17 +4585,26 @@ export default function ChatRoomScreen() {
     [participantProfileMap, project?.project_members]
   );
 
+  /**
+   * 메시지 한 줄을 말풍선으로 렌더링한다.
+   *
+   * 여기서 날짜 구분선, 연속 메시지 묶음, 단체방 sender name, 이미지/장소/약속 시스템 메시지,
+   * 읽음 숫자를 모두 결정한다. 채팅방 표시 방식 변경 시 가장 먼저 확인해야 하는 함수다.
+   */
   const renderMessage = ({ item, index }: { item: ChatMessage; index: number }) => {
     const isMine = item.sender_id === user?.id;
     const previousMessage = index > 0 ? messages[index - 1] : null;
     const currentDateKey = getChatDateKey(item.created_at);
     const previousDateKey = previousMessage ? getChatDateKey(previousMessage.created_at) : '';
     const showDateDivider = !previousMessage || currentDateKey !== previousDateKey;
+
+    // 같은 사람이 같은 날짜에 이어서 보낸 메시지는 여백을 줄이고 이름을 반복 표시하지 않는다.
     const groupedWithPrevious =
       previousMessage?.sender_id === item.sender_id && currentDateKey === previousDateKey;
     const showSenderName = shouldShowSenderNames && !isMine && !groupedWithPrevious;
     const unreadCount = getUnreadCount(item.id, item.sender_id);
 
+    // 이미지/장소/약속 메시지는 일반 텍스트처럼 보이지만 prefix를 파싱해 전용 UI와 버튼을 보여준다.
     const imageItems = parseImageMessage(item.message);
     const isImageMessage = imageItems.length > 0;
     const placeMessage = parsePlaceMessage(item.message);
@@ -4744,9 +4714,7 @@ export default function ChatRoomScreen() {
             ) : isImageMessage ? (
               <TouchableOpacity
                 onPress={() => {
-                  const imageUrls = imageItems.map((image) => image.url);
-                  console.log('이미지 URL:', imageUrls);
-                  setSelectedImageUrls(imageUrls);
+                  const imageUrls = imageItems.map((image) => image.url);                  setSelectedImageUrls(imageUrls);
                   setSelectedImageIndex(0);
                   setImageViewerOpen(true);
                 }}
@@ -5764,7 +5732,6 @@ export default function ChatRoomScreen() {
                       style={styles.fullImage}
                       resizeMode="contain"
                       resizeMethod="resize"
-                      onError={(e) => console.log('큰 이미지 로드 실패:', e.nativeEvent)}
                     />
                   </View>
                 )}

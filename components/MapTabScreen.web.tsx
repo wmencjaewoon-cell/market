@@ -1,3 +1,4 @@
+// 웹 지도탭: 카카오 지도 JS SDK 위에 게시글/가게 마커와 노출 배지를 렌더링한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -13,6 +14,7 @@ import {
     View,
 } from 'react-native';
 import { checkProhibitedContent } from '../lib/prohibited';
+import { fetchStorePublicExposureMap } from '../lib/storeExposure';
 import { supabase } from '../lib/supabase';
 import { useTabRefresh } from '../lib/tabRefresh';
 
@@ -41,6 +43,7 @@ type StoreMapItem = {
   id: string;
   display_name: string | null;
   store_address: string | null;
+  store_detail_address: string | null;
   store_intro: string | null;
   store_today_available: boolean | null;
   store_card_available: boolean | null;
@@ -49,6 +52,7 @@ type StoreMapItem = {
   store_latitude: number;
   store_longitude: number;
   is_premium?: boolean;
+  has_local_ad?: boolean;
   map_highlight?: boolean;
   recommended_exposure?: boolean;
 };
@@ -85,8 +89,55 @@ function shouldShowRecommendedStore(store: StoreMapItem) {
   return !!store.recommended_exposure && getDailyStoreExposureScore(store.id) % 3 === 0;
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function hasStoreLocalAd(store: StoreMapItem) {
+  return !!store.has_local_ad;
+}
+
+function isHighlightedStoreGroup(group: StoreGroupedMarker) {
+  return group.items.some((store) => store.map_highlight || store.has_local_ad);
+}
+
+function getStoreMarkerLabel(store: StoreMapItem) {
+  const name = (store.display_name || '가게').trim();
+  return name.length > 9 ? `${name.slice(0, 8)}...` : name;
+}
+
+function getStoreMarkerSubLabel(store: StoreMapItem) {
+  if (hasStoreLocalAd(store)) return '광고';
+  if (store.is_premium) return '프리미엄';
+  if (shouldShowRecommendedStore(store)) return '추천';
+  return '인증';
+}
+
+function getStoreMarkerBackgroundColor(store: StoreMapItem, highlighted: boolean) {
+  if (hasStoreLocalAd(store)) return '#14532d';
+  return highlighted ? '#166534' : '#059669';
+}
+
+function formatStoreAddress(address?: string | null, detailAddress?: string | null) {
+  return [address, detailAddress]
+    .map((value) => (value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
 function sortStoresByExposure(stores: StoreMapItem[]) {
   return [...stores].sort((a, b) => {
+    const adScore = Number(!!b.has_local_ad) - Number(!!a.has_local_ad);
+    if (adScore !== 0) return adScore;
+
+    const premiumScore = Number(!!b.is_premium) - Number(!!a.is_premium);
+    if (premiumScore !== 0) return premiumScore;
+
     const recommendationScore =
       Number(shouldShowRecommendedStore(b)) - Number(shouldShowRecommendedStore(a));
     if (recommendationScore !== 0) return recommendationScore;
@@ -152,9 +203,7 @@ export default function MapTabScreen() {
       .not('latitude', 'is', null)
       .not('longitude', 'is', null);
 
-    if (error) {
-      console.log('웹 지도 매물 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const mapped = (data || []).map((item: any) => ({
@@ -174,6 +223,7 @@ export default function MapTabScreen() {
         id,
         display_name,
         store_address,
+        store_detail_address,
         store_intro,
         store_today_available,
         store_card_available,
@@ -187,27 +237,12 @@ export default function MapTabScreen() {
       .not('store_latitude', 'is', null)
       .not('store_longitude', 'is', null);
 
-    if (error) {
-      console.log('웹 지도 가게 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const storeRows = (data || []) as StoreMapItem[];
     const storeIds = storeRows.map((store) => store.id);
-    let exposureMap = new Map<string, any>();
-
-    if (storeIds.length > 0) {
-      const { data: exposureData, error: exposureError } = await supabase
-        .from('store_public_exposure')
-        .select('store_user_id, is_premium, map_highlight, recommended_exposure')
-        .in('store_user_id', storeIds);
-
-      if (exposureError && exposureError.code !== 'PGRST205') {
-        console.log('웹 지도 가게 노출 정보 조회 실패:', exposureError);
-      } else {
-        exposureMap = new Map((exposureData || []).map((row: any) => [row.store_user_id, row]));
-      }
-    }
+    const exposureMap = await fetchStorePublicExposureMap(storeIds);
 
     setStores(
       sortStoresByExposure(
@@ -216,6 +251,7 @@ export default function MapTabScreen() {
           return {
             ...store,
             is_premium: !!exposure?.is_premium,
+            has_local_ad: !!exposure?.has_local_ad,
             map_highlight: !!exposure?.map_highlight,
             recommended_exposure: !!exposure?.recommended_exposure,
           };
@@ -256,6 +292,7 @@ export default function MapTabScreen() {
       return (
         store.display_name?.toLowerCase().includes(keyword) ||
         store.store_address?.toLowerCase().includes(keyword) ||
+        store.store_detail_address?.toLowerCase().includes(keyword) ||
         store.store_intro?.toLowerCase().includes(keyword)
       );
     });
@@ -295,12 +332,22 @@ export default function MapTabScreen() {
       grouped.set(key, bucket);
     });
 
-    return Array.from(grouped.entries()).map(([key, bucket]) => ({
-      key,
-      latitude: bucket[0].store_latitude,
-      longitude: bucket[0].store_longitude,
-      items: bucket,
-    }));
+    return Array.from(grouped.entries()).map(([key, bucket]) => {
+      const sortedBucket = sortStoresByExposure(bucket);
+
+      return {
+        key,
+        latitude: sortedBucket[0].store_latitude,
+        longitude: sortedBucket[0].store_longitude,
+        items: sortedBucket,
+      };
+    }).sort((a, b) => {
+      const bScore = Number(!!b.items[0]?.has_local_ad) * 2 + Number(!!b.items[0]?.is_premium);
+      const aScore = Number(!!a.items[0]?.has_local_ad) * 2 + Number(!!a.items[0]?.is_premium);
+
+      if (aScore !== bScore) return bScore - aScore;
+      return b.items.length - a.items.length;
+    });
   }, [filteredStores]);
 
   const loadKakaoMap = () => {
@@ -477,28 +524,42 @@ export default function MapTabScreen() {
       groupedStoreMarkers.forEach((group) => {
         const first = group.items[0];
         const single = group.items.length === 1;
-        const highlighted = group.items.some((store) => store.map_highlight);
-        const recommended = single && shouldShowRecommendedStore(first);
+        const highlighted = isHighlightedStoreGroup(group);
         const markerPosition = new window.kakao.maps.LatLng(group.latitude, group.longitude);
+        const localAd = hasStoreLocalAd(first);
+        const backgroundColor = getStoreMarkerBackgroundColor(first, highlighted);
+        const label = escapeHtml(getStoreMarkerLabel(first));
+        const subLabel = escapeHtml(single ? getStoreMarkerSubLabel(first) : `${group.items.length}곳`);
 
         const content = `
           <div style="
-            min-width:${highlighted ? 50 : 44}px;
-            height:44px;
-            padding:0 10px;
-            border-radius:22px;
-            background:${highlighted ? '#166534' : '#059669'};
-            border:2px solid ${highlighted ? '#bbf7d0' : '#ffffff'};
+            min-width:92px;
+            max-width:128px;
+            min-height:42px;
+            padding:6px 9px;
+            border-radius:${localAd ? 8 : 10}px;
+            background:${backgroundColor};
+            border:2px solid ${localAd ? '#fde68a' : highlighted ? '#bbf7d0' : '#ffffff'};
             display:flex;
+            flex-direction:column;
             align-items:center;
             justify-content:center;
             color:#ffffff;
-            font-size:12px;
-            font-weight:800;
+            font-weight:900;
             box-sizing:border-box;
-            box-shadow:0 2px 8px rgba(0,0,0,0.15);
+            box-shadow:0 2px 8px rgba(0,0,0,0.18);
+            position:relative;
           ">
-            ${single ? (recommended ? '추천' : '가게') : group.items.length}
+            <div style="max-width:108px; display:flex; align-items:center; justify-content:center; gap:3px;">
+              ${localAd ? '<span style="color:#fde68a; font-size:11px; line-height:13px;">★</span>' : ''}
+              <span style="max-width:94px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; line-height:15px;">${label}</span>
+            </div>
+            <div style="margin-top:2px; color:#dcfce7; font-size:10px; line-height:12px;">${subLabel}</div>
+            ${
+              localAd
+                ? '<div style="position:absolute; left:50%; bottom:-9px; transform:translateX(-50%); width:0; height:0; border-left:7px solid transparent; border-right:7px solid transparent; border-top:9px solid #14532d;"></div>'
+                : ''
+            }
           </div>
         `;
 
@@ -642,6 +703,9 @@ export default function MapTabScreen() {
               >
                 {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
               </Text>
+              {selectedStore.has_local_ad ? (
+                <Text style={styles.localAdStoreBadge}>광고</Text>
+              ) : null}
               {selectedStore.is_premium ? (
                 <Text style={styles.premiumStoreBadge}>프리미엄</Text>
               ) : null}
@@ -655,7 +719,7 @@ export default function MapTabScreen() {
             {selectedStore.display_name || '가게'}
           </Text>
           <Text style={styles.itemMeta} numberOfLines={1}>
-            {selectedStore.store_address || '주소 정보 없음'}
+            {formatStoreAddress(selectedStore.store_address, selectedStore.store_detail_address) || '주소 정보 없음'}
           </Text>
           {selectedStore.store_intro ? (
             <Text style={styles.storeIntro} numberOfLines={2}>
@@ -758,6 +822,11 @@ export default function MapTabScreen() {
                           >
                             {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
                           </Text>
+                          {store.has_local_ad ? (
+                            <Text style={[styles.localAdStoreBadge, styles.premiumStoreGroupBadge]}>
+                              광고
+                            </Text>
+                          ) : null}
                           {store.is_premium ? (
                             <Text style={[styles.premiumStoreBadge, styles.premiumStoreGroupBadge]}>
                               프리미엄
@@ -768,7 +837,7 @@ export default function MapTabScreen() {
                           {store.display_name || '가게'}
                         </Text>
                         <Text style={styles.groupMeta} numberOfLines={1}>
-                          {store.store_address || '주소 정보 없음'}
+                          {formatStoreAddress(store.store_address, store.store_detail_address) || '주소 정보 없음'}
                         </Text>
                       </View>
                     </TouchableOpacity>
@@ -949,6 +1018,17 @@ const styles = StyleSheet.create({
   premiumStoreBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#047857',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  localAdStoreBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#14532d',
     color: '#fff',
     paddingHorizontal: 8,
     paddingVertical: 4,

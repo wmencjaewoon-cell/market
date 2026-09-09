@@ -1,3 +1,4 @@
+// 네이티브 위치 상세 지도: 거래 장소나 가게 위치를 크게 보여주고 길찾기/주소복사를 제공한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Location from 'expo-location';
@@ -45,9 +46,7 @@ export default function TradeMapScreen() {
         if (formatted) {
           setPinAddress(formatted);
         }
-      } catch (e) {
-        console.log('거래 희망 장소 주소 변환 실패:', e);
-      }
+      } catch {      }
     };
 
     loadAddress();
@@ -59,9 +58,7 @@ export default function TradeMapScreen() {
     try {
       await Clipboard.setStringAsync(copyAddressText);
       Alert.alert('주소 복사', '주소를 복사했습니다.');
-    } catch (e) {
-      console.log('주소 복사 실패:', e);
-      Alert.alert('주소 복사', '주소를 복사하지 못했습니다.');
+    } catch {      Alert.alert('주소 복사', '주소를 복사하지 못했습니다.');
     }
   };
 

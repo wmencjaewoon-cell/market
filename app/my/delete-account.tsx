@@ -1,3 +1,4 @@
+// 회원 탈퇴 화면: 즉시 삭제 대신 삭제 대기 상태로 전환해 복구/운영 검토 여지를 둔다.
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -52,9 +53,7 @@ export default function DeleteAccountScreen() {
     try {
       const { error } = await supabase.rpc('request_current_user_deletion');
 
-      if (error) {
-        console.log('회원탈퇴 실패:', error);
-        showAlert(
+      if (error) {        showAlert(
           '회원탈퇴 실패',
           error.message.includes('function')
             ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -69,9 +68,7 @@ export default function DeleteAccountScreen() {
       );
       await supabase.auth.signOut();
       router.replace('/login' as any);
-    } catch (error: any) {
-      console.log('회원탈퇴 예외:', error);
-      showAlert('회원탈퇴 실패', error?.message || '회원탈퇴 처리 중 문제가 발생했습니다.');
+    } catch (error: any) {      showAlert('회원탈퇴 실패', error?.message || '회원탈퇴 처리 중 문제가 발생했습니다.');
     } finally {
       setLoading(false);
     }

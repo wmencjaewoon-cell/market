@@ -1,3 +1,4 @@
+// 가게 업종 라벨: 가게 인증, 가게찾기, 협력업체 검색에서 같은 카테고리를 공유한다.
 export const STORE_CATEGORY_OPTIONS = [
   '전체',
   '인테리어',

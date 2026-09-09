@@ -1,3 +1,5 @@
+// 일정표 화면: 개인 일정, 견적 희망 일정, 현장 일정, 일일보고서를 한 캘린더에 합쳐 보여준다.
+// 위젯 데이터와 같은 개념을 공유하므로 일정 타입/색상 변경 시 lib/calendarWidget.ts도 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -49,6 +51,10 @@ type CalendarEvent = {
   raw?: any;
 };
 
+/**
+ * 개인 일정 작성 폼 상태다.
+ * sameDay가 true면 endDate는 startDate와 같은 날로 저장하고, false일 때만 종료일을 별도로 고른다.
+ */
 type PersonalEventForm = {
   title: string;
   startDate: string;
@@ -77,6 +83,9 @@ const VIEW_MODES: { key: CalendarViewMode; label: string }[] = [
 ];
 const HOURS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
 const MINUTES = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, '0'));
+
+// 위젯과 앱 달력에서 일요일/공휴일만 빨간색으로 표시하기 위한 최소 휴일 데이터다.
+// 토요일은 쉬는날 표시 요구에서 제외되어 별도 rest day로 처리하지 않는다.
 const KOREAN_PUBLIC_HOLIDAYS_BY_YEAR: Record<number, { date: string; name: string }[]> = {
   2026: [
     { date: '2026-01-01', name: '신정' },
@@ -257,6 +266,10 @@ function getMonthCells(monthDate: Date) {
   return cells;
 }
 
+/**
+ * 선택한 날짜가 포함된 주의 7일을 만든다.
+ * week view와 날짜별 일정 묶음에서 같은 기준을 사용한다.
+ */
 function getWeekDates(selectedDate: string) {
   const base = parseYmd(selectedDate);
   const day = base.getDay();
@@ -267,11 +280,19 @@ function getWeekDates(selectedDate: string) {
   });
 }
 
+/**
+ * 날짜가 이벤트 기간 안에 들어가는지 확인한다.
+ * 현장 일정과 개인 일정은 여러 날 범위일 수 있으므로 시작일과 종료일 사이를 포함한다.
+ */
 function dateInEvent(dateText: string, event: CalendarEvent) {
   const endDate = event.endDate || event.startDate;
   return dateText >= event.startDate && dateText <= endDate;
 }
 
+/**
+ * 이벤트가 현재 달력 월과 겹치는지 확인한다.
+ * 기간 일정이 이전 달에 시작해서 이번 달까지 이어지는 경우도 보여주기 위해 교차 여부를 본다.
+ */
 function eventIntersectsMonth(event: CalendarEvent, monthDate: Date) {
   const start = formatYmd(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
   const end = formatYmd(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
@@ -367,11 +388,19 @@ function getCalendarEventDeepLink(event: CalendarEvent) {
   return `interiormarket://my/calendar?date=${event.startDate}`;
 }
 
+/**
+ * 위젯에 표시할 제목을 만든다.
+ * 현장/견적 일정은 같은 작업명이 반복될 수 있어 고객명/지역/작업명을 함께 넣는다.
+ */
 function getCalendarEventWidgetTitle(event: CalendarEvent) {
   if (event.kind === 'personal') return event.title;
   return [event.customerName, event.location, event.title].filter(Boolean).join(' · ');
 }
 
+/**
+ * 앱 내부 CalendarEvent를 네이티브 위젯 snapshot event로 변환한다.
+ * 위젯은 JS 함수를 실행하지 못하므로 title/subtitle/timeText를 모두 문자열로 미리 계산해 넘긴다.
+ */
 function mapCalendarEventForWidget(event: CalendarEvent): CalendarWidgetSnapshotEvent {
   return {
     id: event.id,
@@ -387,6 +416,13 @@ function mapCalendarEventForWidget(event: CalendarEvent): CalendarWidgetSnapshot
   };
 }
 
+/**
+ * 홈 화면/잠금화면 위젯이 읽을 snapshot을 만든다.
+ *
+ * 현재 달에 걸친 이벤트는 달력 칸 표시용 `events`로 보내고,
+ * 오늘 일정이 있으면 agenda에는 오늘 일정, 없으면 다가오는 일정을 보낸다.
+ * iOS/Android 네이티브 위젯은 이 JSON만 읽으므로 여기서 잘라낸 데이터는 위젯에 보이지 않는다.
+ */
 function makeCalendarWidgetSnapshot(events: CalendarEvent[]): CalendarWidgetSnapshot {
   const today = getTodayYmd();
   const monthStart = formatYmd(new Date(parseYmd(today).getFullYear(), parseYmd(today).getMonth(), 1));
@@ -413,6 +449,10 @@ function makeCalendarWidgetSnapshot(events: CalendarEvent[]): CalendarWidgetSnap
   };
 }
 
+/**
+ * 일일보고서 내부 내용을 읽을 수 있는지 판단한다.
+ * 고객은 공개 보고서만 볼 수 있고, 가게 관계자/담당 직원/협력업체는 내부 보고서도 볼 수 있다.
+ */
 function canReadInternalReports(project: any, access: StoreAccessContext | null, userId?: string | null) {
   if (!project || !userId) return false;
 
@@ -427,6 +467,10 @@ function canReadInternalReports(project: any, access: StoreAccessContext | null,
   ));
 }
 
+/**
+ * 현장에 일일보고서를 작성할 수 있는지 판단한다.
+ * 협력업체도 초대된 현장에서는 보고서 작성이 가능하지만, 일정 수정 권한과는 별개다.
+ */
 function canWriteProject(project: any, access: StoreAccessContext | null, userId?: string | null) {
   if (!project || !userId) return false;
 
@@ -471,6 +515,8 @@ function buildProjectEvents(projects: any[], access: StoreAccessContext | null, 
     (project.project_schedules || []).forEach((schedule: any) => {
       if (!schedule.start_date || !isValidYmd(schedule.start_date)) return;
 
+      // 현장 일정은 kind=project로 넣고, 현장명/고객명/지역을 함께 저장해
+      // 여러 현장이 같은 작업명일 때도 달력과 위젯에서 구분되게 한다.
       events.push({
         id: `project-${schedule.id}`,
         kind: 'project',
@@ -495,6 +541,8 @@ function buildProjectEvents(projects: any[], access: StoreAccessContext | null, 
       .forEach((report: any) => {
         if (!report.report_date || !isValidYmd(report.report_date)) return;
 
+        // 일일보고서는 일정과 분리해서 kind=report로 표시한다.
+        // 같은 날짜에 일정과 보고서가 모두 있으면 달력 칸 안에 각각 다른 색상으로 보인다.
         events.push({
           id: `report-${report.id}`,
           kind: 'report',
@@ -521,6 +569,8 @@ function buildEstimateEvents(
   access: StoreAccessContext | null,
   userId?: string | null
 ): CalendarEvent[] {
+  // 견적 희망 일정은 아직 현장으로 확정되기 전의 약속성 일정이다.
+  // 가게 계정은 자기 가게로 들어온 문의만, 일반 사용자는 본인이 신청한 문의만 본다.
   return requests
     .filter((item) => {
       if (!item.desired_date || !isValidYmd(item.desired_date)) return false;
@@ -550,6 +600,8 @@ function buildEstimateEvents(
 }
 
 function buildPersonalEvents(rows: any[]): CalendarEvent[] {
+  // 개인 일정은 특정 가게/현장에 묶이지 않고 owner_user_id 기준으로만 보인다.
+  // 위젯에는 개인 일정도 함께 들어가므로 업무 일정과 개인 일정이 한 달력에서 합쳐진다.
   return rows
     .filter((item) => item.start_date && isValidYmd(item.start_date))
     .map((item) => ({
@@ -629,6 +681,9 @@ export default function CalendarScreen() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [storeAccess, setStoreAccess] = useState<StoreAccessContext | null>(null);
+
+  // 현장 일정, 견적 희망일, 일일보고서, 개인 일정을 모두 CalendarEvent 하나의 배열로 합친다.
+  // 렌더링과 위젯 저장은 이 통합 배열만 바라본다.
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [monthDate, setMonthDate] = useState(() => {
     const now = new Date();
@@ -646,6 +701,7 @@ export default function CalendarScreen() {
   const [timePickerTarget, setTimePickerTarget] = useState<TimePickerTarget | null>(null);
   const routeDate = Array.isArray(params.date) ? params.date[0] : params.date;
 
+  // 위젯에서 날짜를 누르거나 deep link로 들어오면 해당 날짜가 선택된 상태로 달력을 연다.
   useEffect(() => {
     if (!routeDate || !isValidYmd(routeDate)) return;
 
@@ -653,6 +709,14 @@ export default function CalendarScreen() {
     setMonthDate(makeMonthDate(routeDate));
   }, [routeDate]);
 
+  /**
+   * 전체 일정표에 필요한 데이터를 조회하고 위젯 snapshot까지 갱신한다.
+   *
+   * 세 데이터 원천을 병렬로 읽는다.
+   * - store_projects: 현장 일정과 일일보고서
+   * - estimate_requests: 견적 희망 일정
+   * - calendar_events: 사용자가 직접 넣은 개인 일정
+   */
   const loadCalendar = useCallback(async () => {
     if (!user?.id) {
       setEvents([]);
@@ -746,19 +810,7 @@ export default function CalendarScreen() {
         .eq('owner_user_id', user.id)
         .order('start_date', { ascending: true })
         .limit(500),
-    ]);
-
-    if (projectResult.error) {
-      console.log('전체 일정 현장 조회 실패:', projectResult.error);
-    }
-
-    if (estimateResult.error) {
-      console.log('전체 일정 견적 조회 실패:', estimateResult.error);
-    }
-
-    if (personalResult.error) {
-      console.log('개인 일정 조회 실패:', personalResult.error);
-      setMessage(
+    ]);    if (personalResult.error) {      setMessage(
         personalResult.error.code === '42P01' || String(personalResult.error.message || '').includes('calendar_events')
           ? '개인 일정을 사용하려면 Supabase SQL에서 calendar_events.sql을 먼저 실행해 주세요.'
           : personalResult.error.message
@@ -776,6 +828,9 @@ export default function CalendarScreen() {
     });
 
     setEvents(nextEvents);
+
+    // 위젯은 앱의 최신 조회 결과를 그대로 저장소에서 읽는다.
+    // 일정표를 새로고침하거나 포커스될 때마다 snapshot을 갱신해 홈 위젯이 최신 상태에 가까워지게 한다.
     void saveCalendarWidgetSnapshot(makeCalendarWidgetSnapshot(nextEvents));
     setLoading(false);
   }, [user?.id]);
@@ -810,6 +865,8 @@ export default function CalendarScreen() {
     });
   }, [events, filter, keyword, monthDate]);
 
+  // 월 달력은 7칸 단위 주 배열로 바꿔 렌더링한다.
+  // 앞/뒤 빈칸도 cell로 넣어 요일 위치가 고정되게 한다.
   const monthCells = useMemo(() => getMonthCells(monthDate), [monthDate]);
   const calendarWeeks = useMemo(() => {
     const weeks: typeof monthCells[] = [];
@@ -855,6 +912,10 @@ export default function CalendarScreen() {
     }
   };
 
+  /**
+   * 메인 달력에서 날짜를 선택한다.
+   * 새 개인 일정을 아직 입력하지 않은 상태라면 선택한 날짜를 form 기본 시작일로 맞춘다.
+   */
   const selectDate = (dateText: string) => {
     setSelectedDate(dateText);
     if (!editingPersonalId && !personalForm.title.trim()) {
@@ -862,6 +923,10 @@ export default function CalendarScreen() {
     }
   };
 
+  /**
+   * 개인 일정 작성 모달을 초기 상태로 연다.
+   * 현재 선택된 날짜를 시작일/종료일 기본값으로 사용해 날짜를 다시 고르지 않아도 되게 한다.
+   */
   const openNewPersonalForm = () => {
     setEditingPersonalId(null);
     setPersonalForm(makeEmptyForm(selectedDate));
@@ -870,6 +935,10 @@ export default function CalendarScreen() {
     setFormOpen(true);
   };
 
+  /**
+   * 기존 개인 일정을 수정 모드로 연다.
+   * 업무 일정/견적/보고서는 이 화면에서 직접 수정하지 않고 각 상세 화면으로 이동한다.
+   */
   const startEditPersonal = (event: CalendarEvent) => {
     const row = event.raw || {};
     setEditingPersonalId(String(row.id));
@@ -887,6 +956,10 @@ export default function CalendarScreen() {
     setFormOpen(true);
   };
 
+  /**
+   * 개인 일정 모달을 닫고 draft를 초기화한다.
+   * 시간 선택 모달도 같이 닫아 다른 일정 편집 상태가 남지 않게 한다.
+   */
   const resetPersonalForm = () => {
     setEditingPersonalId(null);
     setPersonalForm(makeEmptyForm(selectedDate));
@@ -896,6 +969,10 @@ export default function CalendarScreen() {
     setFormOpen(false);
   };
 
+  /**
+   * 당일 일정 여부를 전환한다.
+   * 당일이면 종료일을 시작일과 강제로 맞추고, 기간 일정이면 종료일을 다시 선택하게 한다.
+   */
   const toggleSameDay = () => {
     setPersonalForm((prev) => {
       const nextSameDay = !prev.sameDay;
@@ -908,6 +985,10 @@ export default function CalendarScreen() {
     setPersonalDateRangeMode('start');
   };
 
+  /**
+   * 개인 일정 달력에서 시작일 또는 종료일을 선택한다.
+   * 시작일이 종료일보다 뒤로 가면 종료일을 비워 잘못된 기간 저장을 막는다.
+   */
   const selectPersonalFormDate = (dateText: string) => {
     setPersonalForm((prev) => {
       if (prev.sameDay) {
@@ -945,6 +1026,10 @@ export default function CalendarScreen() {
     }
   };
 
+  /**
+   * 다이얼식 시간 선택 값을 form에 저장한다.
+   * 비어 있는 시간은 "시간 없음"으로 처리되어 날짜 일정처럼 보인다.
+   */
   const setPersonalTime = (target: TimePickerTarget, hour: string, minute: string) => {
     setPersonalForm((prev) => ({
       ...prev,
@@ -952,6 +1037,10 @@ export default function CalendarScreen() {
     }));
   };
 
+  /**
+   * 개인 일정의 시작/종료 시간을 제거한다.
+   * 시간 선택 모달도 닫아 사용자가 삭제 결과를 바로 확인할 수 있게 한다.
+   */
   const clearPersonalTime = (target: TimePickerTarget) => {
     setPersonalForm((prev) => ({
       ...prev,
@@ -960,6 +1049,12 @@ export default function CalendarScreen() {
     setTimePickerTarget(null);
   };
 
+  /**
+   * 개인 일정을 생성하거나 수정한다.
+   *
+   * owner_user_id는 실제 로그인 사용자 id로 저장한다. 가게 계정으로 로그인한 경우에도
+   * 개인 일정은 가게 전체 공유 일정이 아니라 본인 전용 일정이므로 visibility를 private으로 둔다.
+   */
   const savePersonalEvent = async () => {
     if (!user?.id || saving) return;
 
@@ -1036,6 +1131,10 @@ export default function CalendarScreen() {
     await loadCalendar();
   };
 
+  /**
+   * 개인 일정을 삭제한다.
+   * owner_user_id 조건을 함께 걸어 다른 사람의 개인 일정 row가 삭제되지 않게 한다.
+   */
   const deletePersonalEvent = async (event: CalendarEvent) => {
     if (!user?.id || event.kind !== 'personal') return;
 
@@ -1060,6 +1159,12 @@ export default function CalendarScreen() {
     await loadCalendar();
   };
 
+  /**
+   * 일정 카드를 눌렀을 때 원본 업무 화면으로 이동한다.
+   *
+   * 현장 일정은 현장관리, 보고서는 현장관리의 보고서 상세,
+   * 견적 일정은 견적관리로 보낸다. 개인 일정은 이 화면에서 바로 수정하므로 여기서는 이동하지 않는다.
+   */
   const openEvent = (event: CalendarEvent) => {
     if (event.kind === 'project' && event.projectId) {
       router.push(`/store/projects?projectId=${event.projectId}` as any);
@@ -1076,6 +1181,10 @@ export default function CalendarScreen() {
     }
   };
 
+  /**
+   * 일정 카드에서 바로 일일보고서 작성 화면으로 들어간다.
+   * 현장 id만 있으면 현장관리 화면이 해당 현장을 열고 보고서 폼으로 스크롤한다.
+   */
   const openReportWriter = (event: CalendarEvent) => {
     const projectId = event.projectId || event.raw?.project?.id;
     if (!projectId) return;
@@ -1083,6 +1192,10 @@ export default function CalendarScreen() {
     router.push(`/store/projects?projectId=${projectId}&action=dailyReport&focus=form` as any);
   };
 
+  /**
+   * 일정 카드에 "보고서 작성" 버튼을 보여도 되는지 판단한다.
+   * 권한 기준은 현장관리의 보고서 작성 권한과 맞춰야 한다.
+   */
   const canAddReportForEvent = (event: CalendarEvent) => {
     const project = event.raw?.project;
     return canWriteProject(project, storeAccess, user?.id);

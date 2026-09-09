@@ -1,3 +1,4 @@
+// 구해요 글 작성 화면: 필요한 자재 요청 글과 거래 희망 위치를 등록한다.
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -128,9 +129,7 @@ export default function CreateWantScreen() {
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   // 대표 동네와 거래 희망 장소 간 거리 계산
@@ -277,9 +276,7 @@ export default function CreateWantScreen() {
 
       setSuccessMessage('구해요 글이 등록되었습니다.');
       router.replace('/(tabs)/home');
-    } catch (e: any) {
-      console.log('등록 실패:', e);
-      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
+    } catch (e: any) {      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }

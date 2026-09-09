@@ -1,3 +1,4 @@
+// 웹 지도 임베드: WebView/웹 환경에서 카카오 지도를 HTML로 렌더링할 때 사용하는 얇은 화면이다.
 import { useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
 import { View } from 'react-native';
@@ -32,9 +33,7 @@ export default function MapEmbedScreen() {
     try {
       if (!params.items) return [];
       return JSON.parse(params.items);
-    } catch (e) {
-      console.log('items parse error:', e);
-      return [];
+    } catch {      return [];
     }
   }, [params.items]);
 

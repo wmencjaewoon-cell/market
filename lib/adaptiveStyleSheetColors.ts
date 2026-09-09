@@ -1,3 +1,4 @@
+// 플랫폼별 동적 색상 헬퍼: 다크모드/라이트모드에서 StyleSheet 색상을 안전하게 선택한다.
 import {
   Appearance,
   DynamicColorIOS,

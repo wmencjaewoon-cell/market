@@ -1,3 +1,4 @@
+// 지역/거리 헬퍼: 내 동네, 현재 위치, 반경 필터, 거리 계산을 공통으로 제공한다.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { Platform } from 'react-native';
@@ -335,13 +336,7 @@ export async function searchRegionMaster(keyword: string) {
     .from('region_master')
     .select('*')
     .or(`full_name.ilike.%${q}%,region_name.ilike.%${q}%`)
-    .limit(30);
-
-  console.log('동네 검색어:', q);
-  console.log('동네 검색 결과:', data);
-  console.log('동네 검색 에러:', error);
-
-  if (error) throw error;
+    .limit(30); if (error) throw error;
 
   return data || [];
 }

@@ -1,3 +1,4 @@
+// 인증 활동 기록: 로그인/보안 이벤트의 기기, 플랫폼, IP 보관 정책을 다룬다.
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
@@ -25,12 +26,5 @@ export async function logAuthActivity(eventType: AuthActivityEventType) {
         osVersion: Device.osVersion || null,
         timezone: getTimezone(),
       },
-    });
-
-    if (error) {
-      console.log('접속기록 저장 실패:', error.message);
-    }
-  } catch (error) {
-    console.log('접속기록 저장 실패:', error);
-  }
+    });  } catch {  }
 }

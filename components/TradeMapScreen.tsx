@@ -1,3 +1,4 @@
+// 위치 상세 지도 플랫폼 브리지: 네이티브 지도와 웹 지도 화면을 연결한다.
 import React from 'react';
 import { Platform } from 'react-native';
 

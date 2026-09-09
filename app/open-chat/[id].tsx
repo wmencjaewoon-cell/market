@@ -1,3 +1,4 @@
+// 딥링크 채팅 진입 화면: 게시글 id로 기존 채팅방을 찾거나 새 방을 만든 뒤 채팅방으로 이동한다.
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -26,9 +27,7 @@ export default function OpenChatScreen() {
         .eq('id', Number(id))
         .single();
 
-      if (error) {
-        console.log('open-chat 게시글 조회 실패:', error);
-        setLoading(false);
+      if (error) {        setLoading(false);
         return;
       }
 
@@ -56,9 +55,7 @@ export default function OpenChatScreen() {
 
         setNeedsRegionVerify(!myRegions || myRegions.length === 0);
         setRegionChecked(true);
-      } catch (e) {
-        console.log('동네 인증 상태 확인 실패:', e);
-        setNeedsRegionVerify(true);
+      } catch {        setNeedsRegionVerify(true);
         setRegionChecked(true);
       }
     };

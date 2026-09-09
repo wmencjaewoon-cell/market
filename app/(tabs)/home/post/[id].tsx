@@ -1,3 +1,4 @@
+// 게시글 상세 화면: 게시글 보기, 지도 확대, 채팅/전화, 끌어올리기, 관심 알림 진입을 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,7 +35,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContactQrModal from '../../../../components/ContactQrModal';
 import InlineMap from '../../../../components/InlineMap';
-import { PremiumStoreBadge } from '../../../../components/StorePlanModal';
+import { LocalAdStoreBadge, PremiumStoreBadge } from '../../../../components/StorePlanModal';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getOrCreateRoom } from '../../../../lib/chat';
@@ -49,6 +50,7 @@ import {
 } from '../../../../lib/sellerLevel';
 import {
   fetchStorePublicExposureMap,
+  hasLocalAdStoreProfile,
   isPremiumStoreProfile,
   mergeStoreExposureIntoProfile,
 } from '../../../../lib/storeExposure';
@@ -499,9 +501,7 @@ export default function PostDetailScreen() {
       .eq('id', listingId)
       .single();
 
-    if (error) {
-      console.log('게시글 조회 실패:', error);
-      return false;
+    if (error) {      return false;
     }
 
     if (!data) return false;
@@ -555,9 +555,7 @@ export default function PostDetailScreen() {
       listing_id: listingId,
     });
 
-    if (error) {
-      console.log('조회수 증가 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setItem((prev: any) =>
@@ -577,9 +575,7 @@ export default function PostDetailScreen() {
       .select('*', { count: 'exact', head: true })
       .eq('listing_id', listingId);
 
-    if (error) {
-      console.log('관심 수 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setFavoriteCount(count ?? 0);
@@ -597,9 +593,7 @@ export default function PostDetailScreen() {
     if (item?.latitude == null || item?.longitude == null) return;
 
     runSinglePress(`trade-map-${item.id}`, () => {
-      void logStoreInteraction('directions').catch((e) => {
-        console.log('지도 이동 로그 저장 실패:', e);
-      });
+      void logStoreInteraction('directions').catch((e) => {      });
 
       router.push({
         pathname: '/trade-map',
@@ -619,9 +613,7 @@ export default function PostDetailScreen() {
       .select('*', { count: 'exact', head: true })
       .eq('listing_id', listingId);
 
-    if (error) {
-      console.log('채팅 수 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setChatCount(count ?? 0);
@@ -640,9 +632,7 @@ export default function PostDetailScreen() {
       .eq('listing_id', listingId)
       .maybeSingle();
 
-    if (error) {
-      console.log('좋아요 여부 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setLiked(!!data);
@@ -674,9 +664,7 @@ export default function PostDetailScreen() {
       .order('created_at', { ascending: false })
       .limit(40);
 
-    if (error) {
-      console.log('비슷한 물품 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const scoredItems = (data || [])
@@ -722,6 +710,7 @@ export default function PostDetailScreen() {
   const isVerifiedStore =
     item?.profiles?.user_type === 'store' && !!item?.profiles?.business_verified;
   const isPremiumStore = isPremiumStoreProfile(item?.profiles);
+  const hasLocalAd = hasLocalAdStoreProfile(item?.profiles);
   const sellerType = isVerifiedStore ? 'store' : 'personal';
   const sellerName = item?.profiles?.display_name ?? '알 수 없음';
   const publicPhone = sellerType === 'store' ? item?.profiles?.phone : null;
@@ -792,23 +781,11 @@ useEffect(() => {
 
   const handleChat = async () => {
   if (!item || chatStarting) return;
-
-  console.log('채팅하기 클릭', {
-    platform: Platform.OS,
-    itemId: item.id,
-    authorId: item.author_id,
-    userId: user?.id,
-  });
-
-  if (Platform.OS === 'web') {
-    console.log('웹이라 QR 모달 오픈');
-    setQrOpen(true);
+  if (Platform.OS === 'web') {    setQrOpen(true);
     return;
   }
 
-  if (!user) {
-    console.log('로그인 안됨 -> 로그인 페이지 이동');
-    router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+  if (!user) {    router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
     return;
   }
 
@@ -816,16 +793,12 @@ useEffect(() => {
     setChatStarting(true);
 
     const guard = await canChatToListing(item, user.id);
-    console.log('채팅 가능 여부:', guard);
-
     if (!guard.ok) {
       Alert.alert('채팅 제한', guard.reason || '채팅할 수 없습니다.');
       return;
     }
 
     const roomId = await getOrCreateRoom(item.id, item.author_id, user.id);
-    console.log('생성/조회된 roomId:', roomId);
-
     if (!roomId) {
       Alert.alert('채팅 오류', '채팅방을 만들지 못했습니다.');
       return;
@@ -833,9 +806,7 @@ useEffect(() => {
 
     await logStoreInteraction('chat');
     router.push(`/chat/${roomId}` as any);
-  } catch (e: any) {
-    console.log('채팅하기 실패:', e);
-    Alert.alert('채팅 오류', e?.message || '채팅방으로 이동하지 못했습니다.');
+  } catch (e: any) {    Alert.alert('채팅 오류', e?.message || '채팅방으로 이동하지 못했습니다.');
   } finally {
     setChatStarting(false);
   }
@@ -856,9 +827,7 @@ useEffect(() => {
     try {
       await logStoreInteraction('phone');
       await Linking.openURL(`tel:${phone}`);
-    } catch (e) {
-      console.log('전화 연결 실패:', e);
-    }
+    } catch {    }
   };
 
   const logStoreInteraction = async (interactionType: 'chat' | 'phone' | 'directions' | 'product_view') => {
@@ -900,9 +869,7 @@ ${item.price_text || '가격 문의'}
 ${deepLink}`,
       url: deepLink,
     });
-  } catch (e) {
-    console.log('공유 실패:', e);
-  }
+  } catch {  }
 };
 
 const handleEdit = () => {
@@ -943,9 +910,7 @@ const handleBumpListing = async () => {
       p_listing_id: item.id,
     });
 
-    if (error) {
-      console.log('게시글 UP 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         'UP 실패',
         error.message.includes('bump_listing_once_per_day') ||
           error.message.includes('function')
@@ -969,9 +934,7 @@ const handleBumpListing = async () => {
     );
 
     showPostAlert('UP 완료', '게시글이 목록 위로 올라갔습니다.');
-  } catch (e: any) {
-    console.log('게시글 UP 실패:', e);
-    showPostAlert('UP 실패', e?.message || '게시글을 UP하지 못했습니다.');
+  } catch (e: any) {    showPostAlert('UP 실패', e?.message || '게시글을 UP하지 못했습니다.');
   } finally {
     setBumping(false);
   }
@@ -1025,9 +988,7 @@ const handleBumpListing = async () => {
       content: reportContent.trim() || item.title || null,
     });
 
-    if (error) {
-      console.log('게시글 신고 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '신고 실패',
         error.message.includes('reports')
           ? 'Supabase SQL 설정이 필요합니다. report_restrictions.sql을 실행해 주세요.'
@@ -1070,9 +1031,7 @@ const handleBumpListing = async () => {
       }
     );
 
-    if (error) {
-      console.log('게시글 숨기기 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '게시글 숨기기 실패',
         error.message.includes('hidden_listings')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -1125,9 +1084,7 @@ const handleBumpListing = async () => {
       }
     );
 
-    if (error) {
-      console.log('작성자 차단 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '작성자 차단 실패',
         error.message.includes('user_blocks')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -1162,9 +1119,7 @@ const handleBumpListing = async () => {
         .eq('user_id', user.id)
         .eq('listing_id', item.id);
 
-      if (error) {
-        console.log('좋아요 취소 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       setLiked(false);
@@ -1175,9 +1130,7 @@ const handleBumpListing = async () => {
         listing_id: item.id,
       });
 
-      if (error) {
-        console.log('좋아요 추가 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       setLiked(true);
@@ -1212,9 +1165,7 @@ const handleBumpListing = async () => {
     })
     .eq('id', item.id);
 
-  if (error) {
-    console.log('상태 변경 실패:', error);
-    Alert.alert('오류', '상태를 변경하지 못했습니다.');
+  if (error) {    Alert.alert('오류', '상태를 변경하지 못했습니다.');
     return;
   }
 
@@ -1252,9 +1203,7 @@ const toggleListingVisibility = async () => {
     .eq('id', item.id)
     .eq('author_id', user?.id);
 
-  if (error) {
-    console.log(`${isHidden ? '숨김취소' : '숨김'} 실패:`, error);
-    Alert.alert(
+  if (error) {    Alert.alert(
       '오류',
       error.message.includes('listing_hidden_previous_status')
         ? 'Supabase SQL 설정이 필요합니다. listing_owner_visibility.sql을 실행해 주세요.'
@@ -1291,12 +1240,7 @@ const fetchChatUsers = async () => {
       )
     `)
     .eq('listing_id', item.id);
-
-  console.log('chat_rooms data:', JSON.stringify(data, null, 2));
-
-  if (error) {
-    console.log('채팅 상대 조회 실패:', error);
-    Alert.alert('오류', '채팅 상대를 불러오지 못했습니다.');
+  if (error) {    Alert.alert('오류', '채팅 상대를 불러오지 못했습니다.');
     return;
   }
 
@@ -1376,9 +1320,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     p_room_id: roomId ?? null,
   });
 
-  if (error) {
-    console.log(`${isShareListing ? '나눔완료' : '거래완료'} 실패:`, error);
-    Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
+  if (error) {    Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
     return;
   }
 
@@ -1407,11 +1349,6 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   }
 
   const { data: latestSale, error: latestSaleError } = await latestSaleQuery.maybeSingle();
-
-  if (latestSaleError) {
-    console.log('판매 기록 조회 실패:', latestSaleError);
-  }
-
   router.push({
     pathname: '/review/create',
     params: {
@@ -1713,6 +1650,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       {isVerifiedStore ? (
         <Text style={styles.sellerVerifiedBadge}>가게인증 완료</Text>
       ) : null}
+      {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
       {isPremiumStore ? <PremiumStoreBadge /> : null}
       {showSellerLevel ? (
         <Text
@@ -1744,6 +1682,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
             {sellerType === 'store' ? '인증가게' : '개인'}
           </Text>
 
+          {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
           {isPremiumStore ? <PremiumStoreBadge /> : null}
 
           {item.urgent ? (

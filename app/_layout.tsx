@@ -1,3 +1,5 @@
+// 앱 최상위 레이아웃: 인증 컨텍스트, 테마, 알림 토큰, 네이티브 제스처 루트를 연결한다.
+// 전역 Provider나 네이티브 초기화가 필요하면 이 파일에서 시작한다.
 import {
   DarkTheme,
   DefaultTheme,
@@ -9,6 +11,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { ActivityIndicator, Platform, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../hooks/use-app-theme';
@@ -38,9 +41,7 @@ function InitialSplashController() {
     const timeoutId = setTimeout(() => {
       if (cancelled) return;
 
-      SplashScreen.hideAsync().catch((error) => {
-        console.log('스플래시 화면 숨김 실패:', error);
-      });
+      SplashScreen.hideAsync().catch((error) => {      });
     }, waitMs);
 
     return () => {
@@ -141,9 +142,7 @@ function AndroidNavigationBarTheme() {
         await NavigationBar.setButtonStyleAsync(
           theme.scheme === 'dark' ? 'light' : 'dark'
         );
-      } catch (error) {
-        console.log('안드로이드 네비게이션바 테마 적용 실패:', error);
-      }
+      } catch {      }
     };
 
     void applyNavigationBarTheme();
@@ -245,22 +244,24 @@ export default function RootLayout() {
   };
 
   return (
-    <ThemeProvider value={navigationTheme}>
-      <SafeAreaProvider>
-        <StatusBar
-          style={theme.statusBarStyle}
-          backgroundColor={theme.background}
-          translucent={false}
-        />
-        <AndroidNavigationBarTheme />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={navigationTheme}>
+        <SafeAreaProvider>
+          <StatusBar
+            style={theme.statusBarStyle}
+            backgroundColor={theme.background}
+            translucent={false}
+          />
+          <AndroidNavigationBarTheme />
 
-        <AuthProvider>
-          <InitialSplashController />
-          <PushNotificationRegister />
-          <AccountStatusGate />
-          <RootNavigator />
-        </AuthProvider>
-      </SafeAreaProvider>
-    </ThemeProvider>
+          <AuthProvider>
+            <InitialSplashController />
+            <PushNotificationRegister />
+            <AccountStatusGate />
+            <RootNavigator />
+          </AuthProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

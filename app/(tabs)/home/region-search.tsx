@@ -1,3 +1,4 @@
+// 지역 검색 화면: 사용자가 동네를 검색하고 내 활동 지역으로 저장할 후보를 고른다.
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -33,9 +34,7 @@ export default function RegionSearchScreen() {
     try {
       const candidates = await getNearbyRegionCandidatesByGps();
       setNearbyRegions(candidates);
-    } catch (e) {
-      console.log('내 위치 주변 동네 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   const handleSearch = async (text: string) => {

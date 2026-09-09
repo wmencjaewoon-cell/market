@@ -1,3 +1,4 @@
+// 카카오 OAuth 헬퍼: 인가 URL 생성과 브라우저 인증 흐름을 담당한다.
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 

@@ -1,9 +1,11 @@
+// 내 프로필 편집 화면: 개인/가게 전환, 사업자 1차 확인, 가게 인증 신청 정보를 관리한다.
+// 인증 완료 가게의 운영 정보 수정은 app/store/profile.tsx에서 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -144,10 +146,6 @@ function isValidKoreanBusinessNumber(value: string) {
 }
 
 export default function ProfileEditScreen() {
-  const params = useLocalSearchParams<{
-    lat?: string;
-    lng?: string;
-  }>();
   const { user } = useAuth();
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -195,7 +193,6 @@ export default function ProfileEditScreen() {
     useState(false);
 
   const [message, setMessage] = useState('');
-  const hasStoreLocationParams = Boolean(params.lat && params.lng);
   const isApprovedStoreProfile =
     userType === 'store' && storeVerificationStatus === 'approved';
   const shouldValidatePersonalPhone = userType === 'personal' && !isStaffProfile;
@@ -243,18 +240,6 @@ export default function ProfileEditScreen() {
     fetchProfile();
   }, [user]);
 
-  useEffect(() => {
-    if (!params.lat || !params.lng) return;
-
-    const latitude = Number(params.lat);
-    const longitude = Number(params.lng);
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-
-    setStoreLatitude(latitude);
-    setStoreLongitude(longitude);
-  }, [params.lat, params.lng]);
-
   const fetchProfile = async () => {
     const oauthProfile = getOAuthProfileDefaults(user);
 
@@ -283,11 +268,8 @@ export default function ProfileEditScreen() {
       setStoreIntro(data.store_intro || '');
       setStoreVerificationStatus(data.store_verification_status || 'none');
       setStoreAddress(data.store_address || '');
-
-      if (!hasStoreLocationParams) {
-        setStoreLatitude(data.store_latitude ?? null);
-        setStoreLongitude(data.store_longitude ?? null);
-      }
+      setStoreLatitude(data.store_latitude ?? null);
+      setStoreLongitude(data.store_longitude ?? null);
     } else if (!data) {
       setIsStaffProfile(false);
       setDisplayName((current) => current || oauthProfile.displayName || '');
@@ -360,14 +342,9 @@ export default function ProfileEditScreen() {
         setStoreIntro(request.store_intro || '');
         setPhone(request.phone || '');
         setStoreAddress(request.store_address || '');
-
-        if (!hasStoreLocationParams) {
-          setStoreLatitude(request.store_latitude ?? null);
-          setStoreLongitude(request.store_longitude ?? null);
-        }
+        setStoreLatitude(request.store_latitude ?? null);
+        setStoreLongitude(request.store_longitude ?? null);
       }
-    } else if (requestResult.error && requestResult.error.code !== 'PGRST205') {
-      console.log('가게 인증 신청 조회 실패:', requestResult.error);
     }
   };
 
@@ -484,9 +461,7 @@ export default function ProfileEditScreen() {
       if (result.canceled) return;
 
       setSelectedBusinessDocument(result.assets[0]);
-    } catch (error) {
-      console.log('사업자등록증 파일 선택기 로드 실패:', error);
-      setMessage(
+    } catch {      setMessage(
         '현재 설치된 앱에는 PDF 선택 모듈이 아직 없습니다. 앱을 새로 빌드하면 PDF를 선택할 수 있고, 지금은 이미지로 제출할 수 있습니다.'
       );
       await pickBusinessDocumentImage();
@@ -597,23 +572,8 @@ export default function ProfileEditScreen() {
     }
   };
 
-  const openStoreLocationPicker = () => {
-    if (isApprovedStoreProfile) {
-      setMessage('가게 위치 변경은 내 가게 관리의 가게 프로필에서 진행해 주세요.');
-      return;
-    }
-
-    router.push({
-      pathname: '/map-picker',
-      params: {
-        lat: storeLatitude != null ? String(storeLatitude) : undefined,
-        lng: storeLongitude != null ? String(storeLongitude) : undefined,
-        returnTo: '/profile/edit',
-        title: '가게 위치 선택',
-        desc: '핀을 옮겨서 실제 가게 위치를 선택해 주세요.',
-        buttonText: '가게 위치로 선택',
-      },
-    } as any);
+  const openStoreProfileSettings = () => {
+    router.push('/store/profile' as any);
   };
 
   const handleSave = async () => {
@@ -905,7 +865,6 @@ export default function ProfileEditScreen() {
   };
 
   const profileImageUrl = avatarPreviewUri || getProfileImageUrl(avatarPath);
-  const storeLocationSelected = storeLatitude != null && storeLongitude != null;
 
   return (
     <>
@@ -1125,18 +1084,20 @@ export default function ProfileEditScreen() {
               editable={!isApprovedStoreProfile}
             />
 
-            <TouchableOpacity
-              style={styles.locationBtn}
-              onPress={openStoreLocationPicker}
-            >
-              <Ionicons name="map-outline" size={18} color={theme.text} />
-              <Text style={styles.locationBtnText}>지도에서 가게 위치 선택</Text>
-            </TouchableOpacity>
+            {isApprovedStoreProfile ? (
+              <TouchableOpacity
+                style={styles.locationBtn}
+                onPress={openStoreProfileSettings}
+              >
+                <Ionicons name="location-outline" size={18} color={theme.primaryText} />
+                <Text style={styles.locationBtnText}>가게 위치 수정</Text>
+              </TouchableOpacity>
+            ) : null}
 
             <Text style={styles.statusText}>
-              {storeLocationSelected
-                ? `${storeLatitude?.toFixed(6)}, ${storeLongitude?.toFixed(6)}`
-                : '지도 위치를 선택하면 판매자 정보에서 지도로 확인할 수 있습니다.'}
+              {isApprovedStoreProfile
+                ? '가게 프로필 화면에서 지도 위치와 상세주소를 수정할 수 있습니다.'
+                : '가게 주소는 직접 입력하고, 지도 노출 위치는 인증 완료 후 내 가게 관리에서 설정할 수 있습니다.'}
             </Text>
 
             {storeVerificationStatus !== 'approved' ? (
@@ -1502,20 +1463,19 @@ function createStyles(theme: AppPalette) {
   },
 
   locationBtn: {
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: 1,
-    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
-    backgroundColor: theme.surface,
+    backgroundColor: theme.primary,
   },
 
   locationBtnText: {
-    color: theme.text,
-    fontWeight: '800',
+    color: theme.primaryText,
+    fontWeight: '900',
   },
 
   agreementBox: {

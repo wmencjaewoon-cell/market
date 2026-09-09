@@ -1,3 +1,4 @@
+// 웹 위치 선택 대체 화면: 네이티브 지도 조작 대신 기본 좌표를 반환하는 fallback이다.
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -14,6 +15,7 @@ export default function MapPickerScreen() {
     buttonText?: string;
     mode?: string;
     chatRoomId?: string;
+    useCurrentLocation?: string;
   }>();
 
   const initial = useMemo(() => {
@@ -36,6 +38,7 @@ export default function MapPickerScreen() {
 
   const handleSelectLocation = () => {
     if (isChatPlacePicker) {
+      // Keep chat place sharing event-based so the chat room does not remount.
       emitChatPlaceSelection({
         roomId: String(params.chatRoomId),
         address: fallbackAddress,
@@ -46,6 +49,7 @@ export default function MapPickerScreen() {
       return;
     }
 
+    // Match the native picker contract: return lat/lng/address through route params.
     router.replace({
       pathname: returnTo as any,
       params: {
@@ -128,7 +132,7 @@ const styles = StyleSheet.create({
   desc: { marginTop: 6, color: '#6b7280', lineHeight: 20 },
   btn: {
     marginTop: 14,
-    backgroundColor: 'theme.primary',
+    backgroundColor: '#166534',
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',

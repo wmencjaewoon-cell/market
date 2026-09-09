@@ -1,3 +1,4 @@
+// 채팅 시작 가능 여부 검사: 위치/차단/상태 제한을 확인해 부적절한 채팅 생성을 막는다.
 import { getCurrentCoords, getDistanceKm } from './region';
 import { supabase } from './supabase';
 import { canStartChat } from './guard';

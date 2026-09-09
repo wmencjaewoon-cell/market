@@ -223,20 +223,6 @@ serve(async (req) => {
       acc[platform] = (acc[platform] || 0) + 1;
       return acc;
     }, {});
-
-    console.log(
-      'send-chat-push expo result',
-      JSON.stringify({
-        roomId,
-        receiverIds: activeReceiverIds,
-        tokenCount: tokens.length,
-        tokenPlatformCounts,
-        expoStatus: pushRes.status,
-        pushData,
-        receiptData,
-      })
-    );
-
     return new Response(JSON.stringify({ ok: true, pushData }), {
       headers: {
         ...corsHeaders,

@@ -1,3 +1,4 @@
+// 가게 고객관리 화면: 온라인 견적문의와 오프라인 등록 고객을 업체 단위로 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -164,9 +165,7 @@ export default function StoreCustomersScreen() {
 
     const { data: customerData, error: customerError } = await customerQuery;
 
-    if (customerError) {
-      console.log('고객 목록 조회 실패:', customerError);
-      setMessage(customerError.message);
+    if (customerError) {      setMessage(customerError.message);
       setCustomers([]);
       setEstimateRows([]);
       setLoading(false);
@@ -192,9 +191,7 @@ export default function StoreCustomersScreen() {
       .in('customer_id', customerIds)
       .order('created_at', { ascending: false });
 
-    if (estimateError) {
-      console.log('고객 연결 견적문의 조회 실패:', estimateError);
-      setEstimateRows([]);
+    if (estimateError) {      setEstimateRows([]);
     } else {
       setEstimateRows(estimateData || []);
     }

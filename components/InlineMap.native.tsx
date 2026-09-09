@@ -1,3 +1,4 @@
+// 네이티브 인라인 지도: 상세 화면 안에서 작은 미리보기 지도를 보여주고 탭 이벤트를 부모로 넘긴다.
 import { Pressable, StyleSheet } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 

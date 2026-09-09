@@ -157,11 +157,6 @@ serve(async (req) => {
         .eq("staff_user_id", user.id)
         .eq("status", "active")
         .maybeSingle();
-
-      if (staffError) {
-        console.log("현장 초대 알림 직원 권한 조회 실패:", staffError);
-      }
-
       isStoreManager = ["manager", "owner"].includes(String(staffRow?.role || ""));
 
       const { data: actorMemberRows, error: actorMemberError } = await adminClient
@@ -169,11 +164,6 @@ serve(async (req) => {
         .select("id, role, invitation_status")
         .eq("project_id", project.id)
         .eq("member_user_id", user.id);
-
-      if (actorMemberError) {
-        console.log("현장 초대 알림 멤버 권한 조회 실패:", actorMemberError);
-      }
-
       isProjectManager = (actorMemberRows || []).some(isAcceptedWorkMember);
     }
 
@@ -194,11 +184,6 @@ serve(async (req) => {
       .eq("project_id", project.id)
       .eq("room_type", "project")
       .limit(1);
-
-    if (roomError) {
-      console.log("현장 초대 알림 채팅방 조회 실패:", roomError);
-    }
-
     roomId = roomRows?.[0]?.id || null;
 
     if (roomId) {
@@ -208,11 +193,6 @@ serve(async (req) => {
         .eq("room_id", roomId)
         .eq("user_id", recipientId)
         .maybeSingle();
-
-      if (settingError) {
-        console.log("현장 초대 알림 설정 조회 실패:", settingError);
-      }
-
       if (setting?.muted === true) {
         return jsonResponse({ ok: true, reason: "muted", roomId });
       }
@@ -223,11 +203,6 @@ serve(async (req) => {
       .select("display_name")
       .eq("id", user.id)
       .maybeSingle();
-
-    if (actorProfileError) {
-      console.log("현장 초대 알림 발신자 조회 실패:", actorProfileError);
-    }
-
     const projectName = String(project.name || "현장").trim() || "현장";
     const inviteeName =
       String(member.display_name || member.company_name || "협력업체").trim() ||
@@ -313,19 +288,6 @@ serve(async (req) => {
     });
 
     const pushData = await pushRes.json();
-
-    console.log(
-      "send-project-invite-notification result",
-      JSON.stringify({
-        projectMemberId,
-        projectId: project.id,
-        recipientId,
-        tokenCount: tokens.length,
-        expoStatus: pushRes.status,
-        pushData,
-      })
-    );
-
     return jsonResponse({ ok: true, count: 1, pushData });
   } catch (error) {
     return errorResponse(String(error), 500);

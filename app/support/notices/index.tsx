@@ -1,3 +1,4 @@
+// 공지 목록 화면: 운영 공지를 최신순으로 조회한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -51,9 +52,7 @@ export default function NoticesScreen() {
       .order('created_at', { ascending: false });
       
 
-    if (error) {
-      console.log('공지사항 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setItems((data || []) as NoticeItem[]);

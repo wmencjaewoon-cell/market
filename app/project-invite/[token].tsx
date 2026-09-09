@@ -1,3 +1,4 @@
+// 현장 초대 링크 화면: 외부 협력업체가 토큰으로 현장 참여를 수락하는 진입점이다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';

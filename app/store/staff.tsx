@@ -1,3 +1,4 @@
+// 직원관리 화면: 가게 대표/매니저가 직원 계정, 역할, 연락처, 비밀번호 변경 요청을 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -103,9 +104,7 @@ export default function StoreStaffScreen() {
 
     setLimits(limitData);
 
-    if (staffResult.error) {
-      console.log('직원 목록 조회 실패:', staffResult.error);
-      setMessage(staffResult.error.message);
+    if (staffResult.error) {      setMessage(staffResult.error.message);
       setStaffRows([]);
     } else {
       setStaffRows(staffResult.data || []);

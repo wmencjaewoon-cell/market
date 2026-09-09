@@ -1,3 +1,4 @@
+// 앱 사용 제한 가드: 차단/탈퇴대기 같은 계정 상태를 화면 진입 전에 확인한다.
 import { supabase } from './supabase';
 
 export type GuardResult = {

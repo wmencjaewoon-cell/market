@@ -1,3 +1,5 @@
+// 견적문의 작성 화면: 사용자가 가게를 선택해 신청자 정보, 주소, 희망 일정, 사진을 제출한다.
+// 한 가게당 중복 문의 제한과 알림 발송 흐름을 수정할 때 이 파일을 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
@@ -168,9 +170,7 @@ export default function EstimateCreateScreen() {
       .order('created_at', { ascending: false })
       .limit(200);
 
-    if (error) {
-      console.log('진행 중 견적문의 조회 실패:', error);
-      setActiveStoreRequestIds({});
+    if (error) {      setActiveStoreRequestIds({});
       return;
     }
 
@@ -228,9 +228,7 @@ export default function EstimateCreateScreen() {
       .order('display_name', { ascending: true })
       .limit(50);
 
-    if (error) {
-      console.log('견적문의 가게 목록 조회 실패:', error);
-      setStores([]);
+    if (error) {      setStores([]);
       return;
     }
 
@@ -251,9 +249,7 @@ export default function EstimateCreateScreen() {
       .in('store_user_id', storeIds)
       .order('display_name', { ascending: true });
 
-    if (staffError) {
-      console.log('견적문의 직원 목록 조회 실패:', staffError);
-      setStaffMembers([]);
+    if (staffError) {      setStaffMembers([]);
       return;
     }
 
@@ -397,14 +393,7 @@ export default function EstimateCreateScreen() {
     try {
       const { error } = await supabase.functions.invoke('send-estimate-request-notification', {
         body: { requestId },
-      });
-
-      if (error) {
-        console.log('견적문의 알림 전송 실패:', error);
-      }
-    } catch (error) {
-      console.log('견적문의 알림 전송 실패:', error);
-    }
+      });    } catch {    }
   };
 
   const submitEstimate = async () => {
@@ -519,9 +508,7 @@ export default function EstimateCreateScreen() {
           : '선택한 가게가 없어 관리자 배정 또는 디자인위쇼 문의로 접수됩니다.'
       );
       router.replace('/(tabs)/home' as any);
-    } catch (error: any) {
-      console.log('견적문의 등록 실패:', error);
-      setMessage(error?.message || '견적문의 등록 중 오류가 발생했습니다.');
+    } catch (error: any) {      setMessage(error?.message || '견적문의 등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }

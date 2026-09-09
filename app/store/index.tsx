@@ -1,4 +1,6 @@
+// 가게찾기 화면: 사용자 위치, 업종 필터, 프리미엄/지역광고 노출을 반영해 가게 목록을 정렬한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Location from 'expo-location';
 import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -11,21 +13,95 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { PremiumStoreBadge } from '../../components/StorePlanModal';
+import { LocalAdStoreBadge, PremiumStoreBadge } from '../../components/StorePlanModal';
 import { getProfileImageUrl } from '../../lib/profileImage';
+import { getDistanceKm } from '../../lib/region';
 import { STORE_CATEGORY_OPTIONS, getStoreCategoryLabel } from '../../lib/storeCategories';
 import {
+  canShowStoreNotice,
   fetchStorePublicExposureMap,
+  getStoreExposureScore,
+  hasLocalAdStoreProfile,
   isPremiumStoreProfile,
   mergeStoreExposureIntoProfile,
 } from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 
+type Coords = {
+  latitude: number;
+  longitude: number;
+};
+
+function getStoreDistanceKm(store: any, myLocation: Coords | null) {
+  if (!myLocation) return null;
+  return getDistanceKm(
+    myLocation.latitude,
+    myLocation.longitude,
+    store.store_latitude,
+    store.store_longitude
+  );
+}
+
+function formatDistance(km?: number | null) {
+  if (km == null) return '';
+  if (km < 1) return `${Math.round(km * 1000)}m`;
+  return `${km.toFixed(1)}km`;
+}
+
+function formatStoreAddress(address?: string | null, detailAddress?: string | null) {
+  return [address, detailAddress]
+    .map((value) => (value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+// Exposure wins first, then recommendation, then physical distance from the user.
+// This is the 가게찾기 equivalent of the map/home premium ranking policy.
+function sortStoresByExposureAndDistance(stores: any[], myLocation: Coords | null) {
+  return [...stores].sort((a, b) => {
+    const exposureScore = getStoreExposureScore(b) - getStoreExposureScore(a);
+    if (exposureScore !== 0) return exposureScore;
+
+    const recommendationScore =
+      Number(!!b.recommended_exposure) - Number(!!a.recommended_exposure);
+    if (recommendationScore !== 0) return recommendationScore;
+
+    const aDistance = getStoreDistanceKm(a, myLocation);
+    const bDistance = getStoreDistanceKm(b, myLocation);
+
+    if (aDistance != null && bDistance != null && aDistance !== bDistance) {
+      return aDistance - bDistance;
+    }
+
+    if (aDistance != null && bDistance == null) return -1;
+    if (aDistance == null && bDistance != null) return 1;
+
+    return String(a.display_name || '').localeCompare(String(b.display_name || ''));
+  });
+}
+
 export default function StoreListScreen() {
   const [stores, setStores] = useState<any[]>([]);
+  const [myLocation, setMyLocation] = useState<Coords | null>(null);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('전체');
   const [refreshing, setRefreshing] = useState(false);
+
+  const loadMyLocation = async () => {
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') return;
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      setMyLocation({
+        latitude: current.coords.latitude,
+        longitude: current.coords.longitude,
+      });
+    } catch {    }
+  };
 
   const loadStores = async () => {
     const { data, error } = await supabase
@@ -38,6 +114,7 @@ export default function StoreListScreen() {
         phone,
         store_category,
         store_address,
+        store_detail_address,
         store_intro,
         store_notice,
         store_business_hours,
@@ -46,6 +123,8 @@ export default function StoreListScreen() {
         store_cash_receipt_available,
         store_tax_invoice_available,
         store_accepts_inquiries,
+        store_latitude,
+        store_longitude,
         business_verified,
         user_type
       `)
@@ -53,9 +132,7 @@ export default function StoreListScreen() {
       .eq('business_verified', true)
       .order('display_name', { ascending: true });
 
-    if (error) {
-      console.log('가게 목록 조회 실패:', error);
-      setStores([]);
+    if (error) {      setStores([]);
       return;
     }
 
@@ -70,18 +147,19 @@ export default function StoreListScreen() {
 
   useEffect(() => {
     void loadStores();
+    void loadMyLocation();
   }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await loadStores();
+    await Promise.all([loadStores(), loadMyLocation()]);
     setRefreshing(false);
   };
 
   const filteredStores = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
-    return stores.filter((store) => {
+    const filtered = stores.filter((store) => {
       const categoryLabel = getStoreCategoryLabel(store.store_category);
 
       if (selectedCategory === '기타') {
@@ -98,8 +176,9 @@ export default function StoreListScreen() {
         store.display_name,
         store.store_category,
         store.store_address,
+        store.store_detail_address,
         store.store_intro,
-        store.store_notice,
+        canShowStoreNotice(store) ? store.store_notice : null,
         store.store_business_hours,
       ]
         .filter(Boolean)
@@ -108,7 +187,9 @@ export default function StoreListScreen() {
 
       return searchableText.includes(keyword);
     });
-  }, [search, selectedCategory, stores]);
+
+    return sortStoresByExposureAndDistance(filtered, myLocation);
+  }, [myLocation, search, selectedCategory, stores]);
 
   return (
     <ScrollView
@@ -172,6 +253,8 @@ export default function StoreListScreen() {
               ? getProfileImageUrl(store.avatar_path || store.avatar_url)
               : null;
           const isPremiumStore = isPremiumStoreProfile(store);
+          const hasLocalAd = hasLocalAdStoreProfile(store);
+          const distanceText = formatDistance(getStoreDistanceKm(store, myLocation));
 
           return (
             <TouchableOpacity
@@ -193,11 +276,12 @@ export default function StoreListScreen() {
                     {store.display_name || '인증 가게'}
                   </Text>
                   <Text style={styles.verifiedBadge}>인증</Text>
+                  {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
                   {isPremiumStore ? <PremiumStoreBadge /> : null}
                 </View>
 
                 <Text style={styles.meta} numberOfLines={1}>
-                  {store.store_address || '주소 미등록'}
+                  {[formatStoreAddress(store.store_address, store.store_detail_address) || '주소 미등록', distanceText].filter(Boolean).join(' · ')}
                 </Text>
 
                 <Text style={styles.categoryText} numberOfLines={1}>
@@ -257,8 +341,8 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   categoryChipActive: {
-    borderColor: '#2563eb',
-    backgroundColor: '#eff6ff',
+    borderColor: '#166534',
+    backgroundColor: '#ecfdf5',
   },
   categoryChipText: {
     color: '#374151',
@@ -266,7 +350,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   categoryChipTextActive: {
-    color: '#1d4ed8',
+    color: '#166534',
   },
   card: {
     flexDirection: 'row',
@@ -303,7 +387,7 @@ const styles = StyleSheet.create({
   meta: { marginTop: 4, color: '#6b7280', fontSize: 12, fontWeight: '700' },
   categoryText: {
     marginTop: 4,
-    color: '#1d4ed8',
+    color: '#166534',
     fontSize: 12,
     fontWeight: '900',
   },

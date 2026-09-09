@@ -1,3 +1,4 @@
+// 전화번호 정규화/검증: 개인 회원 전화번호를 국내 010 형식으로 맞춘다.
 export function normalizePersonalPhone(value: string) {
   const digits = value.replace(/[^0-9]/g, '');
 

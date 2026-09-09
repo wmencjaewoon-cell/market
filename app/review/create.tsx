@@ -1,3 +1,4 @@
+// 후기 작성 화면: 거래/나눔 완료 후 상대방 후기와 사진을 저장한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system';
@@ -121,9 +122,7 @@ export default function ReviewCreateScreen() {
         .eq('id', targetUserId)
         .maybeSingle();
 
-      if (error) {
-        console.log('후기 대상 프로필 조회 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       setTargetProfile(data || null);
@@ -226,9 +225,7 @@ export default function ReviewCreateScreen() {
     try {
       const { data: authData, error: authError } = await supabase.auth.getUser();
 
-      if (authError) {
-        console.log('authError:', authError);
-        showAlert('로그인 확인 실패', authError.message);
+      if (authError) {        showAlert('로그인 확인 실패', authError.message);
         return;
       }
 
@@ -351,19 +348,10 @@ export default function ReviewCreateScreen() {
               sentiment,
             },
           }
-        );
-
-        if (notificationError) {
-          console.log('후기 알림 전송 실패:', notificationError);
-        }
-      } catch (notificationException) {
-        console.log('후기 알림 호출 실패:', notificationException);
-      }
+        );      } catch {      }
 
       showAlertAndBack('후기 작성 완료');
-    } catch (e: any) {
-      console.log('후기 작성 중 예외:', e);
-      showAlert('오류', e?.message || '후기 작성 중 문제가 발생했습니다.');
+    } catch (e: any) {      showAlert('오류', e?.message || '후기 작성 중 문제가 발생했습니다.');
     } finally {
       setLoading(false);
     }

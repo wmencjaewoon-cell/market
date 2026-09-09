@@ -1,3 +1,5 @@
+// 현장관리 화면: 확정 견적/오프라인 계약에서 생성된 현장, 일정, 일일보고서, 참여자를 관리한다.
+// 파트너는 같은 현장을 보지만 소유 가게 권한을 얻지 않도록 모든 수정 권한을 별도로 계산한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import * as Clipboard from 'expo-clipboard';
@@ -50,6 +52,7 @@ const IMAGE_PREVIEW_CLOSE_VELOCITY = 900;
 
 type ProjectStatus = 'preparing' | 'in_progress' | 'completed' | 'on_hold' | 'canceled';
 type ProjectFilter = ProjectStatus | 'all';
+type ProjectScopeFilter = 'all' | 'owned' | 'partner';
 type ScheduleStatus = 'scheduled' | 'in_progress' | 'done' | 'canceled';
 type PartnerInputMode = 'registered' | 'manual';
 type ProjectActivityNotificationType =
@@ -73,6 +76,12 @@ const PROJECT_STATUS_OPTIONS: { key: ProjectFilter; label: string }[] = [
   { key: 'completed', label: '완료' },
   { key: 'on_hold', label: '보류' },
   { key: 'canceled', label: '취소' },
+];
+
+const PROJECT_SCOPE_OPTIONS: { key: ProjectScopeFilter; label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: 'owned', label: '내 현장' },
+  { key: 'partner', label: '협력 참여' },
 ];
 
 const SCHEDULE_STATUS_OPTIONS: { key: ScheduleStatus; label: string }[] = [
@@ -366,6 +375,50 @@ function canReadProjectInternalReports(
   ));
 }
 
+// Partner access is a separate view of the same project.
+// Partners can see invited projects without gaining the owning store's management permissions.
+function isProjectPartnerAccess(
+  project: any,
+  access: StoreAccessContext | null,
+  userId?: string | null
+) {
+  if (!project || !userId) return false;
+
+  if (project.store_user_id === userId) return false;
+
+  if (access?.storeUserId && project.store_user_id === access.storeUserId) {
+    return false;
+  }
+
+  return (project.project_members || []).some((member: any) => {
+    if (member.invitation_status !== 'accepted' || member.role !== 'partner') return false;
+    return (
+      member.member_user_id === userId ||
+      (!!access?.storeUserId && member.member_user_id === access.storeUserId)
+    );
+  });
+}
+
+function getProjectAccessLabel(
+  project: any,
+  access: StoreAccessContext | null,
+  userId?: string | null
+) {
+  return isProjectPartnerAccess(project, access, userId) ? '협력 참여' : '내 현장';
+}
+
+function projectMatchesScope(
+  project: any,
+  scope: ProjectScopeFilter,
+  access: StoreAccessContext | null,
+  userId?: string | null
+) {
+  if (scope === 'all') return true;
+
+  const partnerAccess = isProjectPartnerAccess(project, access, userId);
+  return scope === 'partner' ? partnerAccess : !partnerAccess;
+}
+
 async function syncProjectPeriodUpdates(
   updates: ProjectPeriodUpdate[],
   access: StoreAccessContext | null
@@ -389,15 +442,12 @@ async function syncProjectPeriodUpdates(
           end_date: update.endDate,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', update.id);
-
-      if (error) {
-        console.log('현장 기간 자동 갱신 실패:', error);
-      }
-    })
+        .eq('id', update.id);    })
   );
 }
 
+// The project period is derived from the earliest and latest schedules.
+// Only persist it when the current user can write to the owning store's project.
 async function syncProjectPeriodFromSchedules(
   project: any,
   schedules: any[],
@@ -476,6 +526,10 @@ function getProjectInviteMessage(projectName: string, inviteLink: string) {
     .join('\n');
 }
 
+/**
+ * 현장 완료/삭제/일정 삭제처럼 되돌리기 어려운 작업 전에 확인을 받는다.
+ * web과 native가 같은 boolean 흐름을 쓰도록 분기만 이 함수에 모아둔다.
+ */
 function confirmProjectLifecycleAction(title: string, message: string, confirmText: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return Promise.resolve(window.confirm(`${title}\n${message}`));
@@ -505,6 +559,9 @@ export default function StoreProjectsScreen() {
   const requestedReportId = getRouteParam(params.reportId);
   const requestedProjectAction = getRouteParam(params.action);
   const requestedActionFocus = getRouteParam(params.focus);
+
+  // 같은 화면을 목록/상세/채팅 return 진입에 모두 사용한다.
+  // route param이 바뀔 때 한 번만 적용하기 위해 ref로 마지막 적용값을 기억한다.
   const appliedProjectParamRef = useRef<string | null>(null);
   const appliedReportParamRef = useRef<string | null>(null);
   const appliedProjectActionParamRef = useRef<string | null>(null);
@@ -527,6 +584,7 @@ export default function StoreProjectsScreen() {
   }, []);
   const [projectStatusOverrides, setProjectStatusOverrides] = useState<Record<string, ProjectStatus>>({});
   const [filter, setFilter] = useState<ProjectFilter>('all');
+  const [scopeFilter, setScopeFilter] = useState<ProjectScopeFilter>('all');
   const [projectSearch, setProjectSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -572,6 +630,9 @@ export default function StoreProjectsScreen() {
   const [pendingReportFormFocus, setPendingReportFormFocus] = useState(false);
   const reportDetailPanY = useRef(new Animated.Value(0)).current;
 
+  // 협력업체 초대 form 상태다.
+  // 등록된 앱 가게를 고르면 partnerStores/partnerStoreStaffMembers에서 담당자와 전화번호를 자동 채우고,
+  // 기타 입력 모드에서는 회사명/담당자/전화번호를 직접 받아 SMS/카카오/링크복사로 초대한다.
   const [partnerCompany, setPartnerCompany] = useState('');
   const [partnerName, setPartnerName] = useState('');
   const [partnerPhone, setPartnerPhone] = useState('');
@@ -583,6 +644,10 @@ export default function StoreProjectsScreen() {
   const [partnerContactPickerOpen, setPartnerContactPickerOpen] = useState(false);
   const [scheduleRangeMode, setScheduleRangeMode] = useState<'start' | 'end' | null>(null);
 
+  /**
+   * 채팅방의 "일일보고서" 버튼으로 들어왔을 때 보고서 작성 폼으로 스크롤한다.
+   * ScrollView layout이 잡힌 뒤 움직여야 하므로 requestAnimationFrame에서 실행한다.
+   */
   const scrollToReportForm = useCallback(() => {
     requestAnimationFrame(() => {
       projectScrollRef.current?.scrollTo({
@@ -592,6 +657,13 @@ export default function StoreProjectsScreen() {
     });
   }, []);
 
+  /**
+   * 현장 목록에 필요한 모든 연결 데이터를 조회한다.
+   *
+   * 대표/매니저는 소유 가게 현장과 협력업체로 초대받은 현장을 같이 보고,
+   * 일반 직원은 배정된 현장 중심으로 본다. 한 화면에서 고객, 견적문의, 참여자,
+   * 일정, 일일보고서를 모두 보여줘야 하므로 select에서 관계 row를 같이 가져온다.
+   */
   const loadProjects = useCallback(async () => {
     if (!user) return;
 
@@ -694,18 +766,11 @@ export default function StoreProjectsScreen() {
         : Promise.resolve({ data: [], error: null }),
     ]);
 
-    if (projectResult.error) {
-      console.log('현장 목록 조회 실패:', projectResult.error);
-      setMessage(projectResult.error.message);
+    if (projectResult.error) {      setMessage(projectResult.error.message);
       setProjects([]);
       setLoading(false);
       return;
     }
-
-    if (partnerStoreResult.error) {
-      console.log('협력업체 가게 목록 조회 실패:', partnerStoreResult.error);
-    }
-
     const assignedStaffUserIds = Array.from(new Set(
       (projectResult.data || [])
         .map((project: any) => project.assigned_staff_user_id)
@@ -734,15 +799,11 @@ export default function StoreProjectsScreen() {
           .in('id', assignedStaffUserIds),
       ]);
 
-      if (projectStaffResult.error) {
-        console.log('현장 담당 직원 조회 실패:', projectStaffResult.error);
-      } else {
+      if (projectStaffResult.error) {      } else {
         projectStaffRows = projectStaffResult.data || [];
       }
 
-      if (projectStaffProfileResult.error) {
-        console.log('현장 담당자 프로필 조회 실패:', projectStaffProfileResult.error);
-      } else {
+      if (projectStaffProfileResult.error) {      } else {
         projectStaffProfileRows = projectStaffProfileResult.data || [];
       }
     }
@@ -812,9 +873,7 @@ export default function StoreProjectsScreen() {
         .in('store_user_id', partnerStoreIds)
         .order('display_name', { ascending: true });
 
-      if (partnerStaffError) {
-        console.log('협력업체 직원 목록 조회 실패:', partnerStaffError);
-        setPartnerStoreStaffMembers([]);
+      if (partnerStaffError) {        setPartnerStoreStaffMembers([]);
       } else {
         setPartnerStoreStaffMembers(partnerStaffData || []);
       }
@@ -922,10 +981,32 @@ export default function StoreProjectsScreen() {
     projects.length > 0;
   const canManageProjects = !!storeAccess?.canManageStore;
 
+  const projectScopeCounts = useMemo(() => {
+    return projects.reduce<Record<ProjectScopeFilter, number>>(
+      (acc, project) => {
+        const partnerAccess = isProjectPartnerAccess(project, storeAccess, user?.id);
+        acc.all += 1;
+        if (partnerAccess) {
+          acc.partner += 1;
+        } else {
+          acc.owned += 1;
+        }
+        return acc;
+      },
+      { all: 0, owned: 0, partner: 0 }
+    );
+  }, [projects, storeAccess, user?.id]);
+
+  const scopedProjects = useMemo(() => {
+    return projects.filter((project) =>
+      projectMatchesScope(project, scopeFilter, storeAccess, user?.id)
+    );
+  }, [projects, scopeFilter, storeAccess, user?.id]);
+
   const filteredProjects = useMemo(() => {
     const keyword = normalizeSearchText(projectSearch);
 
-    return projects.filter((project) => {
+    return scopedProjects.filter((project) => {
       const statusMatched = filter === 'all' || project.status === filter;
       if (!statusMatched) return false;
       if (!keyword) return true;
@@ -960,11 +1041,14 @@ export default function StoreProjectsScreen() {
         memberText,
       ].some((value) => normalizeSearchText(value).includes(keyword));
     });
-  }, [filter, projectSearch, projectStaffProfiles, projects, staffMembers]);
+  }, [filter, projectSearch, projectStaffProfiles, scopedProjects, staffMembers]);
 
   const selectedProject = useMemo(() => {
     return projects.find((project) => project.id === selectedProjectId) || null;
   }, [projects, selectedProjectId]);
+
+  // 알림/채팅에서 projectId로 바로 들어왔는데 아직 목록 조회가 끝나지 않은 잠깐의 상태다.
+  // 이 값을 이용해 "빈 목록"이 아니라 "해당 현장 불러오는 중"처럼 처리한다.
   const isLoadingRequestedProject = !!(
     requestedProjectId &&
     loading &&
@@ -973,6 +1057,9 @@ export default function StoreProjectsScreen() {
   const canReadSelectedProjectInternalReports = useMemo(() => {
     return canReadProjectInternalReports(selectedProject, storeAccess, user?.id);
   }, [selectedProject, storeAccess, user?.id]);
+
+  // 내부 보고서는 가게 관계자/협력업체만 보고, 고객은 customer_visible 보고서만 본다.
+  // 고객 화면에서 내부 보고서가 보이면 RLS와 이 필터를 같이 확인해야 한다.
   const visibleSelectedProjectReports = useMemo(() => {
     if (!selectedProject) return [];
     return (selectedProject.daily_reports || []).filter(
@@ -989,6 +1076,8 @@ export default function StoreProjectsScreen() {
     );
   }, [selectedProject, selectedReportId, visibleSelectedProjectReports]);
 
+  // 보고서 상세 모달에서 표시할 사진은 sort_order 기준으로 고정한다.
+  // 업로드 순서가 DB 조회 순서와 달라도 사용자가 추가한 순서대로 보이게 하기 위함이다.
   const selectedReportImages = useMemo(() => {
     return [...(selectedReport?.daily_report_images || [])].sort(
       (a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)
@@ -1005,7 +1094,14 @@ export default function StoreProjectsScreen() {
     );
   }, [selectedProject, user?.id]);
 
-  const isSelectedProjectPartner = selectedProjectMember?.role === 'partner';
+  // 협력업체로 초대된 사람은 본인에게 보이는 상태 override만 가능하고,
+  // 소유 가게의 실제 현장 상태/참여자/일정 권한은 갖지 않는다.
+  const isSelectedProjectPartner = selectedProject
+    ? isProjectPartnerAccess(selectedProject, storeAccess, user?.id)
+    : selectedProjectMember?.role === 'partner';
+  const selectedProjectAccessLabel = selectedProject
+    ? getProjectAccessLabel(selectedProject, storeAccess, user?.id)
+    : '';
   const canManageSelectedProjectMembers = !!(
     selectedProject &&
     user?.id &&
@@ -1014,6 +1110,12 @@ export default function StoreProjectsScreen() {
       (storeAccess?.canManageStore && selectedProject.store_user_id === storeAccess.storeUserId)
     )
   );
+  /**
+   * 현장 상태를 실제 DB에 바꿀 수 있는지 판단한다.
+   *
+   * 소유 가게 대표/매니저, 담당 직원, 내부 참여자만 공유 상태를 변경할 수 있다.
+   * 협력업체는 자신의 화면에서만 상태처럼 보이는 값을 바꿔야 하므로 여기서 제외한다.
+   */
   const canUpdateSelectedProjectStatus = !!(
     selectedProject &&
     user?.id &&
@@ -1290,6 +1392,8 @@ export default function StoreProjectsScreen() {
     );
   }, [selectedDate, selectedProject]);
 
+  // 선택한 날짜의 일일보고서만 보여준다.
+  // 내부/고객공개 필터는 `visibleSelectedProjectReports`에서 이미 적용된 상태다.
   const selectedReports = useMemo(() => {
     if (!selectedProject) return [];
     return visibleSelectedProjectReports.filter(
@@ -1297,6 +1401,12 @@ export default function StoreProjectsScreen() {
     );
   }, [selectedDate, selectedProject, visibleSelectedProjectReports]);
 
+  /**
+   * 일정 생성/수정 권한이다.
+   *
+   * 요구사항상 일정은 "견적을 받은 가게" 쪽에서만 관리한다.
+   * 협력업체와 고객은 달력에서 일정을 볼 수 있어도 시작/종료일을 바꾸면 안 된다.
+   */
   const canManageSelectedProjectSchedule = useMemo(() => {
     if (!selectedProject || !user?.id) return false;
 
@@ -1316,6 +1426,12 @@ export default function StoreProjectsScreen() {
     );
   }, [selectedProject, storeAccess, user?.id]);
 
+  /**
+   * 일일보고서 수정/삭제 권한이다.
+   *
+   * 작성자는 본인 보고서만 수정/삭제할 수 있다. 대표/매니저라도 다른 작성자의 보고서를
+   * 임의로 고치게 두면 현장 기록의 책임 소재가 흐려지므로 author-only로 유지한다.
+   */
   const canEditReport = useCallback((report: any) => {
     return !!report?.author_id && !!user?.id && report.author_id === user.id;
   }, [user?.id]);
@@ -1332,6 +1448,10 @@ export default function StoreProjectsScreen() {
     setReportImages([]);
   }, [selectedDate]);
 
+  /**
+   * 선택한 보고서를 작성 폼으로 불러와 수정 모드로 전환한다.
+   * 기존 사진은 그대로 두고, 새로 추가한 사진만 append하도록 `reportImages`는 비워둔다.
+   */
   const startEditReport = (report: any) => {
     if (!canEditReport(report)) {
       Alert.alert('일일보고서 수정', '작성자만 수정할 수 있습니다.');
@@ -1369,6 +1489,10 @@ export default function StoreProjectsScreen() {
     setScheduleRangeMode(null);
   }, [selectedDate]);
 
+  /**
+   * 선택한 일정을 일정 폼으로 불러와 수정 모드로 전환한다.
+   * 시작일 기준으로 달력 월도 같이 이동해서 사용자가 수정 대상 날짜를 잃어버리지 않게 한다.
+   */
   const startEditSchedule = (schedule: any) => {
     if (!canManageSelectedProjectSchedule) {
       Alert.alert('일정 수정', '일정은 견적을 받은 가게만 수정할 수 있습니다.');
@@ -1408,6 +1532,8 @@ export default function StoreProjectsScreen() {
       return true;
     }
 
+    // 일일보고서는 협력업체도 작성할 수 있다.
+    // 다만 참여자 추가/내보내기, 공유 현장 상태 변경, 일정 관리는 별도 권한에서 막는다.
     return (selectedProject.project_members || []).some((member: any) => (
       member.member_user_id === user.id &&
       member.invitation_status === 'accepted' &&
@@ -1432,13 +1558,13 @@ export default function StoreProjectsScreen() {
   }, [canWriteSelectedProject, pendingReportFormFocus, scrollToReportForm, selectedProject]);
 
   const statusCounts = useMemo(() => {
-    return projects.reduce<Record<string, number>>((acc, project) => {
+    return scopedProjects.reduce<Record<string, number>>((acc, project) => {
       const status = project.status || 'preparing';
       acc[status] = (acc[status] || 0) + 1;
       acc.all = (acc.all || 0) + 1;
       return acc;
     }, {});
-  }, [projects]);
+  }, [scopedProjects]);
 
   const getStaffName = (staffUserId?: string | null) => {
     if (!staffUserId) return '담당 미지정';
@@ -1809,9 +1935,7 @@ export default function StoreProjectsScreen() {
   const openProjectInviteSms = async (phone: string, messageBody: string, inviteLink: string) => {
     try {
       await Linking.openURL(getSmsInviteUrl(phone, messageBody));
-    } catch (error) {
-      console.log('협력업체 초대 문자 열기 실패:', error);
-      Alert.alert(
+    } catch {      Alert.alert(
         '문자 열기 실패',
         `문자 앱을 열지 못했습니다. 아래 링크를 전달해 주세요.\n\n${inviteLink}`
       );
@@ -1825,9 +1949,7 @@ export default function StoreProjectsScreen() {
         message: messageBody,
         url: inviteLink,
       });
-    } catch (error) {
-      console.log('협력업체 초대 공유 실패:', error);
-      Alert.alert('공유 실패', '공유창을 열지 못했습니다.');
+    } catch {      Alert.alert('공유 실패', '공유창을 열지 못했습니다.');
     }
   };
 
@@ -1877,6 +1999,18 @@ export default function StoreProjectsScreen() {
     }
   };
 
+  /**
+   * 협력업체를 현장 참여자로 추가한다.
+   *
+   * 등록된 가게/직원:
+   * - member_user_id가 있으므로 project_members에 user id를 저장한다.
+   * - 현장 채팅방 멤버도 RPC로 동기화한다.
+   * - 앱 알림을 보내 초대받은 사용자가 앱 안에서 수락/진입할 수 있게 한다.
+   *
+   * 기타 직접 입력 업체:
+   * - 앱 계정이 없으므로 전화번호와 invite_token만 저장한다.
+   * - 서버 SMS를 보내지 않고 문자앱/카카오/링크복사 액션으로 사용자가 직접 공유한다.
+   */
   const addPartnerMember = async () => {
     if (!selectedProject || !canManageSelectedProjectMembers || saving) return;
 
@@ -1914,6 +2048,8 @@ export default function StoreProjectsScreen() {
 
       let memberRow: any = null;
 
+      // 같은 현장에 같은 등록 사용자를 다시 추가하면 insert가 아니라 기존 row를 갱신한다.
+      // 이 처리 없이 insert하면 project_members_project_id_member_user_id_key 중복 오류가 난다.
       if (memberUserId) {
         const { data: existingMember, error: lookupError } = await supabase
           .from('project_members')
@@ -1976,16 +2112,15 @@ export default function StoreProjectsScreen() {
       }
 
       if (memberUserId) {
+        // 등록 사용자 초대는 채팅방에도 즉시 보이도록 현장 채팅방 멤버십을 보장한다.
+        // 기타 입력 초대는 사용자가 링크를 수락하기 전까지 실제 user id가 없으므로 여기서 제외한다.
         const { error: chatMemberError } = await supabase.rpc('ensure_project_chat_room', {
           p_project_id: selectedProject.id,
-        });
-
-        if (chatMemberError) {
-          console.log('현장 채팅방 참여자 동기화 실패:', chatMemberError);
-        }
-      }
+        });      }
 
       const inviteLink = getProjectInviteLink(memberRow?.invite_token);
+      // 등록된 앱 사용자는 push/in-app 알림으로 안내하고,
+      // 미등록 업체는 inviteLink를 문자/카카오/복사로 직접 전달한다.
       const registeredInviteNotificationError =
         memberUserId && memberRow?.id
           ? await sendRegisteredPartnerInviteNotification(memberRow.id)
@@ -2035,17 +2170,14 @@ export default function StoreProjectsScreen() {
       let handledByProjectChatRpc = false;
 
       if (member.member_user_id) {
+        // 현장 채팅방에서 내보내면 project_members 상태와 chat_room_members 제거가 같이 일어나야 한다.
+        // 최신 RPC가 있으면 그 경로를 우선 사용하고, 없으면 기존 remove_project_member로 fallback한다.
         const { data: roomRows, error: roomLookupError } = await supabase
           .from('chat_rooms')
           .select('id')
           .eq('project_id', selectedProject.id)
           .order('created_at', { ascending: false })
           .limit(1);
-
-        if (roomLookupError) {
-          console.log('현장 채팅방 조회 실패:', roomLookupError);
-        }
-
         const projectRoomId = Array.isArray(roomRows) ? roomRows[0]?.id : null;
 
         if (projectRoomId) {
@@ -2090,6 +2222,12 @@ export default function StoreProjectsScreen() {
     }
   };
 
+  /**
+   * 일정/보고서 변경을 현장 채팅방 참여자에게 알린다.
+   *
+   * 현장 활동은 별도 알림 목록에도 남고, push는 기존 `send-chat-push` Edge Function을 재사용한다.
+   * `visibleToCustomer`가 false인 내부 보고서는 고객에게 인앱 표시되지 않도록 서버 RPC에 flag를 넘긴다.
+   */
   const notifyProjectChatActivity = useCallback(async ({
     projectId,
     type,
@@ -2114,9 +2252,7 @@ export default function StoreProjectsScreen() {
         p_project_id: projectId,
       });
 
-      if (roomError || !roomIdData) {
-        console.log('현장 알림 채팅방 확인 실패:', roomError);
-        return;
+      if (roomError || !roomIdData) {        return;
       }
 
       const roomId = String(roomIdData);
@@ -2133,11 +2269,6 @@ export default function StoreProjectsScreen() {
           p_visible_to_customer: visibleToCustomer,
         }
       );
-
-      if (notificationError) {
-        console.log('현장 인앱 알림 생성 실패:', notificationError);
-      }
-
       if (!sendPush) return;
 
       const { error: pushError } = await supabase.functions.invoke('send-chat-push', {
@@ -2146,16 +2277,16 @@ export default function StoreProjectsScreen() {
           senderId: user.id,
           message: `${title}\n${body}`,
         },
-      });
-
-      if (pushError) {
-        console.log('현장 푸시 알림 전송 실패:', pushError);
-      }
-    } catch (error) {
-      console.log('현장 알림 호출 실패:', error);
-    }
+      });    } catch {    }
   }, [user?.id]);
 
+  /**
+   * 현장 일정을 생성하거나 수정한다.
+   *
+   * 저장 후에는 남아 있는 일정의 가장 빠른 시작일과 가장 늦은 종료일을 계산해
+   * 현장 기간(`start_date/end_date`)을 자동 갱신한다. 그래서 일정이 추가/수정될 때
+   * 현장 목록의 기간도 별도 입력 없이 따라 바뀐다.
+   */
   const saveSchedule = async () => {
     const projectStoreUserId = selectedProject?.store_user_id || storeAccess?.storeUserId;
 
@@ -2193,6 +2324,8 @@ export default function StoreProjectsScreen() {
       memo: scheduleMemo.trim() || null,
     };
 
+    // editingScheduleId가 있으면 update, 없으면 insert다.
+    // 두 경로 모두 이후 로컬 nextSchedules를 만들어 기간 동기화를 같은 방식으로 처리한다.
     const isUpdatingSchedule = !!editingScheduleId;
     const scheduleResult = isUpdatingSchedule
       ? await supabase
@@ -2241,6 +2374,12 @@ export default function StoreProjectsScreen() {
     setSaving(false);
   };
 
+  /**
+   * 현장 일정을 삭제한다.
+   *
+   * 삭제 후 남은 일정으로 현장 기간을 다시 계산한다. 마지막 일정이 삭제되면
+   * `allowEmpty`를 true로 넘겨 현장 기간을 비울 수 있게 한다.
+   */
   const deleteSchedule = async (schedule: any) => {
     if (!selectedProject || !canManageSelectedProjectSchedule || saving) return;
 
@@ -2329,6 +2468,12 @@ export default function StoreProjectsScreen() {
     }
   };
 
+  /**
+   * 보고서 사진을 Supabase Storage와 daily_report_images row로 저장한다.
+   *
+   * storage path는 `가게id/현장id/보고서id/파일명` 구조다.
+   * 이 구조를 유지해야 RLS, 삭제, signed URL 생성에서 특정 현장/보고서 사진만 다루기 쉽다.
+   */
   const uploadReportImage = async (
     projectStoreUserId: string,
     projectId: string,
@@ -2362,6 +2507,13 @@ export default function StoreProjectsScreen() {
     if (imageError) throw imageError;
   };
 
+  /**
+   * 일일보고서를 생성하거나 수정한다.
+   *
+   * 보고서는 반드시 하나의 현장(`project_id`)에 속한다. `customer_visible`이 true면 고객도 볼 수 있고,
+   * false면 가게 관계자/협력업체 내부용으로만 보여야 한다. 새 보고서를 만들 때만 채팅방 활동 알림을 보내고,
+   * 수정은 기록 정정 성격이라 현재는 추가 push를 보내지 않는다.
+   */
   const saveDailyReport = async () => {
     const projectStoreUserId = selectedProject?.store_user_id || storeAccess?.storeUserId;
     const authorUserId = user?.id || null;
@@ -2405,6 +2557,7 @@ export default function StoreProjectsScreen() {
         : null;
 
       if (editingReportId) {
+        // 수정은 작성자 본인만 가능하다. update 조건에도 author_id를 넣어 UI 우회 시도를 한 번 더 막는다.
         if (!canEditReport(existingReport)) {
           throw new Error('작성자만 일일보고서를 수정할 수 있습니다.');
         }
@@ -2434,6 +2587,8 @@ export default function StoreProjectsScreen() {
 
       const existingImageCount = existingReport?.daily_report_images?.length || 0;
 
+      // 수정 모드에서는 기존 이미지를 지우지 않고 새 이미지가 뒤에 추가된다.
+      // 기존 이미지 개수를 sort_order 시작값으로 써서 상세 보기 순서가 유지되게 한다.
       for (let index = 0; index < reportImages.length; index += 1) {
         await uploadReportImage(
           projectStoreUserId,
@@ -2445,6 +2600,7 @@ export default function StoreProjectsScreen() {
       }
 
       if (isCreatingReport) {
+        // 내부 보고서는 고객에게 보이지 않아야 하므로 push도 고객 공개 보고서일 때만 보낸다.
         await notifyProjectChatActivity({
           projectId: selectedProject.id,
           type: 'project_daily_report_created',
@@ -2468,6 +2624,12 @@ export default function StoreProjectsScreen() {
     }
   };
 
+  /**
+   * 일일보고서를 삭제한다.
+   *
+   * 작성자만 삭제할 수 있고, storage 파일을 먼저 지운 뒤 image row와 report row를 삭제한다.
+   * 파일만 남거나 DB row만 남는 상태를 줄이기 위해 한 흐름 안에서 순서대로 처리한다.
+   */
   const deleteDailyReport = async (report: any) => {
     if (!selectedProject || !user?.id || saving) return;
 
@@ -2955,6 +3117,25 @@ export default function StoreProjectsScreen() {
             ) : null}
           </View>
 
+          <View style={styles.scopeFilterRow}>
+            {PROJECT_SCOPE_OPTIONS.map((item) => {
+              const active = scopeFilter === item.key;
+              const count = projectScopeCounts[item.key] || 0;
+
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.scopeFilterBtn, active && styles.scopeFilterBtnActive]}
+                  onPress={() => setScopeFilter(item.key)}
+                >
+                  <Text style={[styles.scopeFilterText, active && styles.scopeFilterTextActive]}>
+                    {item.label} {count ? count : ''}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           <View style={styles.filterRow}>
             {PROJECT_STATUS_OPTIONS.map((item) => {
               const active = filter === item.key;
@@ -2988,6 +3169,8 @@ export default function StoreProjectsScreen() {
               {filteredProjects.map((project) => {
                 const active = selectedProjectId === project.id;
                 const projectPeriod = getProjectPeriod(project);
+                const partnerAccess = isProjectPartnerAccess(project, storeAccess, user?.id);
+                const accessLabel = getProjectAccessLabel(project, storeAccess, user?.id);
                 return (
                   <TouchableOpacity
                     key={project.id}
@@ -3022,7 +3205,19 @@ export default function StoreProjectsScreen() {
                   >
                     <View style={styles.projectCardHeader}>
                       <Text style={styles.projectName} numberOfLines={1}>{project.name}</Text>
-                      <Text style={styles.statusBadge}>{getStatusLabel(project.status)}</Text>
+                      <View style={styles.projectBadgeGroup}>
+                        <Text
+                          style={[
+                            styles.projectAccessBadge,
+                            partnerAccess
+                              ? styles.projectAccessBadgePartner
+                              : styles.projectAccessBadgeOwned,
+                          ]}
+                        >
+                          {accessLabel}
+                        </Text>
+                        <Text style={styles.statusBadge}>{getStatusLabel(project.status)}</Text>
+                      </View>
                     </View>
                     <Text style={styles.metaText} numberOfLines={1}>
                       {getProjectCustomerName(project)} · {getStaffName(project.assigned_staff_user_id)}
@@ -3046,6 +3241,21 @@ export default function StoreProjectsScreen() {
               <View style={styles.detailHeader}>
                 <View style={styles.headerTitleBox}>
                   <Text style={styles.detailTitle}>{selectedProject.name}</Text>
+                  <View style={styles.detailBadgeRow}>
+                    <Text
+                      style={[
+                        styles.projectAccessBadge,
+                        isSelectedProjectPartner
+                          ? styles.projectAccessBadgePartner
+                          : styles.projectAccessBadgeOwned,
+                      ]}
+                    >
+                      {selectedProjectAccessLabel}
+                    </Text>
+                    <Text style={styles.statusBadge}>
+                      {getStatusLabel(selectedProjectDisplayStatus)}
+                    </Text>
+                  </View>
                   <Text style={styles.metaText}>
                     {getProjectCustomerAddress(selectedProject)}
                   </Text>
@@ -4103,6 +4313,36 @@ function createStyles(theme: AppPalette) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    scopeFilterRow: {
+      minHeight: 42,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      padding: 4,
+      flexDirection: 'row',
+      gap: 4,
+    },
+    scopeFilterBtn: {
+      flex: 1,
+      minHeight: 32,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 6,
+    },
+    scopeFilterBtnActive: {
+      backgroundColor: theme.primarySoft,
+    },
+    scopeFilterText: {
+      color: theme.textMuted,
+      fontSize: 12,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    scopeFilterTextActive: {
+      color: theme.primary,
+    },
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     chip: {
       minHeight: 34,
@@ -4189,8 +4429,34 @@ function createStyles(theme: AppPalette) {
       gap: 6,
     },
     projectCardActive: { borderColor: theme.primary, backgroundColor: theme.primarySoft },
-    projectCardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    projectCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     projectName: { flex: 1, color: theme.text, fontSize: 16, fontWeight: '900' },
+    projectBadgeGroup: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-end',
+      gap: 5,
+      maxWidth: '48%',
+    },
+    projectAccessBadge: {
+      borderRadius: 999,
+      overflow: 'hidden',
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      fontSize: 11,
+      fontWeight: '900',
+      borderWidth: 1,
+    },
+    projectAccessBadgeOwned: {
+      backgroundColor: theme.primarySoft,
+      borderColor: theme.primary,
+      color: theme.primary,
+    },
+    projectAccessBadgePartner: {
+      backgroundColor: theme.surfaceSoft,
+      borderColor: theme.border,
+      color: theme.text,
+    },
     statusBadge: {
       borderRadius: 999,
       backgroundColor: theme.primarySoft,
@@ -4213,6 +4479,11 @@ function createStyles(theme: AppPalette) {
     },
     detailHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
     detailTitle: { color: theme.text, fontSize: 19, fontWeight: '900', lineHeight: 25 },
+    detailBadgeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
     detailActionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     chatBtn: {
       minHeight: 38,

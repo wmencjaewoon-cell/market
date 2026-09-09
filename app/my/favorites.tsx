@@ -1,3 +1,4 @@
+// 관심 목록 화면: 사용자가 찜한 게시글을 최신 상태와 프리미엄 배지까지 합쳐 보여준다.
 import { useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text } from 'react-native';
 import MaterialCard from '../../components/MaterialCard';
@@ -45,9 +46,7 @@ export default function FavoritesScreen() {
       `)
       .eq('user_id', user?.id);
 
-    if (error) {
-      console.log('관심목록 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const rawFavoriteListings =

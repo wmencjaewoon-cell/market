@@ -1,3 +1,4 @@
+// 웹 인라인 지도 대체 UI: 실제 지도 대신 좌표 확인 버튼 역할을 한다.
 import { Pressable, Text } from 'react-native';
 
 type Props = {

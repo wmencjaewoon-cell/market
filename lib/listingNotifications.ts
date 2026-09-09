@@ -1,3 +1,4 @@
+// 게시글 알림 헬퍼: 새 게시글/관심글 변경 시 알림 테이블과 푸시 발송을 연결한다.
 import { supabase } from './supabase';
 
 export async function sendKeywordAlertsForListing(params: {
@@ -10,14 +11,7 @@ export async function sendKeywordAlertsForListing(params: {
   try {
     const { error } = await supabase.functions.invoke('send-keyword-alerts', {
       body: params,
-    });
-
-    if (error) {
-      console.log('키워드 알림 전송 실패:', error);
-    }
-  } catch (e) {
-    console.log('키워드 알림 호출 실패:', e);
-  }
+    });  } catch {  }
 }
 
 export async function sendFavoriteListingUpdate(params: {
@@ -34,12 +28,5 @@ export async function sendFavoriteListingUpdate(params: {
       {
         body: params,
       }
-    );
-
-    if (error) {
-      console.log('관심 게시글 변경 알림 실패:', error);
-    }
-  } catch (e) {
-    console.log('관심 게시글 변경 알림 호출 실패:', e);
-  }
+    );  } catch {  }
 }

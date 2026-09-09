@@ -1,3 +1,4 @@
+// 가게 상품관리 화면: 등록 상품 목록, 복사 등록, 플랜별 상품 수 제한을 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -81,9 +82,7 @@ export default function StoreProductsScreen() {
 
     setLimits(limitData);
 
-    if (productResult.error) {
-      console.log('가게 상품 조회 실패:', productResult.error);
-      setItems([]);
+    if (productResult.error) {      setItems([]);
       setLoading(false);
       return;
     }
@@ -172,6 +171,11 @@ export default function StoreProductsScreen() {
 
   const duplicateProduct = async (item: any) => {
     if (!user || !storeAccess?.storeUserId) return;
+
+    if (!limits.canCopyProduct) {
+      Alert.alert('복사 등록 제한', '상품 복사 등록은 베이직 이상 플랜에서 사용할 수 있습니다.');
+      return;
+    }
 
     if (productLimitReached) {
       Alert.alert(
@@ -275,7 +279,11 @@ export default function StoreProductsScreen() {
           <QuickButton label="예약중" onPress={() => updateStatus(item, 'reserved')} />
           <QuickButton label="판매완료" onPress={() => updateStatus(item, 'done')} />
           <QuickButton label={item.status === 'hidden' ? '숨김취소' : '숨김'} onPress={() => toggleHidden(item)} />
-          <QuickButton label="복사 등록" onPress={() => duplicateProduct(item)} />
+          <QuickButton
+            label="복사 등록"
+            onPress={() => duplicateProduct(item)}
+            disabled={!limits.canCopyProduct}
+          />
         </View>
       </View>
     );
@@ -338,10 +346,18 @@ export default function StoreProductsScreen() {
   );
 }
 
-function QuickButton({ label, onPress }: { label: string; onPress: () => void }) {
+function QuickButton({
+  label,
+  onPress,
+  disabled = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
-    <TouchableOpacity style={styles.quickBtn} onPress={onPress}>
-      <Text style={styles.quickText}>{label}</Text>
+    <TouchableOpacity style={[styles.quickBtn, disabled && styles.quickBtnDisabled]} onPress={onPress}>
+      <Text style={[styles.quickText, disabled && styles.quickTextDisabled]}>{label}</Text>
     </TouchableOpacity>
   );
 }
@@ -421,5 +437,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 8,
   },
+  quickBtnDisabled: { opacity: 0.55 },
   quickText: { color: '#111827', fontSize: 12, fontWeight: '900' },
+  quickTextDisabled: { color: '#6b7280' },
 });
