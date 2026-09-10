@@ -1,3 +1,4 @@
+// 알림 목록 화면: 푸시/앱 내부 알림을 조회하고 알림 payload에 맞는 화면으로 이동한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -28,6 +29,11 @@ type NotificationItem = {
   data?: {
     listingId?: number | string;
     roomId?: number | string;
+    estimateRequestId?: number | string;
+    projectId?: string;
+    projectMemberId?: string;
+    inviteToken?: string;
+    staffMemberId?: string;
   } | null;
 };
 
@@ -108,7 +114,54 @@ export default function NotificationsScreen() {
       const roomId = item.data?.roomId;
       if (roomId) {
         router.push(`/chat/${roomId}` as any);
+        return;
       }
+    }
+
+    if (item.type === 'estimate_request') {
+      const estimateRequestId = item.data?.estimateRequestId;
+      if (estimateRequestId) {
+        router.push(`/store/estimates?requestId=${estimateRequestId}` as any);
+        return;
+      }
+
+      router.push('/store/estimates' as any);
+      return;
+    }
+
+    if (item.type === 'project_invite') {
+      const inviteToken = item.data?.inviteToken;
+      if (inviteToken) {
+        router.push(`/project-invite/${inviteToken}` as any);
+        return;
+      }
+
+      const projectId = item.data?.projectId;
+      if (projectId) {
+        router.push(`/store/projects?projectId=${projectId}` as any);
+      }
+    }
+
+    if (
+      item.type === 'project_schedule_created' ||
+      item.type === 'project_schedule_updated' ||
+      item.type === 'project_daily_report_created'
+    ) {
+      const roomId = item.data?.roomId;
+      if (roomId) {
+        router.push(`/chat/${roomId}` as any);
+        return;
+      }
+
+      const projectId = item.data?.projectId;
+      if (projectId) {
+        router.push(`/store/projects?projectId=${projectId}` as any);
+      }
+    }
+
+    if (item.type === 'staff_password_reset_request') {
+      router.push('/store/staff' as any);
+      return;
     }
   };
 
@@ -123,9 +176,7 @@ export default function NotificationsScreen() {
       setItems((prev) =>
         prev.map((item) => (item.read_at ? item : { ...item, read_at: readAt }))
       );
-    } catch (e: any) {
-      console.log('전체 읽음 처리 실패:', e);
-      showAlert('읽음 처리 실패', e?.message || '알림을 읽음 처리하지 못했습니다.');
+    } catch (e: any) {      showAlert('읽음 처리 실패', e?.message || '알림을 읽음 처리하지 못했습니다.');
     } finally {
       setBulkAction(null);
     }
@@ -142,9 +193,7 @@ export default function NotificationsScreen() {
     try {
       await deleteAllNotifications();
       setItems([]);
-    } catch (e: any) {
-      console.log('전체 알림 삭제 실패:', e);
-      showAlert('삭제 실패', e?.message || '알림을 모두 삭제하지 못했습니다.');
+    } catch (e: any) {      showAlert('삭제 실패', e?.message || '알림을 모두 삭제하지 못했습니다.');
     } finally {
       setBulkAction(null);
     }

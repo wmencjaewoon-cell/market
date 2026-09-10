@@ -1,12 +1,17 @@
+// 앱 최상위 레이아웃: 인증 컨텍스트, 테마, 알림 토큰, 네이티브 제스처 루트를 연결한다.
+// 전역 Provider나 네이티브 초기화가 필요하면 이 파일에서 시작한다.
 import {
   DarkTheme,
   DefaultTheme,
   ThemeProvider,
 } from '@react-navigation/native';
+import * as NavigationBar from 'expo-navigation-bar';
 import { router, Stack, usePathname } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { useAppTheme } from '../hooks/use-app-theme';
@@ -14,44 +19,79 @@ import { installAdaptiveStyleSheetColors } from '../lib/adaptiveStyleSheetColors
 import { supabase } from '../lib/supabase';
 
 installAdaptiveStyleSheetColors();
+void SplashScreen.preventAutoHideAsync();
+SplashScreen.setOptions({ duration: 350, fade: true });
 
 // iPhone 테스트 중 푸시 알림 초기화가 앱 실행을 방해하지 않도록 잠깐 꺼둡니다.
 // 알림 테스트를 다시 할 때 true로 바꾸면 됩니다.
 const ENABLE_PUSH_NOTIFICATIONS = true;
+const MIN_SPLASH_VISIBLE_MS = 650;
+const splashStartedAtMs = Date.now();
 
-function PushNotificationRegister() {
+function InitialSplashController() {
   const { isReady } = useAuth();
 
   useEffect(() => {
-    if (!ENABLE_PUSH_NOTIFICATIONS) return;
+    if (!isReady) return;
+
+    let cancelled = false;
+    const elapsedMs = Date.now() - splashStartedAtMs;
+    const waitMs = Math.max(MIN_SPLASH_VISIBLE_MS - elapsedMs, 0);
+
+    const timeoutId = setTimeout(() => {
+      if (cancelled) return;
+
+      SplashScreen.hideAsync().catch((error) => {      });
+    }, waitMs);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [isReady]);
+
+  return null;
+}
+
+function PushNotificationRegister() {
+  const { isReady, user } = useAuth();
+
+  useEffect(() => {
+    if (!isReady || !ENABLE_PUSH_NOTIFICATIONS) return;
 
     let sub: { remove: () => void } | null = null;
+    let cancelled = false;
 
     const setup = async () => {
       const {
         setupAndroidNotificationChannels,
         listenNotificationResponse,
+        handleInitialNotificationResponse,
       } = await import('../lib/notifications');
 
       await setupAndroidNotificationChannels();
 
+      if (cancelled) return;
+
       sub = listenNotificationResponse();
+      await handleInitialNotificationResponse();
     };
 
-    setup();
+    void setup();
 
     return () => {
+      cancelled = true;
       sub?.remove();
     };
-  }, []);
+  }, [isReady]);
 
   useEffect(() => {
-    if (isReady && ENABLE_PUSH_NOTIFICATIONS) {
+    if (isReady && user?.id && ENABLE_PUSH_NOTIFICATIONS) {
       import('../lib/notifications').then(({ registerPushToken }) => {
         registerPushToken();
       });
     }
-  }, [isReady]);
+  }, [isReady, user?.id]);
 
   return null;
 }
@@ -86,6 +126,27 @@ function AccountStatusGate() {
       cancelled = true;
     };
   }, [isReady, pathname, user]);
+
+  return null;
+}
+
+function AndroidNavigationBarTheme() {
+  const theme = useAppTheme();
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const applyNavigationBarTheme = async () => {
+      try {
+        await NavigationBar.setBackgroundColorAsync(theme.background);
+        await NavigationBar.setButtonStyleAsync(
+          theme.scheme === 'dark' ? 'light' : 'dark'
+        );
+      } catch {      }
+    };
+
+    void applyNavigationBarTheme();
+  }, [theme.background, theme.scheme]);
 
   return null;
 }
@@ -134,13 +195,23 @@ function RootNavigator() {
         <Stack.Screen name="store/dashboard" options={{ title: '가게 대시보드' }} />
         <Stack.Screen name="store/product-create" options={{ title: '상품 등록' }} />
         <Stack.Screen name="store/products" options={{ title: '상품 관리' }} />
+        <Stack.Screen name="store/customers" options={{ title: '고객관리' }} />
         <Stack.Screen name="store/estimates" options={{ title: '견적/고객관리' }} />
+        <Stack.Screen name="store/projects" options={{ title: '현장관리' }} />
         <Stack.Screen name="store/profile" options={{ title: '가게 프로필' }} />
         <Stack.Screen name="store/staff" options={{ title: '직원 관리' }} />
         <Stack.Screen name="store/[id]" options={{ title: '가게 상세' }} />
 
+        <Stack.Screen name="project-invite/[token]" options={{ title: '현장 초대' }} />
         <Stack.Screen name="open-chat/[id]" options={{ headerShown: false }} />
-        <Stack.Screen name="chat/[roomId]" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="chat/[roomId]"
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
         <Stack.Screen name="my" options={{ headerShown: false }} />
         <Stack.Screen name="support" options={{ headerShown: false }} />
         <Stack.Screen
@@ -173,20 +244,24 @@ export default function RootLayout() {
   };
 
   return (
-    <ThemeProvider value={navigationTheme}>
-      <SafeAreaProvider>
-        <StatusBar
-          style={theme.statusBarStyle}
-          backgroundColor={theme.background}
-          translucent={false}
-        />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={navigationTheme}>
+        <SafeAreaProvider>
+          <StatusBar
+            style={theme.statusBarStyle}
+            backgroundColor={theme.background}
+            translucent={false}
+          />
+          <AndroidNavigationBarTheme />
 
-        <AuthProvider>
-          <PushNotificationRegister />
-          <AccountStatusGate />
-          <RootNavigator />
-        </AuthProvider>
-      </SafeAreaProvider>
-    </ThemeProvider>
+          <AuthProvider>
+            <InitialSplashController />
+            <PushNotificationRegister />
+            <AccountStatusGate />
+            <RootNavigator />
+          </AuthProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

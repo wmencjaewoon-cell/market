@@ -1,3 +1,4 @@
+// 키워드 알림 데이터 헬퍼: 사용자의 관심 키워드 CRUD를 담당한다.
 import { supabase } from './supabase';
 
 export async function fetchKeywordAlerts() {

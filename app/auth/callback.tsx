@@ -1,3 +1,4 @@
+// OAuth 콜백 화면: provider redirect URL에서 세션 토큰을 추출해 Supabase 세션으로 저장한다.
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -100,9 +101,7 @@ export default function AuthCallbackScreen() {
       }
 
       await moveAfterLogin({ passwordRecovery: isPasswordRecoveryUrl(url) });
-    } catch (e: any) {
-      console.log('OAuth callback 처리 실패:', e);
-      if (mounted) {
+    } catch (e: any) {      if (mounted) {
         setMessage(e?.message || '로그인을 완료하지 못했습니다.');
       }
 
@@ -145,8 +144,6 @@ export default function AuthCallbackScreen() {
 
       await moveAfterLogin({ passwordRecovery: isRecovery });
     } catch (e: any) {
-      console.log('웹 OAuth callback 처리 실패:', e);
-
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage(
           {

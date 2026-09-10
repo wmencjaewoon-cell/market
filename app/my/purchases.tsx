@@ -1,3 +1,4 @@
+// 구매내역 화면: 내가 구매자로 참여한 거래 기록을 보여준다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -72,11 +73,6 @@ export default function MyPurchasesScreen() {
       saleRows = fallbackResult.data as any[] | null;
       saleError = fallbackResult.error;
     }
-
-    if (saleError) {
-      console.log('구매 판매기록 조회 실패:', saleError);
-    }
-
     const { data, error } = await supabase
       .from('chat_room_members')
       .select(`
@@ -103,9 +99,7 @@ export default function MyPurchasesScreen() {
       `)
       .eq('user_id', user.id);
 
-    if (error) {
-      console.log('구매내역 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const mapListingToPurchase = ({

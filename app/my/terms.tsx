@@ -1,3 +1,4 @@
+// 이용약관 화면: 서비스 이용 조건을 정적 콘텐츠로 제공한다.
 import type { ReactNode } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 

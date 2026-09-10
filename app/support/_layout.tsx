@@ -1,3 +1,4 @@
+// 고객센터 스택 레이아웃: 공지/도움말 화면의 공통 헤더를 정의한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
@@ -37,6 +38,8 @@ export default function SupportStackLayout() {
     >
       <Stack.Screen name="notices/index" options={{ title: '공지사항', headerLeft: () => <BackButton />, }} />
       <Stack.Screen name="notices/[id]" options={{ title: '공지사항', headerLeft: () => <BackButton />, }} />
+      <Stack.Screen name="events/index" options={{ title: '이벤트', headerLeft: () => <BackButton />, }} />
+      <Stack.Screen name="events/[id]" options={{ title: '이벤트', headerLeft: () => <BackButton />, }} />
       <Stack.Screen name="help" options={{ title: '고객센터', headerLeft: () => <BackButton />, }} />
     </Stack>
   );

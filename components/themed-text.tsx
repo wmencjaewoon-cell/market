@@ -1,3 +1,4 @@
+// 템플릿 테마 텍스트: useThemeColor 기반 색상을 적용하는 간단한 래퍼다.
 import { StyleSheet, Text, type TextProps } from 'react-native';
 
 import { useThemeColor } from '@/hooks/use-theme-color';

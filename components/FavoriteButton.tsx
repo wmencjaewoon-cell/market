@@ -1,3 +1,4 @@
+// 관심 버튼: 게시글 찜 상태를 조회/토글하고 관심 변경 알림의 기준 데이터를 만든다.
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Text, TouchableOpacity } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';

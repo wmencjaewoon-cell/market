@@ -1,3 +1,4 @@
+// 채팅 목록 화면: 일반 채팅, 견적 채팅, 현장 채팅을 한 리스트에 노출하고 숨김/완료 정렬을 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,15 +24,23 @@ import { getUnreadCountByRoom } from '../../lib/chat';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
-const tabs = ['전체', '판매', '나눔', '구해요'] as const;
+const tabs = ['전체', '현장', '판매', '나눔', '구해요', '숨김'] as const;
 type ChatFilterTab = (typeof tabs)[number];
 
 type ChatRoomListItem = {
   id: string;
   listing_id: number | null;
   store_user_id?: string | null;
+  room_type?: string | null;
+  estimate_request_id?: number | null;
+  estimate_quote_id?: number | null;
+  project_id?: string | null;
+  title?: string | null;
+  workflow_status?: string | null;
+  completed_at?: string | null;
   created_at: string;
   muted?: boolean;
+  hidden?: boolean;
   unread_count?: number;
   listing: {
     id: number;
@@ -47,6 +56,20 @@ type ChatRoomListItem = {
       sort_order: number | null;
     }[];
   } | null;
+  project?: {
+    id: string;
+    name: string;
+    status: string | null;
+    address: string | null;
+  } | null;
+  estimate_request?: {
+    id: number;
+    title: string | null;
+    status: string | null;
+    region: string | null;
+    address: string | null;
+    desired_date: string | null;
+  } | null;
   members: {
     user_id: string;
   }[];
@@ -59,6 +82,25 @@ type ChatRoomListItem = {
     sender_id: string;
   } | null;
 };
+
+function isProjectChatRoom(room: ChatRoomListItem) {
+  return !!room.project || !!room.project_id || room.room_type === 'project';
+}
+
+function isEstimateChatRoom(room: ChatRoomListItem) {
+  return !isProjectChatRoom(room) && (!!room.estimate_request || !!room.estimate_request_id || room.room_type === 'estimate');
+}
+
+function isCompletedProjectChatRoom(room: ChatRoomListItem) {
+  return (
+    isProjectChatRoom(room) &&
+    (
+      room.workflow_status === 'completed' ||
+      room.project?.status === 'completed' ||
+      !!room.completed_at
+    )
+  );
+}
 
 function formatTimeAgo(dateString?: string) {
   if (!dateString) return '';
@@ -136,6 +178,7 @@ export default function ChatScreen() {
 
   const getRoomTargetUserId = (room: ChatRoomListItem) => {
     if (!user) return null;
+    if (isProjectChatRoom(room) || isEstimateChatRoom(room)) return null;
 
     return (
       room.members.find((member) => member.user_id !== user.id)?.user_id ||
@@ -161,9 +204,7 @@ export default function ChatScreen() {
       .select('room_id')
       .eq('user_id', user.id);
 
-    if (memberError) {
-      console.log('내 채팅방 멤버 조회 실패:', memberError);
-      return;
+    if (memberError) {      return;
     }
 
     const roomIds = (memberRows || []).map((row: any) => row.room_id);
@@ -176,7 +217,7 @@ export default function ChatScreen() {
     const [settingResult, blockResult, roomResult] = await Promise.all([
       supabase
         .from('chat_room_settings')
-        .select('room_id, muted')
+        .select('room_id, muted, hidden')
         .eq('user_id', user.id)
         .in('room_id', roomIds),
 
@@ -191,7 +232,28 @@ export default function ChatScreen() {
           id,
           listing_id,
           store_user_id,
+          room_type,
+          estimate_request_id,
+          estimate_quote_id,
+          project_id,
+          title,
+          workflow_status,
+          completed_at,
           created_at,
+          store_projects (
+            id,
+            name,
+            status,
+            address
+          ),
+          estimate_requests (
+            id,
+            title,
+            status,
+            region,
+            address,
+            desired_date
+          ),
           listings (
             id,
             title,
@@ -231,17 +293,13 @@ export default function ChatScreen() {
 
     if (fetchSeq !== fetchSeqRef.current) return;
 
-    if (roomResult.error) {
-      console.log('채팅방 조회 실패:', roomResult.error);
-      return;
+    if (roomResult.error) {      return;
     }
-
-    if (blockResult.error) {
-      console.log('채팅 목록 차단 사용자 조회 실패:', blockResult.error);
-    }
-
     const muteMap = new Map(
       (settingResult.data || []).map((row: any) => [row.room_id, row.muted])
+    );
+    const hiddenMap = new Map(
+      (settingResult.data || []).map((row: any) => [row.room_id, row.hidden])
     );
 
     const blockedIds = new Set(
@@ -254,6 +312,12 @@ export default function ChatScreen() {
       new Set(
         roomRows
           .map((room: any) => {
+            const isProjectRoom = !!room.store_projects || !!room.project_id || room.room_type === 'project';
+            const isEstimateRoom =
+              !isProjectRoom &&
+              (!!room.estimate_requests || !!room.estimate_request_id || room.room_type === 'estimate');
+            if (isProjectRoom || isEstimateRoom) return null;
+
             const members = room.chat_room_members || [];
 
             return (
@@ -272,11 +336,6 @@ export default function ChatScreen() {
         .from('profiles')
         .select('id, display_name')
         .in('id', targetIds);
-
-      if (targetProfileError) {
-        console.log('채팅 상대 프로필 조회 실패:', targetProfileError);
-      }
-
       (targetProfiles || []).forEach((profile: any) => {
         if (profile.id) {
           targetNameMap.set(profile.id, profile.display_name || '상대방');
@@ -290,10 +349,15 @@ export default function ChatScreen() {
         : room.listings?.profiles;
 
       const members = room.chat_room_members || [];
+      const isProjectRoom = !!room.store_projects || !!room.project_id || room.room_type === 'project';
+      const isEstimateRoom =
+        !isProjectRoom &&
+        (!!room.estimate_requests || !!room.estimate_request_id || room.room_type === 'estimate');
 
-      const targetUserId =
-        members.find((member: any) => member.user_id !== user.id)?.user_id ||
-        (room.listings?.author_id !== user.id ? room.listings?.author_id : null);
+      const targetUserId = isProjectRoom || isEstimateRoom
+        ? null
+        : members.find((member: any) => member.user_id !== user.id)?.user_id ||
+          (room.listings?.author_id !== user.id ? room.listings?.author_id : null);
 
       const sortedImages = [...(room.listings?.listing_images || [])].sort(
         (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
@@ -307,8 +371,16 @@ export default function ChatScreen() {
         id: room.id,
         listing_id: room.listing_id,
         store_user_id: room.store_user_id,
+        room_type: room.room_type,
+        estimate_request_id: room.estimate_request_id,
+        estimate_quote_id: room.estimate_quote_id,
+        project_id: room.project_id,
+        title: room.title,
+        workflow_status: room.workflow_status,
+        completed_at: room.completed_at,
         created_at: room.created_at,
         muted: muteMap.get(room.id) ?? false,
+        hidden: hiddenMap.get(room.id) ?? false,
         listing: room.listings
           ? {
               ...room.listings,
@@ -316,6 +388,8 @@ export default function ChatScreen() {
               listing_images: sortedImages,
             }
           : null,
+        project: room.store_projects || null,
+        estimate_request: room.estimate_requests || null,
         members,
         target_user_id: targetUserId,
         target_name: targetUserId ? targetNameMap.get(targetUserId) || null : null,
@@ -325,6 +399,12 @@ export default function ChatScreen() {
     });
 
     mapped.sort((a, b) => {
+      const aCompletedProject = isCompletedProjectChatRoom(a);
+      const bCompletedProject = isCompletedProjectChatRoom(b);
+      if (aCompletedProject !== bCompletedProject) {
+        return aCompletedProject ? 1 : -1;
+      }
+
       const aTime = a.latest_message?.created_at || a.created_at;
       const bTime = b.latest_message?.created_at || b.created_at;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
@@ -349,9 +429,7 @@ export default function ChatScreen() {
     if (fetchSeq === fetchSeqRef.current) {
       setRooms(roomsWithUnread);
     }
-  } catch (e) {
-    console.log('채팅방 목록 불러오기 실패:', e);
-  } finally {
+  } catch {  } finally {
     if (fetchSeq === fetchSeqRef.current) {
       setRefreshing(false);
     }
@@ -416,15 +494,20 @@ useFocusEffect(
   });
 
   const filteredRooms = useMemo(() => {
-    if (selectedTab === '전체') return rooms;
+    if (selectedTab === '숨김') return rooms.filter((room) => room.hidden);
 
-    const categoryMap: Record<Exclude<ChatFilterTab, '전체'>, 'trade' | 'share' | 'want'> = {
+    const visibleRooms = rooms.filter((room) => !room.hidden);
+
+    if (selectedTab === '전체') return visibleRooms;
+    if (selectedTab === '현장') return visibleRooms.filter((room) => isProjectChatRoom(room));
+
+    const categoryMap: Record<Exclude<ChatFilterTab, '전체' | '현장' | '숨김'>, 'trade' | 'share' | 'want'> = {
       판매: 'trade',
       나눔: 'share',
       구해요: 'want',
     };
 
-    return rooms.filter((room) => room.listing?.category === categoryMap[selectedTab]);
+    return visibleRooms.filter((room) => room.listing?.category === categoryMap[selectedTab]);
   }, [rooms, selectedTab]);
 
   const getImageUrl = (room: ChatRoomListItem) => {
@@ -449,7 +532,15 @@ useFocusEffect(
     return '';
   };
 
-  const toggleMuteRoom = async (room: ChatRoomListItem) => {
+  const getProjectStatusLabel = (status?: string | null) => {
+    if (status === 'in_progress') return '진행중';
+    if (status === 'completed') return '완료';
+    if (status === 'on_hold') return '보류';
+    if (status === 'canceled') return '취소';
+    return '준비중';
+  };
+
+const toggleMuteRoom = async (room: ChatRoomListItem) => {
   if (!user) return;
 
   const nextMuted = !room.muted;
@@ -463,9 +554,7 @@ useFocusEffect(
     { onConflict: 'room_id,user_id' }
   );
 
-  if (error) {
-    console.log('알림 설정 실패:', error);
-    Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
+  if (error) {    Alert.alert('오류', '알림 설정을 변경하지 못했습니다.');
     return;
   }
 
@@ -476,6 +565,39 @@ useFocusEffect(
   );
 
   setMenuRoom(null);
+};
+
+const toggleHideRoom = async (room: ChatRoomListItem) => {
+  if (!user) return;
+
+  const nextHidden = !room.hidden;
+
+  const { error } = await supabase.from('chat_room_settings').upsert(
+    {
+      room_id: room.id,
+      user_id: user.id,
+      muted: room.muted ?? false,
+      hidden: nextHidden,
+    },
+    { onConflict: 'room_id,user_id' }
+  );
+
+  setMenuRoom(null);
+
+  if (error) {    Alert.alert(
+      '채팅 숨김 실패',
+      error.message.includes('hidden') || error.message.includes('schema cache')
+        ? 'Supabase에 최신 채팅 숨김 SQL을 먼저 실행해 주세요.'
+        : '채팅 숨김 상태를 변경하지 못했습니다.'
+    );
+    return;
+  }
+
+  setRooms((prev) =>
+    prev.map((item) =>
+      item.id === room.id ? { ...item, hidden: nextHidden } : item
+    )
+  );
 };
 
 const openFraudHistory = async () => {
@@ -495,6 +617,13 @@ const reportRoom = (room: ChatRoomListItem) => {
       roomId: room.id,
       listingId: room.listing?.id ? String(room.listing.id) : '',
     },
+  } as any);
+};
+
+const openChatRoomFromList = (roomId: string) => {
+  router.push({
+    pathname: '/chat/[roomId]',
+    params: { roomId, returnTo: 'chatList' },
   } as any);
 };
 
@@ -528,9 +657,7 @@ const blockRoomUser = async (room: ChatRoomListItem) => {
 
   setMenuRoom(null);
 
-  if (error) {
-    console.log('채팅 목록 차단 실패:', error);
-    showChatListAlert(
+  if (error) {    showChatListAlert(
       '차단 실패',
       error.message.includes('user_blocks')
         ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -559,9 +686,7 @@ const exitRoom = (room: ChatRoomListItem) => {
           user_id: user.id,
         });
 
-        if (error) {
-          console.log('채팅방 나가기 실패:', error);
-          Alert.alert('오류', '채팅방을 나가지 못했습니다.');
+        if (error) {          Alert.alert('오류', '채팅방을 나가지 못했습니다.');
           return;
         }
 
@@ -643,17 +768,35 @@ const exitRoom = (room: ChatRoomListItem) => {
                 ) : null}
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.menuItem} onPress={() => reportRoom(menuRoom)}>
-                <Text style={[styles.menuText, styles.warnText]}>신고하기</Text>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => toggleHideRoom(menuRoom)}
+              >
+                <Text style={styles.menuText}>
+                  {menuRoom.hidden ? '숨김 해제' : '채팅 숨기기'}
+                </Text>
+                <Ionicons
+                  name={menuRoom.hidden ? 'eye-outline' : 'eye-off-outline'}
+                  size={18}
+                  color={theme.textMuted}
+                />
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.menuItem} onPress={() => blockRoomUser(menuRoom)}>
-                <Text style={[styles.menuText, styles.warnText]}>차단하기</Text>
-              </TouchableOpacity>
+              {!isProjectChatRoom(menuRoom) && !isEstimateChatRoom(menuRoom) ? (
+                <>
+                  <TouchableOpacity style={styles.menuItem} onPress={() => reportRoom(menuRoom)}>
+                    <Text style={[styles.menuText, styles.warnText]}>신고하기</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity style={styles.menuItem} onPress={openFraudHistory}>
-                <Text style={styles.menuText}>사기 이력 조회하기</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity style={styles.menuItem} onPress={() => blockRoomUser(menuRoom)}>
+                    <Text style={[styles.menuText, styles.warnText]}>차단하기</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.menuItem} onPress={openFraudHistory}>
+                    <Text style={styles.menuText}>사기 이력 조회하기</Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
 
               <TouchableOpacity style={styles.menuItem} onPress={() => exitRoom(menuRoom)}>
                 <Text style={[styles.menuText, styles.warnText]}>채팅방 나가기</Text>
@@ -678,16 +821,27 @@ const exitRoom = (room: ChatRoomListItem) => {
           <View style={styles.roomList}>
             {filteredRooms.map((room) => {
               const imageUrl = getImageUrl(room);
+              const isProjectRoom = isProjectChatRoom(room);
+              const isEstimateRoom = isEstimateChatRoom(room);
+              const isCompletedRoom = room.workflow_status === 'completed';
 
               return (
                 <TouchableOpacity
                   key={room.id}
-                  style={styles.roomCard}
-                  onPress={() => router.push(`/chat/${room.id}` as any)}
+                  style={[styles.roomCard, (isProjectRoom || isEstimateRoom) && styles.projectRoomCard]}
+                  onPress={() => openChatRoomFromList(room.id)}
                 >
                   <View style={styles.thumbWrap}>
                     {imageUrl ? (
                       <Image source={{ uri: imageUrl }} style={styles.thumb} />
+                    ) : isProjectRoom || isEstimateRoom ? (
+                      <View style={[styles.thumbPlaceholder, styles.projectThumbPlaceholder]}>
+                        <Ionicons
+                          name={isProjectRoom ? 'business-outline' : 'clipboard-outline'}
+                          size={23}
+                          color={theme.primary}
+                        />
+                      </View>
                     ) : (
                       <View style={styles.thumbPlaceholder}>
                         <Ionicons name="image-outline" size={22} color={theme.textSubtle} />
@@ -699,11 +853,26 @@ const exitRoom = (room: ChatRoomListItem) => {
                     <View style={styles.topRow}>
                       <View style={styles.topLeft}>
                         <Text style={styles.roomTitle} numberOfLines={1}>
-                          {room.listing?.title ||
+                          {room.title ||
+                            (isProjectRoom ? room.project?.name || '현장 채팅' : null) ||
+                            (isEstimateRoom ? room.estimate_request?.title || '견적 채팅' : null) ||
+                            room.listing?.title ||
                             (room.store_user_id
                               ? `${room.target_name || '가게'} 문의`
                               : '삭제된 게시글')}
                         </Text>
+                        {isProjectRoom ? (
+                          <Text style={[styles.categoryBadge, styles.projectCategoryBadge]}>현장 채팅</Text>
+                        ) : null}
+                        {isEstimateRoom ? (
+                          <Text style={[styles.categoryBadge, styles.projectCategoryBadge]}>견적 채팅</Text>
+                        ) : null}
+                        {isCompletedRoom ? (
+                          <Text style={[styles.categoryBadge, styles.completedCategoryBadge]}>완료</Text>
+                        ) : null}
+                        {room.hidden ? (
+                          <Text style={[styles.categoryBadge, styles.hiddenCategoryBadge]}>숨김</Text>
+                        ) : null}
                         {room.listing?.category ? (
                           <Text style={styles.categoryBadge}>
                             {getCategoryLabel(room.listing.category)}
@@ -740,7 +909,11 @@ const exitRoom = (room: ChatRoomListItem) => {
                     </View>
 
                     <Text style={styles.partnerText} numberOfLines={1}>
-                      {getOtherUserLabel(room)}
+                      {isProjectRoom
+                        ? '고객 · 담당자 · 협력업체 참여'
+                        : isEstimateRoom
+                          ? '신청자 · 담당자 참여'
+                          : getOtherUserLabel(room)}
                     </Text>
 
                     <Text style={styles.messageText} numberOfLines={1}>
@@ -749,11 +922,21 @@ const exitRoom = (room: ChatRoomListItem) => {
 
                     <View style={styles.bottomRow}>
                       <Text style={styles.regionText} numberOfLines={1}>
-                        {room.listing?.region || ''}
+                        {(isProjectRoom
+                          ? room.project?.address || ''
+                          : isEstimateRoom
+                            ? room.estimate_request?.address || room.estimate_request?.region || ''
+                            : room.listing?.region) || ''}
                       </Text>
 
                       <Text style={styles.priceText} numberOfLines={1}>
-                        {room.listing?.price_text || '가격 문의'}
+                        {isProjectRoom
+                          ? getProjectStatusLabel(isCompletedRoom ? 'completed' : room.project?.status)
+                          : isEstimateRoom
+                            ? isCompletedRoom
+                              ? '완료'
+                              : room.estimate_request?.desired_date || '견적 문의'
+                          : room.listing?.price_text || '가격 문의'}
                       </Text>
                     </View>
                   </View>
@@ -877,6 +1060,15 @@ warnText: {
     borderBottomColor: theme.borderSoft,
   },
 
+  projectRoomCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.primarySoft,
+    backgroundColor: theme.surfaceSoft,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+  },
+
   unreadBadge: {
   minWidth: 22,
   height: 22,
@@ -910,6 +1102,10 @@ unreadBadgeText: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  projectThumbPlaceholder: {
+    backgroundColor: theme.primarySoft,
   },
 
   roomInfo: {
@@ -948,6 +1144,23 @@ unreadBadgeText: {
     paddingVertical: 3,
     borderRadius: 999,
     overflow: 'hidden',
+  },
+
+  projectCategoryBadge: {
+    color: theme.primary,
+    backgroundColor: theme.primarySoft,
+  },
+
+  completedCategoryBadge: {
+    color: theme.background,
+    backgroundColor: theme.text,
+  },
+
+  hiddenCategoryBadge: {
+    color: theme.textMuted,
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
 
   timeText: {

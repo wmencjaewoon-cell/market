@@ -1,4 +1,4 @@
--- Admin setup for notices, reports, users, and listing moderation.
+-- Admin setup for notices, events, reports, users, and listing moderation.
 -- Run this in Supabase SQL Editor.
 
 alter table public.profiles
@@ -54,7 +54,7 @@ as $$
   );
 $$;
 
-grant execute on function public.is_admin() to authenticated;
+grant execute on function public.is_admin() to anon, authenticated;
 
 create table if not exists public.notices (
   id bigserial primary key,
@@ -98,6 +98,84 @@ on public.notices
 for delete
 using (public.is_admin());
 
+create table if not exists public.support_events (
+  id bigserial primary key,
+  title text not null,
+  summary text,
+  content text not null,
+  image_url text,
+  is_published boolean not null default true,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  sort_order integer not null default 0,
+  author_id uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.support_events
+  add column if not exists summary text,
+  add column if not exists image_url text,
+  add column if not exists is_published boolean not null default true,
+  add column if not exists starts_at timestamptz,
+  add column if not exists ends_at timestamptz,
+  add column if not exists sort_order integer not null default 0,
+  add column if not exists author_id uuid references public.profiles(id) on delete set null default auth.uid(),
+  add column if not exists updated_at timestamptz not null default now();
+
+create index if not exists support_events_public_idx
+on public.support_events (is_published, ends_at, sort_order desc, created_at desc);
+
+create or replace function public.set_support_events_updated_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists support_events_set_updated_at on public.support_events;
+create trigger support_events_set_updated_at
+before update on public.support_events
+for each row
+execute function public.set_support_events_updated_at();
+
+alter table public.support_events enable row level security;
+
+drop policy if exists support_events_select_public_or_admin on public.support_events;
+create policy support_events_select_public_or_admin
+on public.support_events
+for select
+using (
+  public.is_admin()
+  or (
+    is_published = true
+    and (ends_at is null or ends_at >= now())
+  )
+);
+
+drop policy if exists support_events_admin_insert on public.support_events;
+create policy support_events_admin_insert
+on public.support_events
+for insert
+with check (public.is_admin());
+
+drop policy if exists support_events_admin_update on public.support_events;
+create policy support_events_admin_update
+on public.support_events
+for update
+using (public.is_admin())
+with check (public.is_admin());
+
+drop policy if exists support_events_admin_delete on public.support_events;
+create policy support_events_admin_delete
+on public.support_events
+for delete
+using (public.is_admin());
+
 alter table public.reports
   add column if not exists status text not null default 'pending',
   add column if not exists admin_note text,
@@ -111,11 +189,32 @@ for select
 using (public.is_admin());
 
 drop policy if exists profiles_admin_update on public.profiles;
-create policy profiles_admin_update
-on public.profiles
-for update
-using (public.is_admin())
-with check (public.is_admin());
+
+revoke update (role) on public.profiles from anon;
+revoke update (role) on public.profiles from authenticated;
+
+create or replace function public.prevent_client_profile_role_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.role is distinct from new.role and auth.role() in ('anon', 'authenticated') then
+    raise exception 'Profile role cannot be changed from the app client.';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists prevent_client_profile_role_change on public.profiles;
+create trigger prevent_client_profile_role_change
+before update on public.profiles
+for each row
+execute function public.prevent_client_profile_role_change();
+
+revoke all on function public.prevent_client_profile_role_change() from public;
 
 drop policy if exists reports_admin_select on public.reports;
 create policy reports_admin_select
@@ -498,6 +597,9 @@ $$;
 
 grant select, insert, update, delete on public.notices to authenticated;
 grant usage, select on sequence public.notices_id_seq to authenticated;
+grant select on public.support_events to anon;
+grant select, insert, update, delete on public.support_events to authenticated;
+grant usage, select on sequence public.support_events_id_seq to authenticated;
 grant select, insert on public.admin_logs to authenticated;
 grant usage, select on sequence public.admin_logs_id_seq to authenticated;
 grant execute on function public.admin_set_user_status(uuid, text, boolean, boolean) to authenticated;

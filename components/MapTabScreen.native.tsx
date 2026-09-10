@@ -1,9 +1,12 @@
+// 네이티브 지도탭: 게시글/가게 마커, 검색, 군집, 프리미엄/지역광고 노출을 처리한다.
+// Android 마커는 클리핑 이슈 때문에 일부를 지도 오버레이로 렌더링한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
+  LayoutChangeEvent,
   Modal,
   Platform,
   Pressable,
@@ -20,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { type AppPalette } from '../contexts/theme';
 import { useAppTheme } from '../hooks/use-app-theme';
 import { checkProhibitedContent } from '../lib/prohibited';
+import { fetchStorePublicExposureMap } from '../lib/storeExposure';
 import { supabase } from '../lib/supabase';
 import { useTabRefresh } from '../lib/tabRefresh';
 
@@ -38,10 +42,18 @@ type ListingMapItem = {
   }[];
 };
 
+/**
+ * 지도에 표시할 인증 가게 row다.
+ *
+ * 좌표는 `profiles.store_latitude/store_longitude`를 사용한다. 주소 문자열만 있는 가게는
+ * 지도탭에 표시하지 않는다. 프리미엄/지역광고 값은 profiles 원본이 아니라
+ * `store_public_exposure` view에서 합쳐 넣는다.
+ */
 type StoreMapItem = {
   id: string;
   display_name: string | null;
   store_address: string | null;
+  store_detail_address: string | null;
   store_intro: string | null;
   store_today_available: boolean | null;
   store_card_available: boolean | null;
@@ -49,8 +61,16 @@ type StoreMapItem = {
   store_tax_invoice_available: boolean | null;
   store_latitude: number;
   store_longitude: number;
+  is_premium?: boolean;
+  has_local_ad?: boolean;
+  map_highlight?: boolean;
+  recommended_exposure?: boolean;
 };
 
+/**
+ * 같은 격자에 묶인 게시글 마커다.
+ * 지도 축척이 작을수록 격자를 크게 잡아 여러 게시글을 하나의 숫자 마커로 보여준다.
+ */
 type GroupedMarker = {
   key: string;
   latitude: number;
@@ -58,6 +78,10 @@ type GroupedMarker = {
   items: ListingMapItem[];
 };
 
+/**
+ * 같은 격자에 묶인 가게 마커다.
+ * bucket 내부는 지역광고/프리미엄 우선으로 정렬해서 축소 상태에서도 좋은 노출권을 먼저 보여준다.
+ */
 type StoreGroupedMarker = {
   key: string;
   latitude: number;
@@ -67,9 +91,190 @@ type StoreGroupedMarker = {
 
 type MapLayer = 'listings' | 'stores';
 
+type MapSize = {
+  width: number;
+  height: number;
+};
+
+type AndroidMapMarker =
+  | {
+      type: 'listing';
+      key: string;
+      label: string;
+      backgroundColor: string;
+      highlighted: boolean;
+      x: number;
+      y: number;
+      group: GroupedMarker;
+    }
+  | {
+      type: 'store';
+      key: string;
+      label: string;
+      subLabel: string;
+      backgroundColor: string;
+      highlighted: boolean;
+      localAd: boolean;
+      x: number;
+      y: number;
+      group: StoreGroupedMarker;
+    };
+
+const DEFAULT_MAP_REGION: Region = {
+  latitude: 37.5665,
+  longitude: 126.978,
+  latitudeDelta: 0.2,
+  longitudeDelta: 0.2,
+};
+
 function roundCoord(value: number, precision = 3) {
   const factor = Math.pow(10, precision);
   return Math.round(value * factor) / factor;
+}
+
+/**
+ * 현재 지도 확대 수준에 따라 좌표를 몇 자리까지 묶을지 결정한다.
+ *
+ * 반환값이 낮을수록 더 넓은 영역이 같은 key로 묶인다. 즉 사용자가 지도를 축소하면
+ * 주변 게시글/가게가 하나의 마커로 합쳐지고, 확대하면 precision이 올라가면서 점점 분리된다.
+ */
+function getClusterPrecision(region: Region) {
+  const delta = Math.max(region.latitudeDelta, region.longitudeDelta);
+
+  // Lower precision groups nearby pins earlier as the user zooms out.
+  if (delta >= 1.2) return 1;
+  if (delta >= 0.18) return 2;
+  if (delta >= 0.018) return 3;
+  if (delta >= 0.006) return 4;
+  return 5;
+}
+
+/**
+ * 여러 마커가 하나로 묶였을 때 중앙 좌표를 계산한다.
+ * 첫 번째 항목 좌표만 쓰면 군집 마커가 한쪽으로 치우치므로 평균값을 사용한다.
+ */
+function averageCoordinate<T>(
+  items: T[],
+  getLatitude: (item: T) => number,
+  getLongitude: (item: T) => number
+) {
+  const count = Math.max(items.length, 1);
+
+  return {
+    latitude: items.reduce((sum, item) => sum + getLatitude(item), 0) / count,
+    longitude: items.reduce((sum, item) => sum + getLongitude(item), 0) / count,
+  };
+}
+
+/**
+ * Android overlay 마커용 좌표 변환 함수다.
+ *
+ * iOS는 react-native-maps Marker의 custom children이 안정적으로 보이지만,
+ * Android는 둥근 배지/말풍선이 잘리는 문제가 있어 화면 위 absolute overlay로 렌더링한다.
+ * 이 함수는 위도/경도를 현재 region과 mapSize 기준의 x/y 픽셀 좌표로 바꿔준다.
+ */
+function projectCoordinateToPoint(
+  coordinate: { latitude: number; longitude: number },
+  region: Region,
+  mapSize: MapSize
+) {
+  if (mapSize.width <= 0 || mapSize.height <= 0) return null;
+
+  const leftLongitude = region.longitude - region.longitudeDelta / 2;
+  const topLatitude = region.latitude + region.latitudeDelta / 2;
+  const x = ((coordinate.longitude - leftLongitude) / region.longitudeDelta) * mapSize.width;
+  const y = ((topLatitude - coordinate.latitude) / region.latitudeDelta) * mapSize.height;
+
+  if (x < -90 || x > mapSize.width + 90 || y < -90 || y > mapSize.height + 90) {
+    return null;
+  }
+
+  return { x, y };
+}
+
+/**
+ * 추천 가게가 매번 같은 가게만 노출되지 않도록 날짜+가게 id 기반 점수를 만든다.
+ * 서버 광고 상품은 `has_local_ad`가 우선이고, 추천 노출은 보조적으로 랜덤성을 준다.
+ */
+function getDailyStoreExposureScore(storeId: string) {
+  const seed = `${new Date().toISOString().slice(0, 10)}:${storeId}`;
+  return seed.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+}
+
+/**
+ * 프리미엄 추천 노출을 일부 날짜에만 보여주는 gate다.
+ * 지도/목록에서 "가끔 추천 노출" 요구사항을 클라이언트 표시 단계에서 구현한다.
+ */
+function shouldShowRecommendedStore(store: StoreMapItem) {
+  return !!store.recommended_exposure && getDailyStoreExposureScore(store.id) % 3 === 0;
+}
+
+function hasStoreLocalAd(store: StoreMapItem) {
+  return !!store.has_local_ad;
+}
+
+function isHighlightedStoreGroup(group: StoreGroupedMarker) {
+  return group.items.some((store) => store.map_highlight || store.has_local_ad);
+}
+
+function getStoreMarkerLabel(store: StoreMapItem) {
+  const name = (store.display_name || '가게').trim();
+  return name.length > 9 ? `${name.slice(0, 8)}...` : name;
+}
+
+/**
+ * 가게 마커 아래 보조 문구를 만든다.
+ * 지역광고가 가장 강한 신호이고, 그 다음 프리미엄, 일별 추천, 일반 인증 순서다.
+ */
+function getStoreMarkerSubLabel(store: StoreMapItem) {
+  if (hasStoreLocalAd(store)) return '광고';
+  if (store.is_premium) return '프리미엄';
+  if (shouldShowRecommendedStore(store)) return '추천';
+  return '인증';
+}
+
+/**
+ * 가게 마커의 배경색을 구독 노출 수준에 맞춘다.
+ * 지역광고는 더 진한 녹색과 별 pointer를 사용해서 일반 프리미엄과 구분한다.
+ */
+function getStoreMarkerBackgroundColor(store: StoreMapItem, highlighted: boolean) {
+  if (hasStoreLocalAd(store)) return '#14532d';
+  return highlighted ? '#166534' : '#059669';
+}
+
+/**
+ * 지도 카드/검색 대상에서 기본 주소와 상세주소를 한 줄로 보여준다.
+ */
+function formatStoreAddress(address?: string | null, detailAddress?: string | null) {
+  return [address, detailAddress]
+    .map((value) => (value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
+ * 가게 정렬 우선순위를 한 곳에 모은다.
+ *
+ * 지역광고 > 프리미엄 > 일별 추천 > 지도 강조 > 이름순 순서다.
+ * 이 함수를 지도 마커 bucket 정렬과 가게 목록 정렬에 같이 써야 축소/확대 시 노출 순서가 흔들리지 않는다.
+ */
+function sortStoresByExposure(stores: StoreMapItem[]) {
+  return [...stores].sort((a, b) => {
+    const adScore = Number(!!b.has_local_ad) - Number(!!a.has_local_ad);
+    if (adScore !== 0) return adScore;
+
+    const premiumScore = Number(!!b.is_premium) - Number(!!a.is_premium);
+    if (premiumScore !== 0) return premiumScore;
+
+    const recommendationScore =
+      Number(shouldShowRecommendedStore(b)) - Number(shouldShowRecommendedStore(a));
+    if (recommendationScore !== 0) return recommendationScore;
+
+    const highlightScore = Number(!!b.map_highlight) - Number(!!a.map_highlight);
+    if (highlightScore !== 0) return highlightScore;
+
+    return (a.display_name || '').localeCompare(b.display_name || '');
+  });
 }
 
 export default function MapTabScreen() {
@@ -90,8 +295,12 @@ export default function MapTabScreen() {
   const [groupModalOpen, setGroupModalOpen] = useState(false);
   const [storeGroupModalOpen, setStoreGroupModalOpen] = useState(false);
   const [showHint, setShowHint] = useState(true);
-  const [tracksMarkerViewChanges, setTracksMarkerViewChanges] = useState(true);
   const [myLocation, setMyLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // `mapRegion`은 클러스터링과 Android overlay 좌표 계산의 기준이다.
+  // iOS는 region complete만으로 충분하지만 Android overlay는 드래그 중에도 위치를 맞춰야 한다.
+  const [mapRegion, setMapRegion] = useState<Region>(DEFAULT_MAP_REGION);
+  const [mapSize, setMapSize] = useState<MapSize>({ width: 0, height: 0 });
 
   useEffect(() => {
     fetchListings();
@@ -128,9 +337,7 @@ export default function MapTabScreen() {
       .not('latitude', 'is', null)
       .not('longitude', 'is', null);
 
-    if (error) {
-      console.log('지도 매물 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const mapped = (data || []).map((item: any) => ({
@@ -143,6 +350,12 @@ export default function MapTabScreen() {
     setItems(mapped as ListingMapItem[]);
   };
 
+  /**
+   * 지도에 표시할 인증 가게를 조회한다.
+   *
+   * profiles에서는 공개 프로필과 좌표만 읽고, 구독/광고 노출 정보는
+   * `fetchStorePublicExposureMap`으로 따로 합친다. 결제/관리 테이블을 공개 화면이 직접 읽지 않게 하기 위한 구조다.
+   */
   const fetchStores = async () => {
     const { data, error } = await supabase
       .from('profiles')
@@ -150,6 +363,7 @@ export default function MapTabScreen() {
         id,
         display_name,
         store_address,
+        store_detail_address,
         store_intro,
         store_today_available,
         store_card_available,
@@ -163,14 +377,33 @@ export default function MapTabScreen() {
       .not('store_latitude', 'is', null)
       .not('store_longitude', 'is', null);
 
-    if (error) {
-      console.log('지도 가게 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
-    setStores(data as StoreMapItem[]);
+    const storeRows = (data || []) as StoreMapItem[];
+    const storeIds = storeRows.map((store) => store.id);
+    const exposureMap = await fetchStorePublicExposureMap(storeIds);
+
+    setStores(
+      sortStoresByExposure(
+        storeRows.map((store) => {
+          const exposure = exposureMap.get(store.id);
+          return {
+            ...store,
+            is_premium: !!exposure?.is_premium,
+            has_local_ad: !!exposure?.has_local_ad,
+            map_highlight: !!exposure?.map_highlight,
+            recommended_exposure: !!exposure?.recommended_exposure,
+          };
+        })
+      )
+    );
   };
 
+  /**
+   * 내 위치를 저장해두고 "내 위치" 버튼에서 지도 이동에 사용한다.
+   * 권한이 없으면 지도탭 자체는 기본 서울 region으로 계속 동작한다.
+   */
   const loadMyLocation = async () => {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -184,9 +417,7 @@ export default function MapTabScreen() {
         latitude: current.coords.latitude,
         longitude: current.coords.longitude,
       });
-    } catch (e) {
-      console.log('내 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   useTabRefresh('map', () => {
@@ -215,6 +446,8 @@ export default function MapTabScreen() {
     });
   }, [items, search]);
 
+  // 가게 검색은 이름, 기본 주소, 상세주소, 소개글까지 포함한다.
+  // 지도에서 주소 수정 직후 검색이 맞으려면 `store_detail_address`도 반드시 포함해야 한다.
   const filteredStores = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return stores;
@@ -223,17 +456,21 @@ export default function MapTabScreen() {
       return (
         store.display_name?.toLowerCase().includes(keyword) ||
         store.store_address?.toLowerCase().includes(keyword) ||
+        store.store_detail_address?.toLowerCase().includes(keyword) ||
         store.store_intro?.toLowerCase().includes(keyword)
       );
     });
   }, [search, stores]);
 
+  // 게시글 좌표를 현재 zoom 기준으로 묶는다.
+  // 한 bucket에 여러 개가 들어가면 숫자 마커가 나오고, 누르면 모달 목록으로 풀어서 보여준다.
   const groupedMarkers = useMemo<GroupedMarker[]>(() => {
     const map = new Map<string, ListingMapItem[]>();
+    const precision = getClusterPrecision(mapRegion);
 
     filteredItems.forEach((item) => {
-      const lat = roundCoord(item.latitude, 3);
-      const lng = roundCoord(item.longitude, 3);
+      const lat = roundCoord(item.latitude, precision);
+      const lng = roundCoord(item.longitude, precision);
       const key = `${lat},${lng}`;
 
       const bucket = map.get(key) || [];
@@ -241,20 +478,31 @@ export default function MapTabScreen() {
       map.set(key, bucket);
     });
 
-    return Array.from(map.entries()).map(([key, bucket]) => ({
-      key,
-      latitude: bucket[0].latitude,
-      longitude: bucket[0].longitude,
-      items: bucket,
-    }));
-  }, [filteredItems]);
+    return Array.from(map.entries()).map(([key, bucket]) => {
+      const coordinate = averageCoordinate(
+        bucket,
+        (item) => item.latitude,
+        (item) => item.longitude
+      );
 
+      return {
+        key,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        items: bucket,
+      };
+    });
+  }, [filteredItems, mapRegion]);
+
+  // 가게 좌표도 게시글과 같은 방식으로 묶되, bucket 내부와 bucket 자체를 노출 점수순으로 정렬한다.
+  // 축소된 지도에서 여러 가게가 한 마커로 합쳐져도 지역광고/프리미엄 가게가 대표 label이 된다.
   const groupedStoreMarkers = useMemo<StoreGroupedMarker[]>(() => {
     const map = new Map<string, StoreMapItem[]>();
+    const precision = getClusterPrecision(mapRegion);
 
     filteredStores.forEach((store) => {
-      const lat = roundCoord(store.store_latitude, 3);
-      const lng = roundCoord(store.store_longitude, 3);
+      const lat = roundCoord(store.store_latitude, precision);
+      const lng = roundCoord(store.store_longitude, precision);
       const key = `${lat},${lng}`;
 
       const bucket = map.get(key) || [];
@@ -262,25 +510,42 @@ export default function MapTabScreen() {
       map.set(key, bucket);
     });
 
-    return Array.from(map.entries()).map(([key, bucket]) => ({
-      key,
-      latitude: bucket[0].store_latitude,
-      longitude: bucket[0].store_longitude,
-      items: bucket,
-    }));
-  }, [filteredStores]);
+    return Array.from(map.entries()).map(([key, bucket]) => {
+      const sortedBucket = sortStoresByExposure(bucket);
+      const coordinate = averageCoordinate(
+        sortedBucket,
+        (store) => store.store_latitude,
+        (store) => store.store_longitude
+      );
+
+      return {
+        key,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        items: sortedBucket,
+      };
+    }).sort((a, b) => {
+      const exposureScore =
+        Number(!!b.items[0]?.has_local_ad) * 2 +
+        Number(!!b.items[0]?.is_premium) -
+        (Number(!!a.items[0]?.has_local_ad) * 2 + Number(!!a.items[0]?.is_premium));
+
+      if (exposureScore !== 0) return exposureScore;
+      return b.items.length - a.items.length;
+    });
+  }, [filteredStores, mapRegion]);
 
   const activeCoordinates = useMemo(() => {
     return activeLayer === 'stores'
-      ? groupedStoreMarkers.map((item) => ({
-          latitude: item.latitude,
-          longitude: item.longitude,
+      ? filteredStores.map((store) => ({
+          latitude: store.store_latitude,
+          longitude: store.store_longitude,
         }))
-      : groupedMarkers.map((item) => ({
+      : filteredItems.map((item) => ({
           latitude: item.latitude,
           longitude: item.longitude,
         }));
-  }, [activeLayer, groupedMarkers, groupedStoreMarkers]);
+  }, [activeLayer, filteredItems, filteredStores]);
 
   useEffect(() => {
     if (!mapRef.current || activeCoordinates.length === 0) return;
@@ -303,29 +568,15 @@ export default function MapTabScreen() {
     return () => clearTimeout(timer);
   }, [activeCoordinates]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-
-    setTracksMarkerViewChanges(true);
-
-    const timer = setTimeout(() => {
-      setTracksMarkerViewChanges(false);
-    }, 900);
-
-    return () => clearTimeout(timer);
-  }, [activeCoordinates]);
-
-  const initialRegion: Region = {
-    latitude: 37.5665,
-    longitude: 126.978,
-    latitudeDelta: 0.2,
-    longitudeDelta: 0.2,
-  };
-
   function getCategoryLabel(category: ListingMapItem['category']) {
     if (category === 'trade') return '판매';
     if (category === 'share') return '나눔';
     return '구해요';
+  }
+
+  function getMarkerCategoryLabel(category: ListingMapItem['category']) {
+    if (category === 'want') return '구함';
+    return getCategoryLabel(category);
   }
 
   const getCategoryColor = (category: ListingMapItem['category']) => {
@@ -333,6 +584,182 @@ export default function MapTabScreen() {
     if (category === 'share') return '#16a34a';
     return '#d97706';
   };
+
+  const renderListingMarkerContent = (label: string, backgroundColor: string) => {
+    return (
+      <View collapsable={false} style={styles.markerOuter}>
+        <View
+          collapsable={false}
+          style={[
+            styles.markerWrap,
+            { backgroundColor },
+          ]}
+        >
+          <Text style={styles.markerText}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * iOS용 가게 Marker children을 만든다.
+   *
+   * 단일 가게면 "가게명 + 인증/프리미엄/광고"를 보여주고,
+   * 여러 가게가 묶인 marker면 대표 가게명과 "N곳"을 보여준다.
+   */
+  const renderStoreMarkerContent = (store: StoreMapItem, isGroup = false, groupCount = 1) => {
+    const localAd = hasStoreLocalAd(store);
+    const highlighted = localAd || !!store.map_highlight || !!store.is_premium;
+    const backgroundColor = getStoreMarkerBackgroundColor(store, highlighted);
+    const label = isGroup ? getStoreMarkerLabel(store) : getStoreMarkerLabel(store);
+    const subLabel = isGroup ? `${groupCount}곳` : getStoreMarkerSubLabel(store);
+
+    return (
+      <View collapsable={false} style={styles.storeMarkerOuter}>
+        <View
+          collapsable={false}
+          style={[
+            styles.storeMarkerWrap,
+            { backgroundColor },
+            highlighted && styles.storeMarkerHighlight,
+            localAd && styles.localAdMarkerWrap,
+          ]}
+        >
+          <View style={styles.storeMarkerTitleRow}>
+            {localAd ? <Ionicons name="star" size={11} color="#fde68a" /> : null}
+            <Text style={styles.storeMarkerName} numberOfLines={1} allowFontScaling={false}>
+              {label}
+            </Text>
+          </View>
+          <Text style={styles.storeMarkerSubText} numberOfLines={1} allowFontScaling={false}>
+            {subLabel}
+          </Text>
+        </View>
+        {localAd ? <View style={styles.localAdMarkerPointer} /> : null}
+      </View>
+    );
+  };
+
+  /**
+   * Android overlay용 marker UI를 만든다.
+   *
+   * Android에서는 MapView Marker children이 플랫폼 내부에서 bitmap으로 변환되면서
+   * 둥근 외곽/텍스트가 잘리는 문제가 있었다. 그래서 같은 모양을 지도 위 absolute View로
+   * 다시 그리되, 터치 이벤트는 Pressable에서 처리한다.
+   */
+  const renderAndroidMarkerContent = (
+    label: string,
+    backgroundColor: string,
+    highlighted = false,
+    subLabel = '',
+    localAd = false
+  ) => {
+    if (subLabel) {
+      return (
+        <View style={styles.storeMarkerOuter}>
+          <View
+            style={[
+              styles.storeMarkerWrap,
+              { backgroundColor },
+              highlighted && styles.storeMarkerHighlight,
+              localAd && styles.localAdMarkerWrap,
+            ]}
+          >
+            <View style={styles.storeMarkerTitleRow}>
+              {localAd ? <Ionicons name="star" size={11} color="#fde68a" /> : null}
+              <Text style={styles.storeMarkerName} numberOfLines={1} allowFontScaling={false}>
+                {label}
+              </Text>
+            </View>
+            <Text style={styles.storeMarkerSubText} numberOfLines={1} allowFontScaling={false}>
+              {subLabel}
+            </Text>
+          </View>
+          {localAd ? <View style={styles.localAdMarkerPointer} /> : null}
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.markerOuter}>
+        <View
+          style={[
+            styles.markerWrap,
+            { backgroundColor },
+            highlighted && styles.storeMarkerHighlight,
+          ]}
+        >
+          <Text style={styles.markerText} numberOfLines={1} allowFontScaling={false}>
+            {label}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  /**
+   * Android에서 실제 화면에 올릴 overlay marker 목록이다.
+   *
+   * `projectCoordinateToPoint`로 지도 좌표를 화면 좌표로 바꾼 뒤, MapView 위에
+   * Pressable을 absolute 배치한다. 그래서 Android도 iOS처럼 가게명, 프리미엄/광고 뱃지,
+   * 군집 개수를 잘리지 않게 보여줄 수 있다.
+   */
+  const androidMapMarkers = useMemo<AndroidMapMarker[]>(() => {
+    if (Platform.OS !== 'android') return [];
+
+    if (activeLayer === 'stores') {
+      return groupedStoreMarkers.flatMap((group) => {
+        const single = group.items.length === 1;
+        const first = group.items[0];
+        const highlighted = isHighlightedStoreGroup(group);
+        const point = projectCoordinateToPoint(
+          { latitude: group.latitude, longitude: group.longitude },
+          mapRegion,
+          mapSize
+        );
+
+        if (!point) return [];
+
+        return [{
+          type: 'store' as const,
+          key: `android-store-${group.key}`,
+          label: getStoreMarkerLabel(first),
+          subLabel: single ? getStoreMarkerSubLabel(first) : `${group.items.length}곳`,
+          backgroundColor: getStoreMarkerBackgroundColor(first, highlighted),
+          highlighted,
+          localAd: !!first.has_local_ad,
+          x: point.x,
+          y: point.y,
+          group,
+        }];
+      });
+    }
+
+    return groupedMarkers.flatMap((group) => {
+      const single = group.items.length === 1;
+      const first = group.items[0];
+      const point = projectCoordinateToPoint(
+        { latitude: group.latitude, longitude: group.longitude },
+        mapRegion,
+        mapSize
+      );
+
+      if (!point) return [];
+
+      return [{
+        type: 'listing' as const,
+        key: `android-listing-${group.key}`,
+        label: single ? getMarkerCategoryLabel(first.category) : String(group.items.length),
+        backgroundColor: single ? getCategoryColor(first.category) : '#166534',
+        highlighted: false,
+        x: point.x,
+        y: point.y,
+        group,
+      }];
+    });
+  }, [activeLayer, groupedMarkers, groupedStoreMarkers, mapRegion, mapSize]);
 
   const getListingImageUrl = (item: ListingMapItem) => {
     const imagePath = item.listing_images?.[0]?.image_path;
@@ -342,6 +769,10 @@ export default function MapTabScreen() {
     return data.publicUrl;
   };
 
+  /**
+   * 게시글 marker를 눌렀을 때의 동작이다.
+   * 단일 게시글은 하단 카드, 여러 게시글 군집은 모달 목록을 연다.
+   */
   const handleMarkerPress = (group: GroupedMarker) => {
     if (group.items.length === 1) {
       setSelectedGroup([]);
@@ -355,6 +786,10 @@ export default function MapTabScreen() {
     setGroupModalOpen(true);
   };
 
+  /**
+   * 가게 marker를 눌렀을 때의 동작이다.
+   * 단일 가게는 하단 카드, 여러 가게 군집은 노출 점수순으로 정렬된 모달 목록을 연다.
+   */
   const handleStoreMarkerPress = (group: StoreGroupedMarker) => {
     if (group.items.length === 1) {
       setSelectedGroup([]);
@@ -374,6 +809,10 @@ export default function MapTabScreen() {
     setStoreGroupModalOpen(true);
   };
 
+  /**
+   * 저장된 내 위치로 지도 중심을 이동한다.
+   * 위치 권한이 없거나 아직 조회 전이면 버튼을 눌러도 아무 동작을 하지 않는다.
+   */
   const moveToMyLocation = () => {
     if (!myLocation || !mapRef.current) return;
 
@@ -388,6 +827,40 @@ export default function MapTabScreen() {
     );
   };
 
+  /**
+   * MapView의 실제 크기를 저장한다.
+   * Android overlay marker 좌표는 화면 픽셀 기준이라 width/height가 없으면 계산할 수 없다.
+   */
+  const handleMapLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+
+    setMapSize((prev) => {
+      if (prev.width === width && prev.height === height) return prev;
+      return { width, height };
+    });
+  };
+
+  /**
+   * Android는 드래그 중에도 overlay marker 위치를 따라가야 해서 region을 계속 갱신한다.
+   * iOS는 native Marker를 쓰기 때문에 complete 이벤트만으로 충분하다.
+   */
+  const handleRegionChange = (region: Region) => {
+    if (Platform.OS !== 'android') return;
+    setMapRegion(region);
+  };
+
+  /**
+   * 지도 이동이 끝난 뒤 최종 region을 저장한다.
+   * 이 값은 클러스터링 precision과 iOS marker 위치에도 사용된다.
+   */
+  const handleRegionChangeComplete = (region: Region) => {
+    setMapRegion(region);
+  };
+
+  /**
+   * 지도 검색어를 바꾼다.
+   * 판매금지어가 들어오면 검색 자체를 비우고 안내 문구를 띄워서 금지 품목 탐색에도 쓰이지 않게 한다.
+   */
   const handleSearchChange = (value: string) => {
     const blockedKeyword = checkProhibitedContent(value);
 
@@ -412,13 +885,18 @@ export default function MapTabScreen() {
       <MapView
         ref={mapRef}
         style={styles.map}
-        initialRegion={initialRegion}
+        initialRegion={DEFAULT_MAP_REGION}
+        onLayout={handleMapLayout}
+        onRegionChange={handleRegionChange}
+        onRegionChangeComplete={handleRegionChangeComplete}
       >
-        {activeLayer === 'listings' &&
+        {Platform.OS !== 'android' && activeLayer === 'listings' &&
           groupedMarkers.map((group) => {
             const single = group.items.length === 1;
             const first = group.items[0];
             const color = getCategoryColor(first.category);
+            const label = single ? getMarkerCategoryLabel(first.category) : String(group.items.length);
+            const backgroundColor = single ? color : '#166534';
 
             return (
               <Marker
@@ -427,27 +905,17 @@ export default function MapTabScreen() {
                   latitude: group.latitude,
                   longitude: group.longitude,
                 }}
-                tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
+                tracksViewChanges={false}
                 onPress={() => handleMarkerPress(group)}
               >
-                <View collapsable={false} style={styles.markerOuter}>
-                  <View
-                    style={[
-                      styles.markerWrap,
-                      { backgroundColor: single ? color : theme.text },
-                    ]}
-                  >
-                    <Text style={styles.markerText}>
-                      {single ? getCategoryLabel(first.category) : String(group.items.length)}
-                    </Text>
-                  </View>
-                </View>
+                {renderListingMarkerContent(label, backgroundColor)}
               </Marker>
             );
           })}
-        {activeLayer === 'stores' &&
+        {Platform.OS !== 'android' && activeLayer === 'stores' &&
           groupedStoreMarkers.map((group) => {
             const single = group.items.length === 1;
+            const first = group.items[0];
 
             return (
               <Marker
@@ -456,20 +924,50 @@ export default function MapTabScreen() {
                   latitude: group.latitude,
                   longitude: group.longitude,
                 }}
-                tracksViewChanges={Platform.OS === 'android' ? tracksMarkerViewChanges : false}
+                tracksViewChanges={false}
                 onPress={() => handleStoreMarkerPress(group)}
               >
-                <View collapsable={false} style={styles.markerOuter}>
-                  <View style={[styles.markerWrap, styles.storeMarkerWrap]}>
-                    <Text style={styles.markerText}>
-                      {single ? '가게' : String(group.items.length)}
-                    </Text>
-                  </View>
-                </View>
+                {renderStoreMarkerContent(first, !single, group.items.length)}
               </Marker>
             );
           })}
       </MapView>
+
+      {Platform.OS === 'android' ? (
+        <View pointerEvents="box-none" style={styles.androidMarkerLayer}>
+          {androidMapMarkers.map((marker) => (
+            <Pressable
+              key={marker.key}
+              hitSlop={8}
+              pointerEvents="auto"
+              style={[
+                styles.androidMarkerPressable,
+                marker.type === 'store' && styles.androidStoreMarkerPressable,
+                {
+                  left: marker.x - (marker.type === 'store' ? 64 : 36),
+                  top: marker.y - (marker.type === 'store' ? 38 : 26),
+                },
+              ]}
+              onPress={() => {
+                if (marker.type === 'listing') {
+                  handleMarkerPress(marker.group);
+                  return;
+                }
+
+                handleStoreMarkerPress(marker.group);
+              }}
+            >
+              {renderAndroidMarkerContent(
+                marker.label,
+                marker.backgroundColor,
+                marker.highlighted,
+                marker.type === 'store' ? marker.subLabel : '',
+                marker.type === 'store' ? marker.localAd : false
+              )}
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       <View style={[styles.searchBox, { top: Math.max(insets.top + 8, 14) }]}>
         <TextInput
@@ -514,6 +1012,7 @@ export default function MapTabScreen() {
       </View>
 
       <TouchableOpacity style={styles.myLocationBtn} onPress={moveToMyLocation}>
+        <Ionicons name="locate" size={16} color={theme.text} />
         <Text style={styles.myLocationBtnText}>내 위치</Text>
       </TouchableOpacity>
 
@@ -580,7 +1079,22 @@ export default function MapTabScreen() {
       {selectedStore ? (
         <View style={styles.bottomCard}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.storeBadge}>인증 가게</Text>
+            <View style={styles.storeBadgeRow}>
+              <Text
+                style={[
+                  styles.storeBadge,
+                  shouldShowRecommendedStore(selectedStore) && styles.recommendedStoreBadge,
+                ]}
+              >
+                {shouldShowRecommendedStore(selectedStore) ? '추천 가게' : '인증 가게'}
+              </Text>
+              {selectedStore.has_local_ad ? (
+                <Text style={styles.localAdStoreBadge}>광고</Text>
+              ) : null}
+              {selectedStore.is_premium ? (
+                <Text style={styles.premiumStoreBadge}>프리미엄</Text>
+              ) : null}
+            </View>
 
             <TouchableOpacity onPress={() => setSelectedStore(null)}>
               <Text style={styles.closeText}>닫기</Text>
@@ -591,7 +1105,7 @@ export default function MapTabScreen() {
             {selectedStore.display_name || '가게'}
           </Text>
           <Text style={styles.itemMeta} numberOfLines={1}>
-            {selectedStore.store_address || '주소 정보 없음'}
+            {formatStoreAddress(selectedStore.store_address, selectedStore.store_detail_address) || '주소 정보 없음'}
           </Text>
           {selectedStore.store_intro ? (
             <Text style={styles.storeIntro} numberOfLines={2}>
@@ -685,12 +1199,31 @@ export default function MapTabScreen() {
                       </View>
 
                       <View style={styles.groupInfo}>
-                        <Text style={styles.storeGroupBadge}>인증 가게</Text>
+                        <View style={styles.storeGroupBadgeRow}>
+                          <Text
+                            style={[
+                              styles.storeGroupBadge,
+                              shouldShowRecommendedStore(store) && styles.recommendedStoreBadge,
+                            ]}
+                          >
+                            {shouldShowRecommendedStore(store) ? '추천 가게' : '인증 가게'}
+                          </Text>
+                          {store.has_local_ad ? (
+                            <Text style={[styles.localAdStoreBadge, styles.premiumStoreGroupBadge]}>
+                              광고
+                            </Text>
+                          ) : null}
+                          {store.is_premium ? (
+                            <Text style={[styles.premiumStoreBadge, styles.premiumStoreGroupBadge]}>
+                              프리미엄
+                            </Text>
+                          ) : null}
+                        </View>
                         <Text style={styles.groupTitle} numberOfLines={1}>
                           {store.display_name || '가게'}
                         </Text>
                         <Text style={styles.groupMeta} numberOfLines={1}>
-                          {store.store_address || '주소 정보 없음'}
+                          {formatStoreAddress(store.store_address, store.store_detail_address) || '주소 정보 없음'}
                         </Text>
                       </View>
                     </Pressable>
@@ -767,6 +1300,10 @@ function createStyles(theme: AppPalette) {
     bottom: 96,
     backgroundColor: theme.surface,
     borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
@@ -779,27 +1316,99 @@ function createStyles(theme: AppPalette) {
   },
 
   markerOuter: {
-  width: 38,
-  height: 38,
-  alignItems: 'center',
-  justifyContent: 'center',
-  overflow: 'visible',
-},
+    width: 72,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
 
-markerWrap: {
-  minWidth: 38,
-  height: 38,
-  paddingHorizontal: 10,
-  borderRadius: 22,
-  alignItems: 'center',
-  justifyContent: 'center',
-  borderWidth: 2,
-  borderColor: '#fff',
-  overflow: 'hidden',
-},
+  markerWrap: {
+    minWidth: 42,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    overflow: 'hidden',
+  },
 
   storeMarkerWrap: {
+    minWidth: 92,
+    maxWidth: 128,
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: '#fff',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#059669',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+
+  storeMarkerHighlight: {
+    borderColor: '#bbf7d0',
+  },
+
+  storeMarkerOuter: {
+    width: 128,
+    height: 76,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+
+  localAdMarkerWrap: {
+    borderColor: '#fde68a',
+    borderRadius: 8,
+  },
+
+  localAdMarkerPointer: {
+    marginTop: -1,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 9,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: '#14532d',
+  },
+
+  storeMarkerTitleRow: {
+    maxWidth: 108,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+
+  storeMarkerName: {
+    maxWidth: 94,
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+
+  storeMarkerSubText: {
+    marginTop: 2,
+    color: '#dcfce7',
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '900',
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 
   markerText: {
@@ -809,6 +1418,22 @@ markerWrap: {
     fontWeight: '800',
     textAlign: 'center',
     includeFontPadding: false,
+  },
+
+  androidMarkerLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  androidMarkerPressable: {
+    position: 'absolute',
+    width: 72,
+    height: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  androidStoreMarkerPressable: {
+    width: 128,
+    height: 76,
   },
 
   bottomHint: {
@@ -885,6 +1510,13 @@ markerWrap: {
     fontWeight: '700',
     marginBottom: 10,
   },
+  storeBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+    marginBottom: 10,
+  },
   storeBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#166534',
@@ -895,7 +1527,32 @@ markerWrap: {
     overflow: 'hidden',
     fontSize: 12,
     fontWeight: '800',
-    marginBottom: 10,
+  },
+  premiumStoreBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#047857',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  localAdStoreBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#14532d',
+    color: '#fff',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  recommendedStoreBadge: {
+    backgroundColor: '#14532d',
+    color: '#fff',
   },
   storeIntro: {
     marginTop: 8,
@@ -998,7 +1655,17 @@ markerWrap: {
     overflow: 'hidden',
     fontSize: 11,
     fontWeight: '700',
+  },
+  storeGroupBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
     marginBottom: 8,
+  },
+  premiumStoreGroupBadge: {
+    fontSize: 11,
+    fontWeight: '800',
   },
   groupTitle: {
     fontSize: 15,

@@ -1,3 +1,4 @@
+// 반경 슬라이더 플랫폼 브리지: native/web 입력 방식을 분리한다.
 import React from 'react';
 import { Platform } from 'react-native';
 

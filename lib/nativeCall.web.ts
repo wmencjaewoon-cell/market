@@ -1,3 +1,4 @@
+// 웹 통화 fallback: 네이티브 WebRTC API가 없는 환경에서 타입 호환을 유지한다.
 import { createElement } from 'react';
 import { StyleProp, View, ViewStyle } from 'react-native';
 

@@ -50,6 +50,17 @@ Join our community of developers creating universal apps.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
 # market
 
+## Interior Market 개발 문서
+
+새 개발자는 먼저 [docs/DEVELOPER_HANDOFF.md](docs/DEVELOPER_HANDOFF.md)를 확인하세요.
+
+검사 명령:
+
+```bash
+npx expo lint
+npx tsc --noEmit
+```
+
 
 
 

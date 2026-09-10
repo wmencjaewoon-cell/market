@@ -1,3 +1,4 @@
+// 지도탭 플랫폼 브리지: 네이티브 지도와 웹 카카오 지도 구현을 분리한다.
 import React from 'react';
 import { Platform } from 'react-native';
 

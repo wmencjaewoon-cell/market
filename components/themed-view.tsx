@@ -1,3 +1,4 @@
+// 템플릿 테마 View: useThemeColor 기반 배경색을 적용하는 간단한 래퍼다.
 import { View, type ViewProps } from 'react-native';
 
 import { useThemeColor } from '@/hooks/use-theme-color';

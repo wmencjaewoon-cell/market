@@ -1,3 +1,4 @@
+// 게시글 카드: 홈/관심/목록에서 재사용되는 거래글 요약 카드와 프리미엄 가게 배지를 표시한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -12,6 +13,7 @@ import {
   View
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { LocalAdStoreBadge, PremiumStoreBadge } from './StorePlanModal';
 import { canUseApp } from '../lib/guard';
 import {
   getSellerLevel,
@@ -20,7 +22,9 @@ import {
 } from '../lib/sellerLevel';
 import { type AppPalette } from '../contexts/theme';
 import { useAppTheme } from '../hooks/use-app-theme';
+import { hasLocalAdStoreProfile, isPremiumStoreProfile } from '../lib/storeExposure';
 import { supabase } from '../lib/supabase';
+import { useSingleFlightPress } from '../lib/useSingleFlightPress';
 
 type Props = {
   item: any;
@@ -78,6 +82,17 @@ function formatTimeAgo(dateString?: string) {
 
   const diffDay = Math.floor(diffHour / 24);
   return `${diffDay}일 전`;
+}
+
+function getListingDisplayTime(item: any) {
+  const bumpedAt = item?.last_bumped_at ? new Date(item.last_bumped_at).getTime() : NaN;
+  const createdAt = item?.created_at ? new Date(item.created_at).getTime() : NaN;
+
+  if (Number.isFinite(bumpedAt) && Number.isFinite(createdAt) && bumpedAt - createdAt > 60_000) {
+    return `끌올 ${formatTimeAgo(item.last_bumped_at)}`;
+  }
+
+  return formatTimeAgo(item?.created_at);
 }
 
 function getListingQuantityInfo(item: any) {
@@ -141,8 +156,11 @@ export default function MaterialCard({
   const { user } = useAuth();
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const runSinglePress = useSingleFlightPress();
   const isVerifiedStore =
     item.profiles?.user_type === 'store' && !!item.profiles?.business_verified;
+  const isPremiumStore = isPremiumStoreProfile(item.profiles);
+  const hasLocalAd = hasLocalAdStoreProfile(item.profiles);
   const isOwner = !!user?.id && item.author_id === user.id;
   const sellerLevel = getSellerLevel(item.profiles);
   const sellerLevelStyle = getSellerLevelStyle(item.profiles, sellerLevel);
@@ -163,7 +181,10 @@ export default function MaterialCard({
     return formatDistance(sellerDistanceKm);
   }, [sellerDistanceKm]);
 
-  const timeAgo = useMemo(() => formatTimeAgo(item.created_at), [item.created_at]);
+  const timeAgo = useMemo(
+    () => getListingDisplayTime(item),
+    [item.created_at, item.last_bumped_at]
+  );
   const quantityInfo = useMemo(() => getListingQuantityInfo(item), [item]);
   const shouldCompactBadges =
     Platform.OS === 'android' &&
@@ -210,9 +231,7 @@ export default function MaterialCard({
 
       setMenuOpen(false);
       onRefresh?.();
-    } catch (e) {
-      console.log('관심 처리 실패:', e);
-    }
+    } catch {    }
   };
 
   const handleHide = async () => {
@@ -246,9 +265,7 @@ export default function MaterialCard({
 
     setMenuOpen(false);
 
-    if (error) {
-      console.log('게시글 숨기기 실패:', error);
-      showCardAlert(
+    if (error) {      showCardAlert(
         '게시글 숨기기 실패',
         error.message.includes('hidden_listings')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -294,9 +311,7 @@ export default function MaterialCard({
 
     setMenuOpen(false);
 
-    if (error) {
-      console.log('게시글 삭제 실패:', error);
-      showCardAlert('삭제 실패', error.message || '게시글을 삭제하지 못했습니다.');
+    if (error) {      showCardAlert('삭제 실패', error.message || '게시글을 삭제하지 못했습니다.');
       return;
     }
 
@@ -351,9 +366,7 @@ export default function MaterialCard({
 
     setMenuOpen(false);
 
-    if (error) {
-      console.log('판매자 차단 실패:', error);
-      showCardAlert(
+    if (error) {      showCardAlert(
         '판매자 차단 실패',
         error.message.includes('user_blocks')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -379,7 +392,11 @@ export default function MaterialCard({
           shouldCompactBadges && styles.compactCard,
         ]}
         activeOpacity={0.9}
-        onPress={() => router.push(`/(tabs)/home/post/${item.id}` as any)}
+        onPress={() =>
+          runSinglePress(`open-listing-${item.id}`, () =>
+            router.push(`/(tabs)/home/post/${item.id}` as any)
+          )
+        }
       >
         <View style={[styles.row, shouldCompactBadges && styles.compactRow]}>
           {/* 왼쪽 큰 이미지 */}
@@ -409,6 +426,9 @@ export default function MaterialCard({
               >
                 {isVerifiedStore ? '인증가게' : '개인'}
               </Text>
+
+              {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
+              {isPremiumStore ? <PremiumStoreBadge /> : null}
 
               {showSellerLevel ? (
                 <Text
@@ -632,12 +652,13 @@ function createStyles(theme: AppPalette) {
 
   infoWrap: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'space-between',
   },
 
   badgesRow: {
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    flexWrap: 'wrap',
     gap: 6,
     marginBottom: 6,
   },
@@ -647,6 +668,7 @@ function createStyles(theme: AppPalette) {
   },
 
   badge: {
+    maxWidth: '100%',
     fontSize: 11,
     fontWeight: '700',
     paddingHorizontal: 8,

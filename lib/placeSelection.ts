@@ -1,3 +1,4 @@
+// 채팅 위치 공유 이벤트 버스: 지도 선택 후 채팅방을 remount하지 않고 선택 위치를 전달한다.
 export type ChatPlaceSelection = {
   id: string;
   roomId: string;

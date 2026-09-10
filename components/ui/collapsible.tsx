@@ -1,3 +1,4 @@
+// 접이식 섹션 UI: 템플릿 계열 화면에서 간단한 펼침/접힘 블록을 만든다.
 import { PropsWithChildren, useState } from 'react';
 import { StyleSheet, TouchableOpacity } from 'react-native';
 

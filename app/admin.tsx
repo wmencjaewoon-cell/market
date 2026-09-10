@@ -1,3 +1,5 @@
+// 관리자 콘솔: 신고/공지/가게인증/구독/지역광고 같은 운영자 전용 기능을 한 화면에서 처리한다.
+// 서버 권한 검증은 Supabase RPC/RLS가 최종 기준이고, 이 화면의 분기는 UX용이다.
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -19,11 +21,13 @@ import { supabase } from '../lib/supabase';
 type AdminTab =
   | 'overview'
   | 'notices'
+  | 'events'
   | 'reports'
   | 'users'
   | 'listings'
   | 'stores'
-  | 'estimates';
+  | 'estimates'
+  | 'security';
 
 type AdminViewMode = 'grid' | 'list';
 type DateFilter = 'all' | 'today' | '7days' | '30days';
@@ -41,6 +45,20 @@ type NoticeItem = {
   content: string;
   is_published: boolean | null;
   created_at: string;
+};
+
+type EventItem = {
+  id: number;
+  title: string;
+  summary: string | null;
+  content: string;
+  image_url: string | null;
+  is_published: boolean | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  sort_order: number | null;
+  created_at: string;
+  updated_at: string | null;
 };
 
 type ReportItem = {
@@ -68,6 +86,23 @@ type AdminUser = {
   can_create_listing: boolean | null;
   restricted_until: string | null;
   restriction_reason: string | null;
+  store_subscription_plan?: string | null;
+  store_subscription_status?: string | null;
+  store_subscription_expires_at?: string | null;
+  store_local_ad_active?: boolean | null;
+};
+
+type StoreSubscriptionAdminRow = {
+  user_id: string;
+  plan: string | null;
+  status: string | null;
+  expires_at: string | null;
+};
+
+type StoreLocalAdAdminRow = {
+  store_user_id: string;
+  status: string | null;
+  expires_at: string | null;
 };
 
 type AdminListing = {
@@ -131,6 +166,8 @@ type AdminEstimateRequest = {
   id: number;
   user_id: string | null;
   category: string;
+  applicant_name: string | null;
+  applicant_phone: string | null;
   region: string | null;
   address: string | null;
   title: string;
@@ -139,6 +176,26 @@ type AdminEstimateRequest = {
   fallback_destination: string | null;
   preferred_store_user_id: string | null;
   assigned_store_user_id: string | null;
+  created_at: string;
+};
+
+type AdminAuthActivityLog = {
+  id: number;
+  user_id: string;
+  event_type: string;
+  ip_address: string | null;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  timezone: string | null;
+  platform: string | null;
+  app_version: string | null;
+  device_name: string | null;
+  os_name: string | null;
+  os_version: string | null;
+  user_agent: string | null;
   created_at: string;
 };
 
@@ -218,6 +275,17 @@ function isVerifiedStoreUser(item: AdminUser) {
   return item.user_type === 'store' && !!item.business_verified;
 }
 
+function isLocalAdStoreUser(item: AdminUser) {
+  return isVerifiedStoreUser(item) && item.store_local_ad_active === true;
+}
+
+function getStorePlanLabel(plan?: string | null) {
+  if (plan === 'premium') return '프리미엄';
+  if (plan === 'basic') return '베이직';
+  if (plan === 'partner') return '파트너';
+  return '무료';
+}
+
 function getUserStatusLabel(item: AdminUser) {
   if (isDeletionPendingUser(item)) return '탈퇴 대기';
   if (isUserRestricted(item)) return '이용 제한';
@@ -250,6 +318,69 @@ function formatAdminDate(value?: string | null) {
   });
 }
 
+function formatAdminDateOnly(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return date.toLocaleDateString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+function formatAdminDateInput(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatEventPeriod(item: EventItem) {
+  const startText = formatAdminDateOnly(item.starts_at);
+  const endText = formatAdminDateOnly(item.ends_at);
+
+  if (startText && endText) return `${startText} - ${endText}`;
+  if (startText) return `${startText} 시작`;
+  if (endText) return `${endText}까지`;
+  return '상시';
+}
+
+function getEventStatusLabel(item: EventItem) {
+  if (!item.is_published) return '비공개';
+
+  const now = Date.now();
+  const startsAt = item.starts_at ? new Date(item.starts_at).getTime() : null;
+  const endsAt = item.ends_at ? new Date(item.ends_at).getTime() : null;
+
+  if (startsAt && startsAt > now) return '예정';
+  if (endsAt && endsAt < now) return '종료';
+  return '진행중';
+}
+
+function normalizeEventDateInput(value: string, fallbackTime: 'start' | 'end') {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const normalized =
+    /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+      ? `${trimmed}T${fallbackTime === 'start' ? '00:00:00' : '23:59:59'}+09:00`
+      : trimmed;
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) return undefined;
+
+  return date.toISOString();
+}
+
 function isWithinDateFilter(createdAt: string, filter: DateFilter) {
   if (filter === 'all') return true;
 
@@ -277,6 +408,23 @@ function getDateFilterLabel(filter: DateFilter) {
   return '전체 날짜';
 }
 
+function getAuthActivityEventLabel(eventType: string) {
+  if (eventType === 'login') return '로그인';
+  if (eventType === 'logout') return '로그아웃';
+  return eventType;
+}
+
+function getAuthActivityLocationText(item: AdminAuthActivityLog) {
+  const location = [item.country, item.region, item.city].filter(Boolean).join(' ');
+  if (location) return location;
+
+  if (item.latitude != null && item.longitude != null) {
+    return `${item.latitude.toFixed(4)}, ${item.longitude.toFixed(4)}`;
+  }
+
+  return '위치 정보 없음';
+}
+
 function isListingHidden(item: AdminListing) {
   return item.status === 'hidden';
 }
@@ -297,16 +445,27 @@ export default function AdminScreen() {
   const [adminName, setAdminName] = useState('');
 
   const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [listings, setListings] = useState<AdminListing[]>([]);
   const [storeRequests, setStoreRequests] = useState<StoreVerificationRequest[]>([]);
   const [estimateRequests, setEstimateRequests] = useState<AdminEstimateRequest[]>([]);
   const [verifiedStores, setVerifiedStores] = useState<VerifiedStoreOption[]>([]);
+  const [authActivityLogs, setAuthActivityLogs] = useState<AdminAuthActivityLog[]>([]);
 
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
   const [noticePublished, setNoticePublished] = useState(true);
+  const [editingEventId, setEditingEventId] = useState<number | null>(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventSummary, setEventSummary] = useState('');
+  const [eventContent, setEventContent] = useState('');
+  const [eventImageUrl, setEventImageUrl] = useState('');
+  const [eventStartsAt, setEventStartsAt] = useState('');
+  const [eventEndsAt, setEventEndsAt] = useState('');
+  const [eventSortOrder, setEventSortOrder] = useState('0');
+  const [eventPublished, setEventPublished] = useState(true);
 
   const [viewModes, setViewModes] = useState<AdminViewModes>({
   reports: 'grid',
@@ -354,9 +513,7 @@ const goToListingDetail = (listingId: number) => {
               ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
               : error.message
           );
-        } else {
-          console.log('만료 삭제 정리 실패:', error.message);
-        }
+        } else {        }
         return 0;
       }
 
@@ -378,32 +535,39 @@ const goToListingDetail = (listingId: number) => {
   }, []);
 
   const refreshExpiredUserRestrictions = useCallback(async () => {
-    const { error } = await supabase.rpc('admin_refresh_expired_user_restrictions');
-    if (error) {
-      console.log('만료 이용제한 정리 실패:', error.message);
-    }
-  }, []);
+    const { error } = await supabase.rpc('admin_refresh_expired_user_restrictions');  }, []);
 
   const loadAdminData = useCallback(async () => {
     await Promise.all([
       runExpiredListingCleanup(false),
       refreshExpiredUserRestrictions(),
     ]);
+    const authActivityRetentionStart = new Date(
+      Date.now() - 90 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     const [
       noticeResult,
+      eventResult,
       reportResult,
       userResult,
       listingResult,
       storeRequestResult,
       estimateRequestResult,
       verifiedStoreResult,
+      authActivityResult,
     ] = await Promise.all([
       supabase
         .from('notices')
         .select('id, title, content, is_published, created_at')
         .order('created_at', { ascending: false })
         .limit(50),
+      supabase
+        .from('support_events')
+        .select('id, title, summary, content, image_url, is_published, starts_at, ends_at, sort_order, created_at, updated_at')
+        .order('sort_order', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(80),
       supabase
         .from('reports')
         .select('id, reporter_id, target_user_id, reason, content, status, created_at')
@@ -466,7 +630,7 @@ const goToListingDetail = (listingId: number) => {
       supabase
         .from('estimate_requests')
         .select(
-          'id, user_id, category, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
+          'id, user_id, category, applicant_name, applicant_phone, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
         )
         .order('created_at', { ascending: false })
         .limit(80),
@@ -477,9 +641,41 @@ const goToListingDetail = (listingId: number) => {
         .eq('business_verified', true)
         .order('display_name', { ascending: true })
         .limit(80),
+      supabase
+        .from('auth_activity_logs')
+        .select(
+          [
+            'id',
+            'user_id',
+            'event_type',
+            'ip_address',
+            'country',
+            'region',
+            'city',
+            'latitude',
+            'longitude',
+            'timezone',
+            'platform',
+            'app_version',
+            'device_name',
+            'os_name',
+            'os_version',
+            'user_agent',
+            'created_at',
+          ].join(', ')
+        )
+        .gte('created_at', authActivityRetentionStart)
+        .order('created_at', { ascending: false })
+        .limit(200),
     ]);
 
     if (noticeResult.error) throw noticeResult.error;
+    if (
+      eventResult.error &&
+      !['42P01', 'PGRST116', 'PGRST200', 'PGRST205'].includes(eventResult.error.code || '')
+    ) {
+      throw eventResult.error;
+    }
     if (reportResult.error) throw reportResult.error;
     if (userResult.error) throw userResult.error;
     if (listingResult.error) throw listingResult.error;
@@ -490,10 +686,78 @@ const goToListingDetail = (listingId: number) => {
       throw estimateRequestResult.error;
     }
     if (verifiedStoreResult.error) throw verifiedStoreResult.error;
+    if (
+      authActivityResult.error &&
+      !['42P01', 'PGRST116', 'PGRST200', 'PGRST205'].includes(authActivityResult.error.code || '')
+    ) {
+      throw authActivityResult.error;
+    }
+
+    const rawUsers = (userResult.data || []) as AdminUser[];
+    const userIds = rawUsers.map((item) => item.id);
+    let subscriptionMap = new Map<string, StoreSubscriptionAdminRow>();
+    let localAdMap = new Map<string, StoreLocalAdAdminRow>();
+
+    if (userIds.length > 0) {
+      const [subscriptionResult, localAdResult] = await Promise.all([
+        supabase
+          .from('store_subscriptions')
+          .select('user_id, plan, status, expires_at')
+          .in('user_id', userIds),
+        supabase
+          .from('store_local_ads')
+          .select('store_user_id, status, expires_at')
+          .in('store_user_id', userIds)
+          .eq('status', 'active'),
+      ]);
+
+      const { data: subscriptionData, error: subscriptionError } = subscriptionResult;
+
+      if (
+        subscriptionError &&
+        !['42P01', 'PGRST116', 'PGRST200', 'PGRST205'].includes(subscriptionError.code || '')
+      ) {      } else {
+        subscriptionMap = new Map(
+          ((subscriptionData || []) as StoreSubscriptionAdminRow[]).map((item) => [
+            item.user_id,
+            item,
+          ])
+        );
+      }
+
+      if (
+        localAdResult.error &&
+        !['42P01', 'PGRST116', 'PGRST200', 'PGRST205'].includes(localAdResult.error.code || '')
+      ) {      } else {
+        localAdMap = new Map(
+          ((localAdResult.data || []) as StoreLocalAdAdminRow[]).map((item) => [
+            item.store_user_id,
+            item,
+          ])
+        );
+      }
+    }
 
     setNotices((noticeResult.data || []) as NoticeItem[]);
+    setEvents(eventResult.error ? [] : ((eventResult.data || []) as EventItem[]));
     setReports((reportResult.data || []) as ReportItem[]);
-    setUsers((userResult.data || []) as AdminUser[]);
+    setUsers(
+      rawUsers.map((item) => {
+        const subscription = subscriptionMap.get(item.id);
+        const localAd = localAdMap.get(item.id);
+        const localAdActive =
+          !!localAd &&
+          (localAd.expires_at == null || new Date(localAd.expires_at).getTime() > Date.now());
+        return {
+          ...item,
+          store_subscription_plan:
+            subscription?.plan || (isVerifiedStoreUser(item) ? 'premium' : 'free'),
+          store_subscription_status: subscription?.status || 'active',
+          store_subscription_expires_at: subscription?.expires_at || null,
+          store_local_ad_active: localAdActive,
+        };
+      })
+    );
     setListings((listingResult.data || []) as AdminListing[]);
     setStoreRequests(
       storeRequestResult.error
@@ -506,6 +770,11 @@ const goToListingDetail = (listingId: number) => {
         : ((estimateRequestResult.data || []) as AdminEstimateRequest[])
     );
     setVerifiedStores((verifiedStoreResult.data || []) as VerifiedStoreOption[]);
+    setAuthActivityLogs(
+      authActivityResult.error
+        ? []
+        : ((authActivityResult.data || []) as unknown as AdminAuthActivityLog[])
+    );
   }, [refreshExpiredUserRestrictions, runExpiredListingCleanup]);
 
   const loadAdmin = useCallback(async () => {
@@ -536,9 +805,7 @@ const goToListingDetail = (listingId: number) => {
       setUnauthorized(false);
       setAdminName(profile.display_name || profile.email || '관리자');
       await loadAdminData();
-    } catch (error: any) {
-      console.log('관리자 화면 로드 실패:', error);
-      showAdminAlert('관리자 화면', error?.message || '관리자 정보를 불러오지 못했습니다.');
+    } catch (error: any) {      showAdminAlert('관리자 화면', error?.message || '관리자 정보를 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
@@ -599,6 +866,119 @@ const goToListingDetail = (listingId: number) => {
     if (error) {
       showAdminAlert('공지사항 삭제 실패', error.message);
       return;
+    }
+
+    await loadAdminData();
+  };
+
+  const resetEventForm = () => {
+    setEditingEventId(null);
+    setEventTitle('');
+    setEventSummary('');
+    setEventContent('');
+    setEventImageUrl('');
+    setEventStartsAt('');
+    setEventEndsAt('');
+    setEventSortOrder('0');
+    setEventPublished(true);
+  };
+
+  const saveEvent = async () => {
+    const title = eventTitle.trim();
+    const content = eventContent.trim();
+    const sortOrder = Number(eventSortOrder.trim() || '0');
+    const startsAt = normalizeEventDateInput(eventStartsAt, 'start');
+    const endsAt = normalizeEventDateInput(eventEndsAt, 'end');
+
+    if (!title || !content) {
+      showAdminAlert('이벤트', '제목과 내용을 입력해 주세요.');
+      return;
+    }
+
+    if (!Number.isFinite(sortOrder)) {
+      showAdminAlert('이벤트', '정렬순서는 숫자로 입력해 주세요.');
+      return;
+    }
+
+    if (startsAt === undefined) {
+      showAdminAlert('이벤트', '시작일을 다시 확인해 주세요. 예: 2026-09-09');
+      return;
+    }
+
+    if (endsAt === undefined) {
+      showAdminAlert('이벤트', '종료일을 다시 확인해 주세요. 예: 2026-09-30');
+      return;
+    }
+
+    if (startsAt && endsAt && new Date(startsAt).getTime() > new Date(endsAt).getTime()) {
+      showAdminAlert('이벤트', '종료일은 시작일보다 빠를 수 없습니다.');
+      return;
+    }
+
+    const payload = {
+      title,
+      summary: eventSummary.trim() || null,
+      content,
+      image_url: eventImageUrl.trim() || null,
+      is_published: eventPublished,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      sort_order: sortOrder,
+    };
+
+    const { error } = editingEventId
+      ? await supabase.from('support_events').update(payload).eq('id', editingEventId)
+      : await supabase.from('support_events').insert(payload);
+
+    if (error) {
+      showAdminAlert(editingEventId ? '이벤트 수정 실패' : '이벤트 등록 실패', error.message);
+      return;
+    }
+
+    resetEventForm();
+    await loadAdminData();
+  };
+
+  const startEditingEvent = (event: EventItem) => {
+    setEditingEventId(event.id);
+    setEventTitle(event.title);
+    setEventSummary(event.summary || '');
+    setEventContent(event.content);
+    setEventImageUrl(event.image_url || '');
+    setEventStartsAt(formatAdminDateInput(event.starts_at));
+    setEventEndsAt(formatAdminDateInput(event.ends_at));
+    setEventSortOrder(String(event.sort_order ?? 0));
+    setEventPublished(!!event.is_published);
+    setActiveTab('events');
+  };
+
+  const toggleEventPublished = async (event: EventItem) => {
+    const { error } = await supabase
+      .from('support_events')
+      .update({ is_published: !event.is_published })
+      .eq('id', event.id);
+
+    if (error) {
+      showAdminAlert('이벤트 공개 변경 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const deleteEvent = async (event: EventItem) => {
+    const ok = await confirmAdminAction('이벤트 삭제', `"${event.title}" 이벤트를 삭제할까요?`);
+    if (!ok) return;
+
+    const { error } = await supabase.from('support_events').delete().eq('id', event.id);
+
+    if (error) {
+      showAdminAlert('이벤트 삭제 실패', error.message);
+      return;
+    }
+
+    if (editingEventId === event.id) {
+      resetEventForm();
     }
 
     await loadAdminData();
@@ -702,6 +1082,82 @@ const goToListingDetail = (listingId: number) => {
 
     if (error) {
       showAdminAlert('가게 인증 취소 실패', error.message);
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const setStoreSubscriptionPlan = async (
+    item: AdminUser,
+    nextPlan: 'free' | 'basic' | 'premium'
+  ) => {
+    if (!isVerifiedStoreUser(item)) {
+      showAdminAlert('가게 요금제', '가게 인증 완료 계정에만 요금제를 적용할 수 있습니다.');
+      return;
+    }
+
+    if (item.store_subscription_plan === nextPlan) return;
+
+    const nextLabel = getStorePlanLabel(nextPlan);
+    const ok = await confirmAdminAction(
+      '가게 요금제 변경',
+      `${item.display_name || item.email || item.id} 계정을 ${nextLabel} 플랜으로 변경할까요?`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_set_store_subscription', {
+      p_store_user_id: item.id,
+      p_plan: nextPlan,
+      p_status: 'active',
+      p_expires_at: null,
+    });
+
+    if (error) {
+      showAdminAlert(
+        '가게 요금제 변경 실패',
+        error.message.includes('function')
+          ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
+          : error.message
+      );
+      return;
+    }
+
+    await loadAdminData();
+  };
+
+  const toggleStoreLocalAd = async (item: AdminUser) => {
+    if (!isVerifiedStoreUser(item)) {
+      showAdminAlert('지역광고', '가게 인증 완료 계정에만 지역광고를 적용할 수 있습니다.');
+      return;
+    }
+
+    const enabled = isLocalAdStoreUser(item);
+    const ok = await confirmAdminAction(
+      enabled ? '지역광고 해제' : '지역광고 적용',
+      `${item.display_name || item.email || item.id} 계정의 지역광고를 ${
+        enabled ? '해제할까요?' : '적용할까요?'
+      }`
+    );
+
+    if (!ok) return;
+
+    const { error } = await supabase.rpc('admin_set_store_local_ad', {
+      p_store_user_id: item.id,
+      p_status: enabled ? 'inactive' : 'active',
+      p_region_name: null,
+      p_category: null,
+      p_expires_at: null,
+    });
+
+    if (error) {
+      showAdminAlert(
+        '지역광고 변경 실패',
+        error.message.includes('function')
+          ? '새 Supabase 마이그레이션을 먼저 적용해 주세요.'
+          : error.message
+      );
       return;
     }
 
@@ -975,12 +1431,14 @@ const filteredStoreRequests = useMemo(() => {
 
   const stats = [
     { label: '공지', value: notices.length },
+    { label: '이벤트', value: events.filter((item) => item.is_published).length },
     { label: '신고', value: reports.filter((item) => item.status !== 'reviewed').length },
     { label: '가게인증', value: storeRequests.filter((item) => item.status === 'pending').length },
     {
       label: '견적문의',
       value: estimateRequests.filter((item) => !item.assigned_store_user_id).length,
     },
+    { label: '접속기록', value: authActivityLogs.length },
     { label: '사용자', value: users.length },
     { label: '게시글', value: listings.length },
   ];
@@ -1023,9 +1481,11 @@ const filteredStoreRequests = useMemo(() => {
           {[
             ['overview', '요약'],
             ['notices', '공지'],
+            ['events', '이벤트'],
             ['reports', '신고'],
             ['stores', '가게인증'],
             ['estimates', '견적'],
+            ['security', '접속기록'],
             ['users', '사용자'],
             ['listings', '게시글'],
           ].map(([key, label]) => (
@@ -1091,6 +1551,105 @@ const filteredStoreRequests = useMemo(() => {
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.dangerBtn} onPress={() => deleteNotice(notice)}>
+                    <Text style={styles.dangerText}>삭제</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {activeTab === 'events' ? (
+          <View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>{editingEventId ? '이벤트 수정' : '이벤트 등록'}</Text>
+              <Text style={styles.desc}>
+                공개된 이벤트는 내정보 &gt; 고객지원 &gt; 이벤트에서 노출됩니다.
+              </Text>
+              <TextInput
+                style={styles.input}
+                placeholder="제목"
+                value={eventTitle}
+                onChangeText={setEventTitle}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="요약"
+                value={eventSummary}
+                onChangeText={setEventSummary}
+              />
+              <TextInput
+                style={[styles.input, styles.textarea]}
+                placeholder="내용"
+                value={eventContent}
+                onChangeText={setEventContent}
+                multiline
+                textAlignVertical="top"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="이미지 URL"
+                value={eventImageUrl}
+                onChangeText={setEventImageUrl}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="시작일 예: 2026-09-09"
+                value={eventStartsAt}
+                onChangeText={setEventStartsAt}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="종료일 예: 2026-09-30"
+                value={eventEndsAt}
+                onChangeText={setEventEndsAt}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="정렬순서. 숫자가 높을수록 상단"
+                value={eventSortOrder}
+                onChangeText={setEventSortOrder}
+                keyboardType="number-pad"
+              />
+              <View style={styles.switchRow}>
+                <Text style={styles.itemText}>공개</Text>
+                <Switch value={eventPublished} onValueChange={setEventPublished} />
+              </View>
+              <TouchableOpacity style={styles.primaryBtn} onPress={saveEvent}>
+                <Text style={styles.primaryText}>{editingEventId ? '이벤트 수정' : '이벤트 등록'}</Text>
+              </TouchableOpacity>
+              {editingEventId ? (
+                <TouchableOpacity style={styles.secondaryBtn} onPress={resetEventForm}>
+                  <Text style={styles.secondaryText}>수정 취소</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+
+            {events.map((event) => (
+              <View key={event.id} style={styles.card}>
+                <Text style={styles.cardTitle}>{event.title}</Text>
+                <Text style={styles.desc}>
+                  {getEventStatusLabel(event)} · {formatEventPeriod(event)} · 정렬 {event.sort_order ?? 0}
+                </Text>
+                {event.summary ? <Text style={styles.itemText}>{event.summary}</Text> : null}
+                <Text style={styles.metaText} numberOfLines={2}>
+                  {event.content}
+                </Text>
+                {event.image_url ? (
+                  <Text style={styles.metaText} numberOfLines={1}>
+                    이미지: {event.image_url}
+                  </Text>
+                ) : null}
+                <View style={styles.actionRow}>
+                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => startEditingEvent(event)}>
+                    <Text style={styles.secondaryText}>수정</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => toggleEventPublished(event)}>
+                    <Text style={styles.secondaryText}>{event.is_published ? '비공개' : '공개'}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.dangerBtn} onPress={() => deleteEvent(event)}>
                     <Text style={styles.dangerText}>삭제</Text>
                   </TouchableOpacity>
                 </View>
@@ -1321,7 +1880,9 @@ const filteredStoreRequests = useMemo(() => {
             #{item.id} · {item.category} · {new Date(item.created_at).toLocaleString()}
           </Text>
           <Text style={styles.metaText}>지역: {[item.region, item.address].filter(Boolean).join(' ') || '-'}</Text>
-          <Text style={styles.metaText}>문의자: {item.user_id || '-'}</Text>
+          <Text style={styles.metaText}>
+            문의자: {item.applicant_name || item.user_id || '-'} · {item.applicant_phone || '전화번호 미입력'}
+          </Text>
           <Text style={styles.metaText}>
             배정 상태: {assignedStore ? assignedStore.display_name || assignedStore.id : '관리자 배정 대기 / 디자인위쇼'}
           </Text>
@@ -1355,6 +1916,48 @@ const filteredStoreRequests = useMemo(() => {
               );
             })}
           </ScrollView>
+        </View>
+      );
+    })}
+  </View>
+) : null}
+
+        {activeTab === 'security' ? (
+  <View>
+    <View style={styles.toolCard}>
+      <Text style={styles.toolTitle}>최근 90일 접속기록 {authActivityLogs.length}건</Text>
+      <Text style={styles.desc}>
+        IP와 위치는 서버가 받은 요청 헤더 기준입니다. 위치 헤더가 없는 접속은 IP와 기기 정보만 표시됩니다.
+      </Text>
+    </View>
+
+    {authActivityLogs.map((item) => {
+      const user = users.find((userItem) => userItem.id === item.user_id);
+      const userText = user?.display_name || user?.email || item.user_id;
+      const deviceText = [
+        item.platform,
+        item.device_name,
+        [item.os_name, item.os_version].filter(Boolean).join(' '),
+        item.app_version ? `앱 ${item.app_version}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
+      return (
+        <View key={item.id} style={styles.card}>
+          <Text style={styles.cardTitle}>{getAuthActivityEventLabel(item.event_type)}</Text>
+          <Text style={styles.desc}>{new Date(item.created_at).toLocaleString()}</Text>
+          <Text style={styles.metaText}>계정: {userText}</Text>
+          <Text style={styles.metaText}>사용자 ID: {item.user_id}</Text>
+          <Text style={styles.metaText}>IP: {item.ip_address || 'IP 정보 없음'}</Text>
+          <Text style={styles.metaText}>위치: {getAuthActivityLocationText(item)}</Text>
+          <Text style={styles.metaText}>시간대: {item.timezone || '-'}</Text>
+          <Text style={styles.metaText}>기기: {deviceText || '-'}</Text>
+          {item.user_agent ? (
+            <Text style={styles.metaText} numberOfLines={3}>
+              User-Agent: {item.user_agent}
+            </Text>
+          ) : null}
         </View>
       );
     })}
@@ -1422,6 +2025,13 @@ const filteredStoreRequests = useMemo(() => {
           <Text style={styles.metaText}>
             가게 인증: {item.business_verified ? '인증완료' : item.store_verification_status || 'none'}
           </Text>
+          {isVerifiedStoreUser(item) ? (
+            <Text style={styles.metaText}>
+              가게 플랜: {getStorePlanLabel(item.store_subscription_plan)} ·{' '}
+              {item.store_subscription_status || 'active'} · 지역광고{' '}
+              {isLocalAdStoreUser(item) ? '사용중' : '미사용'}
+            </Text>
+          ) : null}
           {item.business_number ? (
             <Text style={styles.metaText}>사업자번호: {item.business_number}</Text>
           ) : null}
@@ -1493,12 +2103,47 @@ const filteredStoreRequests = useMemo(() => {
           </TouchableOpacity>
 
           {isVerifiedStoreUser(item) ? (
-            <TouchableOpacity
-              style={styles.dangerBtn}
-              onPress={() => revokeStoreVerification(item)}
-            >
-              <Text style={styles.dangerText}>가게인증 취소</Text>
-            </TouchableOpacity>
+            <>
+              <View style={styles.storePlanButtonRow}>
+                {(['free', 'basic', 'premium'] as const).map((plan) => {
+                  const selected = item.store_subscription_plan === plan;
+
+                  return (
+                    <TouchableOpacity
+                      key={plan}
+                      style={[styles.storePlanButton, selected && styles.storePlanButtonActive]}
+                      onPress={() => setStoreSubscriptionPlan(item, plan)}
+                      disabled={selected}
+                    >
+                      <Text
+                        style={[
+                          styles.storePlanButtonText,
+                          selected && styles.storePlanButtonTextActive,
+                        ]}
+                      >
+                        {getStorePlanLabel(plan)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TouchableOpacity
+                style={isLocalAdStoreUser(item) ? styles.secondaryBtn : styles.approveBtn}
+                onPress={() => toggleStoreLocalAd(item)}
+              >
+                <Text style={isLocalAdStoreUser(item) ? styles.secondaryText : styles.approveText}>
+                  {isLocalAdStoreUser(item) ? '지역광고 해제' : '지역광고 적용'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.dangerBtn}
+                onPress={() => revokeStoreVerification(item)}
+              >
+                <Text style={styles.dangerText}>가게인증 취소</Text>
+              </TouchableOpacity>
+            </>
           ) : null}
         </View>
       ))}
@@ -1801,6 +2446,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 12,
+  },
+  storePlanButtonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  storePlanButton: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  storePlanButtonActive: {
+    borderColor: '#166534',
+    backgroundColor: '#ecfdf5',
+  },
+  storePlanButtonText: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  storePlanButtonTextActive: {
+    color: '#166534',
   },
   primaryBtn: {
     marginTop: 14,

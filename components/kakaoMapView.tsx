@@ -1,3 +1,4 @@
+// 카카오 지도 WebView: 네이티브에서 웹 지도를 임베드해 마커를 렌더링하는 실험/보조 컴포넌트다.
 import { useMemo } from 'react';
 import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -165,9 +166,7 @@ export default function KakaoMapView({ items, onMarkerPress }: Props) {
                 onMarkerPress?.(payload.items[0]);
               }
             }
-          } catch (e) {
-            console.log('카카오 지도 메시지 파싱 실패:', e);
-          }
+          } catch {          }
         }}
       />
     </View>

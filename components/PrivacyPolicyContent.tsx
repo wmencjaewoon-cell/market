@@ -1,3 +1,4 @@
+// 개인정보처리방침 공용 콘텐츠: 공개 라우트와 내정보 라우트가 같은 문서를 사용한다.
 import type { ReactNode } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 

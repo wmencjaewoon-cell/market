@@ -1,3 +1,4 @@
+// Expo 템플릿용 모달 샘플 화면. 실제 서비스 모달과 헷갈리면 제거 후보로 검토한다.
 import { Link } from 'expo-router';
 import { StyleSheet } from 'react-native';
 

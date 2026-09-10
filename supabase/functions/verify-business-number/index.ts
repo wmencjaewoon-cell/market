@@ -17,6 +17,20 @@ const jsonResponse = (body: unknown, status = 200) => {
   });
 };
 
+function isValidKoreanBusinessNumber(value: string) {
+  const digits = value.replace(/[^0-9]/g, "");
+  if (digits.length !== 10) return false;
+
+  const weights = [1, 3, 7, 1, 3, 7, 1, 3];
+  const sum =
+    weights.reduce((acc, weight, index) => acc + Number(digits[index]) * weight, 0) +
+    Math.floor((Number(digits[8]) * 5) / 10) +
+    ((Number(digits[8]) * 5) % 10);
+  const checkDigit = (10 - (sum % 10)) % 10;
+
+  return checkDigit === Number(digits[9]);
+}
+
 serve(async (req) => {
   try {
     if (req.method === "OPTIONS") {
@@ -44,6 +58,13 @@ serve(async (req) => {
     if (cleanNumber.length !== 10) {
       return jsonResponse(
         { valid: false, error: "사업자등록번호는 10자리여야 합니다." },
+        400
+      );
+    }
+
+    if (!isValidKoreanBusinessNumber(cleanNumber)) {
+      return jsonResponse(
+        { valid: false, error: "유효한 사업자등록번호 형식이 아닙니다." },
         400
       );
     }

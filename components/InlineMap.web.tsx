@@ -1,15 +1,21 @@
-import { Text, View } from 'react-native';
+// 웹 인라인 지도 대체 UI: 실제 지도 대신 좌표 확인 버튼 역할을 한다.
+import { Pressable, Text } from 'react-native';
 
 type Props = {
   latitude: number;
   longitude: number;
+  onPress?: () => void;
 };
 
-export default function InlineMap({ latitude, longitude }: Props) {
+export default function InlineMap({ latitude, longitude, onPress }: Props) {
   if (!latitude || !longitude) return null;
 
   return (
-    <View
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? '지도 크게 보기' : undefined}
       style={{
         height: 180,
         borderRadius: 14,
@@ -32,6 +38,6 @@ export default function InlineMap({ latitude, longitude }: Props) {
       >
         지도 크게 보기를 눌러 거래 희망 장소를 확인할 수 있어요.
       </Text>
-    </View>
+    </Pressable>
   );
 }

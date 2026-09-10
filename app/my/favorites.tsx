@@ -1,7 +1,12 @@
+// 관심 목록 화면: 사용자가 찜한 게시글을 최신 상태와 프리미엄 배지까지 합쳐 보여준다.
 import { useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text } from 'react-native';
 import MaterialCard from '../../components/MaterialCard';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+  fetchStorePublicExposureMap,
+  mergeStoreExposureIntoProfile,
+} from '../../lib/storeExposure';
 import { supabase } from '../../lib/supabase';
 
 export default function FavoritesScreen() {
@@ -41,23 +46,33 @@ export default function FavoritesScreen() {
       `)
       .eq('user_id', user?.id);
 
-    if (error) {
-      console.log('관심목록 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
-    const favoriteListings =
+    const rawFavoriteListings =
       data
         ?.map((row: any) => row.listings)
-        .filter(Boolean)
+        .filter(Boolean) || [];
+    const exposureMap = await fetchStorePublicExposureMap(
+      rawFavoriteListings
+        .filter((listing: any) => listing.profiles?.user_type === 'store' && listing.profiles?.business_verified)
+        .map((listing: any) => listing.author_id)
+    );
+
+    const favoriteListings =
+      rawFavoriteListings
         .map((listing: any) => ({
           ...listing,
+          profiles: mergeStoreExposureIntoProfile(
+            listing.profiles,
+            exposureMap.get(listing.author_id)
+          ),
           favorites_count: listing.favorites_count ?? 0,
           chats_count: listing.chats_count ?? 0,
           listing_images: [...(listing.listing_images || [])].sort(
             (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
           ),
-        })) || [];
+        }));
 
     setItems(favoriteListings);
   };

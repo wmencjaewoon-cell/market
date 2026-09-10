@@ -184,6 +184,39 @@ serve(async (req) => {
       });
     }
 
+    const { data: limitRows, error: limitError } = await adminClient.rpc(
+      "get_store_subscription_limits",
+      { p_store_user_id: storeUserId },
+    );
+
+    if (limitError) {
+      return errorResponse("가게 요금제 제한을 확인하지 못했습니다.", 500, limitError.message);
+    }
+
+    const limits = Array.isArray(limitRows) ? limitRows[0] : limitRows;
+    const staffLimit =
+      limits?.staff_limit == null ? null : Number(limits.staff_limit);
+
+    if (staffLimit !== null) {
+      const { count: activeStaffCount, error: countError } = await adminClient
+        .from("store_staff_members")
+        .select("id", { count: "exact", head: true })
+        .eq("store_user_id", storeUserId)
+        .eq("status", "active");
+
+      if (countError) {
+        return errorResponse("직원 수를 확인하지 못했습니다.", 500, countError.message);
+      }
+
+      if ((activeStaffCount || 0) >= staffLimit) {
+        return errorResponse(
+          `현재 요금제에서는 직원 등록이 ${staffLimit}명까지 가능합니다.`,
+          403,
+          { staffLimit, activeStaffCount },
+        );
+      }
+    }
+
     const loginCode = `staff-${randomString(8).toLowerCase()}`;
     const loginId = `${loginCode}@staff.interior-market.wmenc.co.kr`;
     const password = `Im${randomString(10)}!7`;

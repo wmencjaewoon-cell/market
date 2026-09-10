@@ -1,3 +1,4 @@
+// 내 동네 관리 화면: 활동 지역과 반경 설정을 저장하고 홈 피드 필터 기준으로 사용한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useState } from 'react';

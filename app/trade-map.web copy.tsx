@@ -1,3 +1,4 @@
+// 예전 웹 지도 테스트 화면으로 보인다. 실제 웹 라우트는 app/trade-map.web.tsx를 우선 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';

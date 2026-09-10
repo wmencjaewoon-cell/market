@@ -1,3 +1,4 @@
+// 사용자/가게 공개 프로필: 판매자 정보, 가게 배지, 위치, 후기, 게시글을 보여준다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -15,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import StorePlanModal, { LocalAdStoreBadge, PremiumStoreBadge } from '../../../../components/StorePlanModal';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getProfileImageUrl } from '../../../../lib/profileImage';
@@ -26,9 +28,22 @@ import {
   getSellerPoints,
 } from '../../../../lib/sellerLevel';
 import { getStoreCategoryLabel } from '../../../../lib/storeCategories';
+import {
+  fetchStorePublicExposureMap,
+  hasLocalAdStoreProfile,
+  isPremiumStoreProfile,
+  mergeStoreExposureIntoProfile,
+} from '../../../../lib/storeExposure';
 import { supabase } from '../../../../lib/supabase';
 
 type ListingFilter = 'all' | 'selling' | 'done';
+
+function formatStoreAddress(address?: string | null, detailAddress?: string | null) {
+  return [address, detailAddress]
+    .map((value) => (value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
 
 function showProfileAlert(title: string, message = '') {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -66,6 +81,7 @@ export default function UserProfileScreen() {
 
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
   const [listingStats, setListingStats] = useState({
     total: 0,
     selling: 0,
@@ -89,7 +105,12 @@ export default function UserProfileScreen() {
       .single();
 
     if (!error && data) {
-      setProfile(data);
+      if (data.user_type === 'store' && data.business_verified) {
+        const exposureMap = await fetchStorePublicExposureMap([userId]);
+        setProfile(mergeStoreExposureIntoProfile(data, exposureMap.get(userId)));
+      } else {
+        setProfile(data);
+      }
     }
   };
 
@@ -139,9 +160,7 @@ export default function UserProfileScreen() {
     .select('id', { count: 'exact', head: true })
     .eq('target_user_id', userId);
 
-  if (error) {
-    console.log('후기 통계 조회 실패:', error);
-    return;
+  if (error) {    return;
   }
 
   setReviewStats({
@@ -151,6 +170,8 @@ export default function UserProfileScreen() {
 
   const profileImageUrl = getProfileImageUrl(profile?.avatar_path || profile?.avatar_url);
   const isVerifiedStore = profile?.user_type === 'store' && !!profile?.business_verified;
+  const isPremiumStore = isPremiumStoreProfile(profile);
+  const hasLocalAd = hasLocalAdStoreProfile(profile);
   const sellerFallbackPoints = reviewStats.count * 100;
   const sellerPoints = getSellerPoints(profile, sellerFallbackPoints);
   const sellerLevel = getSellerLevel(profile, sellerFallbackPoints);
@@ -161,6 +182,7 @@ export default function UserProfileScreen() {
     isVerifiedStore &&
     profile?.store_latitude != null &&
     profile?.store_longitude != null;
+  const storeDisplayAddress = formatStoreAddress(profile?.store_address, profile?.store_detail_address);
   const canCallStore =
     isVerifiedStore &&
     !!profile?.phone;
@@ -199,9 +221,7 @@ export default function UserProfileScreen() {
 
   try {
     await Linking.openURL(`tel:${phone}`);
-  } catch (e) {
-    console.log('전화 연결 실패:', e);
-    showProfileAlert('전화하기', '전화 앱을 열지 못했습니다.');
+  } catch {    showProfileAlert('전화하기', '전화 앱을 열지 못했습니다.');
   }
 };
 
@@ -213,8 +233,8 @@ export default function UserProfileScreen() {
       params: {
         lat: String(profile.store_latitude),
         lng: String(profile.store_longitude),
-        region: profile.store_address || '',
-        place: profile.store_address || profile.display_name || '가게 위치',
+        region: storeDisplayAddress || '',
+        place: storeDisplayAddress || profile.display_name || '가게 위치',
         title: '가게 위치',
       },
     } as any);
@@ -248,9 +268,7 @@ export default function UserProfileScreen() {
       }
     );
 
-    if (error) {
-      console.log('판매자 정보 차단 실패:', error);
-      showProfileAlert(
+    if (error) {      showProfileAlert(
         '차단 실패',
         error.message.includes('user_blocks')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -319,8 +337,21 @@ export default function UserProfileScreen() {
           {isVerifiedStore ? '가게 판매자' : '개인 판매자'}
         </Text>
 
-        {isVerifiedStore ? (
-          <Text style={styles.verifiedText}>가게인증완료</Text>
+        {isVerifiedStore || isPremiumStore || hasLocalAd ? (
+          <View style={styles.profileBadgeRow}>
+            {isVerifiedStore ? (
+              <Text style={styles.verifiedText}>가게인증완료</Text>
+            ) : null}
+            {hasLocalAd ? (
+              <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} />
+            ) : null}
+            {isPremiumStore ? (
+              <PremiumStoreBadge
+                label="프리미엄 인증 완료"
+                onPress={() => setPlanModalOpen(true)}
+              />
+            ) : null}
+          </View>
         ) : null}
 
         {isVerifiedStore ? (
@@ -353,15 +384,15 @@ export default function UserProfileScreen() {
           </View>
         ) : null}
 
-        {isVerifiedStore && (profile?.store_address || hasStoreLocation) ? (
+        {isVerifiedStore && (storeDisplayAddress || hasStoreLocation) ? (
           <View style={styles.storeLocationBox}>
             <View style={styles.storeLocationHeader}>
               <Ionicons name="location-outline" size={17} color={theme.primary} />
               <Text style={styles.storeLocationTitle}>가게 위치</Text>
             </View>
 
-            {profile?.store_address ? (
-              <Text style={styles.storeAddress}>{profile.store_address}</Text>
+            {storeDisplayAddress ? (
+              <Text style={styles.storeAddress}>{storeDisplayAddress}</Text>
             ) : null}
 
             {hasStoreLocation ? (
@@ -537,6 +568,14 @@ export default function UserProfileScreen() {
         </View>
       </TouchableWithoutFeedback>
     </Modal>
+    <StorePlanModal
+      visible={planModalOpen}
+      currentPlan={profile?.store_subscription_plan || (isPremiumStore ? 'premium' : 'free')}
+      isPremium={isPremiumStore}
+      hasLocalAd={hasLocalAd}
+      mode="public"
+      onClose={() => setPlanModalOpen(false)}
+    />
     </SafeAreaView>
   );
 }
@@ -614,7 +653,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
   },
   verifiedText: {
-    marginTop: 8,
     borderWidth: 1,
     borderColor: '#166534',
     borderRadius: 999,
@@ -625,6 +663,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     overflow: 'hidden',
+  },
+  profileBadgeRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
   },
   levelBox: {
     width: '100%',

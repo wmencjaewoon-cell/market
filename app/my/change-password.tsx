@@ -1,3 +1,4 @@
+// 비밀번호 변경 화면: 로그인 사용자가 현재 비밀번호 기반으로 새 비밀번호를 설정한다.
 import { router, Stack } from 'expo-router';
 import { useState } from 'react';
 import {

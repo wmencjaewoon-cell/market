@@ -1,5 +1,6 @@
 import { Session, User } from '@supabase/supabase-js';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { logAuthActivity, type AuthActivityEventType } from '../lib/authActivity';
 import { supabase } from '../lib/supabase';
 
 type AuthContextType = {
@@ -14,21 +15,39 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const lastActivityKeyRef = useRef<string | null>(null);
+
+  const logActivityOnce = useCallback((eventType: AuthActivityEventType, activeSession: Session | null) => {
+    if (!activeSession?.user?.id) return;
+
+    const tokenKey = activeSession.access_token?.slice(-16) || '';
+    const activityKey = `${eventType}:${activeSession.user.id}:${tokenKey}`;
+    if (lastActivityKeyRef.current === activityKey) return;
+
+    lastActivityKeyRef.current = activityKey;
+    void logAuthActivity(eventType);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session ?? null);
+      const nextSession = data.session ?? null;
+      setSession(nextSession);
       setIsReady(true);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      const nextSession = session ?? null;
+      setSession(nextSession);
+
+      if (event === 'SIGNED_IN') {
+        logActivityOnce('login', nextSession);
+      }
     });
 
     return () => {
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [logActivityOnce]);
 
   const value = useMemo(
     () => ({
@@ -36,6 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       isReady,
       signOut: async () => {
+        if (session) {
+          await logAuthActivity('logout');
+        }
+
+        try {
+          const { unregisterPushToken } = await import('../lib/notifications');
+          await unregisterPushToken();
+        } catch {        }
+
         setSession(null);
 
         try {

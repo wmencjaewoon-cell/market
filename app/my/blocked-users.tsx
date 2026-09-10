@@ -1,3 +1,4 @@
+// 차단 사용자 관리 화면: 내가 차단한 사용자를 조회하고 차단을 해제한다.
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -82,9 +83,7 @@ export default function BlockedUsersScreen() {
       .eq('blocker_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (blockError) {
-      console.log('차단 목록 조회 실패:', blockError);
-      showAlert('차단 목록', '차단한 사용자를 불러오지 못했습니다.');
+    if (blockError) {      showAlert('차단 목록', '차단한 사용자를 불러오지 못했습니다.');
       setLoading(false);
       return;
     }
@@ -103,9 +102,7 @@ export default function BlockedUsersScreen() {
       .select('id, display_name, email, avatar_path, avatar_url, user_type')
       .in('id', blockedIds);
 
-    if (profileError) {
-      console.log('차단 사용자 프로필 조회 실패:', profileError);
-      showAlert('차단 목록', '사용자 정보를 불러오지 못했습니다.');
+    if (profileError) {      showAlert('차단 목록', '사용자 정보를 불러오지 못했습니다.');
       setLoading(false);
       return;
     }
@@ -149,9 +146,7 @@ export default function BlockedUsersScreen() {
       .eq('blocker_id', user.id)
       .eq('blocked_id', target.id);
 
-    if (error) {
-      console.log('차단 해제 실패:', error);
-      showAlert('차단 해제', '차단을 해제하지 못했습니다.');
+    if (error) {      showAlert('차단 해제', '차단을 해제하지 못했습니다.');
       return;
     }
 

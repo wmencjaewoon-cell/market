@@ -1,3 +1,4 @@
+// 네이티브 반경 슬라이더: 동네 반경 설정에서 @react-native-community/slider를 사용한다.
 import Slider from '@react-native-community/slider';
 import React from 'react';
 

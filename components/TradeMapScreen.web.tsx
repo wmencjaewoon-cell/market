@@ -1,3 +1,4 @@
+// 웹 위치 상세 지도: 카카오 지도 대신 주소/좌표와 복사 액션을 제공하는 fallback 화면이다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams } from 'expo-router';
@@ -33,9 +34,7 @@ export default function TradeMapScreenWeb() {
       if (typeof window !== 'undefined') {
         window.alert('주소를 복사했습니다.');
       }
-    } catch (e) {
-      console.log('주소 복사 실패:', e);
-      if (typeof window !== 'undefined') {
+    } catch {      if (typeof window !== 'undefined') {
         window.alert('주소를 복사하지 못했습니다.');
       }
     }

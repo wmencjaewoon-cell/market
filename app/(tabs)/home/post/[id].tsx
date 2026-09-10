@@ -1,3 +1,4 @@
+// 게시글 상세 화면: 게시글 보기, 지도 확대, 채팅/전화, 끌어올리기, 관심 알림 진입을 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,6 +35,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ContactQrModal from '../../../../components/ContactQrModal';
 import InlineMap from '../../../../components/InlineMap';
+import { LocalAdStoreBadge, PremiumStoreBadge } from '../../../../components/StorePlanModal';
 import { useAuth } from '../../../../contexts/AuthContext';
 import { useAppTheme } from '../../../../hooks/use-app-theme';
 import { getOrCreateRoom } from '../../../../lib/chat';
@@ -46,7 +48,14 @@ import {
   getSellerLevelStyle,
   getSellerLevelTitle,
 } from '../../../../lib/sellerLevel';
+import {
+  fetchStorePublicExposureMap,
+  hasLocalAdStoreProfile,
+  isPremiumStoreProfile,
+  mergeStoreExposureIntoProfile,
+} from '../../../../lib/storeExposure';
 import { supabase } from '../../../../lib/supabase';
+import { useSingleFlightPress } from '../../../../lib/useSingleFlightPress';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const HEADER_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
@@ -86,6 +95,32 @@ function formatTimeAgo(dateString?: string) {
 
   const diffDay = Math.floor(diffHour / 24);
   return `${diffDay}일 전`;
+}
+
+function getKoreaDateKey(value?: string | Date | null) {
+  if (!value) return '';
+
+  const date = typeof value === 'string' ? new Date(value) : value;
+  const time = date.getTime();
+
+  if (!Number.isFinite(time)) return '';
+
+  return new Date(time + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function wasBumpedToday(lastBumpedAt?: string | null) {
+  return !!lastBumpedAt && getKoreaDateKey(lastBumpedAt) === getKoreaDateKey(new Date());
+}
+
+function getListingDisplayTime(item?: any | null) {
+  const bumpedAt = item?.last_bumped_at ? new Date(item.last_bumped_at).getTime() : NaN;
+  const createdAt = item?.created_at ? new Date(item.created_at).getTime() : NaN;
+
+  if (Number.isFinite(bumpedAt) && Number.isFinite(createdAt) && bumpedAt - createdAt > 60_000) {
+    return `끌올 ${formatTimeAgo(item.last_bumped_at)}`;
+  }
+
+  return formatTimeAgo(item?.created_at);
 }
 function getTradeStatusLabel(status?: string, category?: string) {
   const isShare = category === 'share';
@@ -316,6 +351,7 @@ export default function PostDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
   const theme = useAppTheme();
+  const runSinglePress = useSingleFlightPress();
   const backIconColor = theme.scheme === 'dark' ? '#fff' : theme.text;
   const isDark = theme.scheme === 'dark';
   const postBackground = isDark ? '#000' : theme.background;
@@ -414,6 +450,7 @@ export default function PostDetailScreen() {
   const [chatUsers, setChatUsers] = useState<any[]>([]);
   const [saleQuantityText, setSaleQuantityText] = useState('1');
   const [chatStarting, setChatStarting] = useState(false);
+  const [bumping, setBumping] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportContent, setReportContent] = useState('');
@@ -464,9 +501,7 @@ export default function PostDetailScreen() {
       .eq('id', listingId)
       .single();
 
-    if (error) {
-      console.log('게시글 조회 실패:', error);
-      return false;
+    if (error) {      return false;
     }
 
     if (!data) return false;
@@ -483,9 +518,17 @@ export default function PostDetailScreen() {
     const sortedImages = [...(data.listing_images || [])].sort(
       (a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
     );
+    const exposureMap =
+      data.profiles?.user_type === 'store' && data.profiles?.business_verified
+        ? await fetchStorePublicExposureMap([data.author_id])
+        : new Map();
 
     setItem({
       ...data,
+      profiles: mergeStoreExposureIntoProfile(
+        data.profiles,
+        exposureMap.get(data.author_id)
+      ),
       listing_images: sortedImages,
     });
 
@@ -500,6 +543,8 @@ export default function PostDetailScreen() {
   };
 
   const isOwner = user?.id === item?.author_id;
+  const bumpDoneToday = wasBumpedToday(item?.last_bumped_at);
+  const bumpDisabled = bumping || bumpDoneToday;
 
   const increaseViewCount = async () => {
     const listingId = Number(id);
@@ -510,9 +555,7 @@ export default function PostDetailScreen() {
       listing_id: listingId,
     });
 
-    if (error) {
-      console.log('조회수 증가 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setItem((prev: any) =>
@@ -532,9 +575,7 @@ export default function PostDetailScreen() {
       .select('*', { count: 'exact', head: true })
       .eq('listing_id', listingId);
 
-    if (error) {
-      console.log('관심 수 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setFavoriteCount(count ?? 0);
@@ -542,23 +583,28 @@ export default function PostDetailScreen() {
 
   const goToSellerProfile = () => {
     if (!item?.author_id) return;
-    router.push(`/(tabs)/home/user/${item.author_id}` as any);
+
+    runSinglePress(`seller-profile-${item.author_id}`, () =>
+      router.push(`/(tabs)/home/user/${item.author_id}` as any)
+    );
   };
 
-  const goToTradeMap = async () => {
+  const goToTradeMap = () => {
     if (item?.latitude == null || item?.longitude == null) return;
 
-    await logStoreInteraction('directions');
+    runSinglePress(`trade-map-${item.id}`, () => {
+      void logStoreInteraction('directions').catch((e) => {      });
 
-    router.push({
-      pathname: '/trade-map',
-      params: {
-        lat: String(item.latitude),
-        lng: String(item.longitude),
-        place: item.detail_location || '',
-        region: item.region || '',
-      },
-    } as any);
+      router.push({
+        pathname: '/trade-map',
+        params: {
+          lat: String(item.latitude),
+          lng: String(item.longitude),
+          place: item.detail_location || '',
+          region: item.region || '',
+        },
+      } as any);
+    }, 1400);
   };
 
   const fetchChatCount = async (listingId: number) => {
@@ -567,9 +613,7 @@ export default function PostDetailScreen() {
       .select('*', { count: 'exact', head: true })
       .eq('listing_id', listingId);
 
-    if (error) {
-      console.log('채팅 수 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setChatCount(count ?? 0);
@@ -588,9 +632,7 @@ export default function PostDetailScreen() {
       .eq('listing_id', listingId)
       .maybeSingle();
 
-    if (error) {
-      console.log('좋아요 여부 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     setLiked(!!data);
@@ -622,9 +664,7 @@ export default function PostDetailScreen() {
       .order('created_at', { ascending: false })
       .limit(40);
 
-    if (error) {
-      console.log('비슷한 물품 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     const scoredItems = (data || [])
@@ -669,6 +709,8 @@ export default function PostDetailScreen() {
 
   const isVerifiedStore =
     item?.profiles?.user_type === 'store' && !!item?.profiles?.business_verified;
+  const isPremiumStore = isPremiumStoreProfile(item?.profiles);
+  const hasLocalAd = hasLocalAdStoreProfile(item?.profiles);
   const sellerType = isVerifiedStore ? 'store' : 'personal';
   const sellerName = item?.profiles?.display_name ?? '알 수 없음';
   const publicPhone = sellerType === 'store' ? item?.profiles?.phone : null;
@@ -739,23 +781,11 @@ useEffect(() => {
 
   const handleChat = async () => {
   if (!item || chatStarting) return;
-
-  console.log('채팅하기 클릭', {
-    platform: Platform.OS,
-    itemId: item.id,
-    authorId: item.author_id,
-    userId: user?.id,
-  });
-
-  if (Platform.OS === 'web') {
-    console.log('웹이라 QR 모달 오픈');
-    setQrOpen(true);
+  if (Platform.OS === 'web') {    setQrOpen(true);
     return;
   }
 
-  if (!user) {
-    console.log('로그인 안됨 -> 로그인 페이지 이동');
-    router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+  if (!user) {    router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
     return;
   }
 
@@ -763,16 +793,12 @@ useEffect(() => {
     setChatStarting(true);
 
     const guard = await canChatToListing(item, user.id);
-    console.log('채팅 가능 여부:', guard);
-
     if (!guard.ok) {
       Alert.alert('채팅 제한', guard.reason || '채팅할 수 없습니다.');
       return;
     }
 
     const roomId = await getOrCreateRoom(item.id, item.author_id, user.id);
-    console.log('생성/조회된 roomId:', roomId);
-
     if (!roomId) {
       Alert.alert('채팅 오류', '채팅방을 만들지 못했습니다.');
       return;
@@ -780,9 +806,7 @@ useEffect(() => {
 
     await logStoreInteraction('chat');
     router.push(`/chat/${roomId}` as any);
-  } catch (e: any) {
-    console.log('채팅하기 실패:', e);
-    Alert.alert('채팅 오류', e?.message || '채팅방으로 이동하지 못했습니다.');
+  } catch (e: any) {    Alert.alert('채팅 오류', e?.message || '채팅방으로 이동하지 못했습니다.');
   } finally {
     setChatStarting(false);
   }
@@ -803,9 +827,7 @@ useEffect(() => {
     try {
       await logStoreInteraction('phone');
       await Linking.openURL(`tel:${phone}`);
-    } catch (e) {
-      console.log('전화 연결 실패:', e);
-    }
+    } catch {    }
   };
 
   const logStoreInteraction = async (interactionType: 'chat' | 'phone' | 'directions' | 'product_view') => {
@@ -826,7 +848,10 @@ useEffect(() => {
 
   const goToStoreDetail = () => {
     if (!item?.author_id) return;
-    router.push(`/store/${item.author_id}` as any);
+
+    runSinglePress(`store-detail-${item.author_id}`, () =>
+      router.push(`/store/${item.author_id}` as any)
+    );
   };
 
   const handleShare = async () => {
@@ -844,20 +869,75 @@ ${item.price_text || '가격 문의'}
 ${deepLink}`,
       url: deepLink,
     });
-  } catch (e) {
-    console.log('공유 실패:', e);
-  }
+  } catch {  }
 };
 
 const handleEdit = () => {
   if (!item || !isOwner) return;
 
-  router.push({
-    pathname: '/(tabs)/home/post/edit/[id]',
-    params: {
-      id: String(item.id),
-    },
-  } as any);
+  runSinglePress(`edit-listing-${item.id}`, () =>
+    router.push({
+      pathname: '/(tabs)/home/post/edit/[id]',
+      params: {
+        id: String(item.id),
+      },
+    } as any)
+  );
+};
+
+const handleBumpListing = async () => {
+  if (!item || !isOwner || bumping) return;
+
+  if (!user) {
+    router.push(`/login?redirect=/(tabs)/home/post/${item.id}` as any);
+    return;
+  }
+
+  if (item.status !== 'active') {
+    showPostAlert('UP하기', '거래중 게시글만 UP할 수 있습니다.');
+    return;
+  }
+
+  if (wasBumpedToday(item.last_bumped_at)) {
+    showPostAlert('UP하기', 'UP하기는 하루에 한 번만 가능합니다.');
+    return;
+  }
+
+  try {
+    setBumping(true);
+
+    const { data, error } = await supabase.rpc('bump_listing_once_per_day', {
+      p_listing_id: item.id,
+    });
+
+    if (error) {      showPostAlert(
+        'UP 실패',
+        error.message.includes('bump_listing_once_per_day') ||
+          error.message.includes('function')
+          ? 'Supabase SQL 설정이 필요합니다. listing_bump.sql을 실행해 주세요.'
+          : error.message || '게시글을 UP하지 못했습니다.'
+      );
+      return;
+    }
+
+    const nextItem = Array.isArray(data) ? data[0] : data;
+    const nextBumpedAt = nextItem?.last_bumped_at || new Date().toISOString();
+
+    setItem((prev: any) =>
+      prev
+        ? {
+            ...prev,
+            ...(nextItem || {}),
+            last_bumped_at: nextBumpedAt,
+          }
+        : prev
+    );
+
+    showPostAlert('UP 완료', '게시글이 목록 위로 올라갔습니다.');
+  } catch (e: any) {    showPostAlert('UP 실패', e?.message || '게시글을 UP하지 못했습니다.');
+  } finally {
+    setBumping(false);
+  }
 };
 
   const handleReport = async () => {
@@ -908,9 +988,7 @@ const handleEdit = () => {
       content: reportContent.trim() || item.title || null,
     });
 
-    if (error) {
-      console.log('게시글 신고 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '신고 실패',
         error.message.includes('reports')
           ? 'Supabase SQL 설정이 필요합니다. report_restrictions.sql을 실행해 주세요.'
@@ -953,9 +1031,7 @@ const handleEdit = () => {
       }
     );
 
-    if (error) {
-      console.log('게시글 숨기기 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '게시글 숨기기 실패',
         error.message.includes('hidden_listings')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -1008,9 +1084,7 @@ const handleEdit = () => {
       }
     );
 
-    if (error) {
-      console.log('작성자 차단 실패:', error);
-      showPostAlert(
+    if (error) {      showPostAlert(
         '작성자 차단 실패',
         error.message.includes('user_blocks')
           ? 'Supabase SQL 설정이 필요합니다. account_settings.sql을 실행해 주세요.'
@@ -1045,9 +1119,7 @@ const handleEdit = () => {
         .eq('user_id', user.id)
         .eq('listing_id', item.id);
 
-      if (error) {
-        console.log('좋아요 취소 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       setLiked(false);
@@ -1058,9 +1130,7 @@ const handleEdit = () => {
         listing_id: item.id,
       });
 
-      if (error) {
-        console.log('좋아요 추가 실패:', error);
-        return;
+      if (error) {        return;
       }
 
       setLiked(true);
@@ -1095,9 +1165,7 @@ const handleEdit = () => {
     })
     .eq('id', item.id);
 
-  if (error) {
-    console.log('상태 변경 실패:', error);
-    Alert.alert('오류', '상태를 변경하지 못했습니다.');
+  if (error) {    Alert.alert('오류', '상태를 변경하지 못했습니다.');
     return;
   }
 
@@ -1135,9 +1203,7 @@ const toggleListingVisibility = async () => {
     .eq('id', item.id)
     .eq('author_id', user?.id);
 
-  if (error) {
-    console.log(`${isHidden ? '숨김취소' : '숨김'} 실패:`, error);
-    Alert.alert(
+  if (error) {    Alert.alert(
       '오류',
       error.message.includes('listing_hidden_previous_status')
         ? 'Supabase SQL 설정이 필요합니다. listing_owner_visibility.sql을 실행해 주세요.'
@@ -1174,12 +1240,7 @@ const fetchChatUsers = async () => {
       )
     `)
     .eq('listing_id', item.id);
-
-  console.log('chat_rooms data:', JSON.stringify(data, null, 2));
-
-  if (error) {
-    console.log('채팅 상대 조회 실패:', error);
-    Alert.alert('오류', '채팅 상대를 불러오지 못했습니다.');
+  if (error) {    Alert.alert('오류', '채팅 상대를 불러오지 못했습니다.');
     return;
   }
 
@@ -1259,9 +1320,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     p_room_id: roomId ?? null,
   });
 
-  if (error) {
-    console.log(`${isShareListing ? '나눔완료' : '거래완료'} 실패:`, error);
-    Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
+  if (error) {    Alert.alert('오류', `${isShareListing ? '나눔완료' : '거래완료'} 처리에 실패했습니다.`);
     return;
   }
 
@@ -1290,11 +1349,6 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
   }
 
   const { data: latestSale, error: latestSaleError } = await latestSaleQuery.maybeSingle();
-
-  if (latestSaleError) {
-    console.log('판매 기록 조회 실패:', latestSaleError);
-  }
-
   router.push({
     pathname: '/review/create',
     params: {
@@ -1325,7 +1379,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           style={[styles.headerBtn, postThemeStyles.headerBtn]}
           hitSlop={HEADER_HIT_SLOP}
           activeOpacity={0.85}
-          onPress={handleShare}
+          onPress={() => runSinglePress(`share-listing-${item.id}`, handleShare, 1400)}
         >
           <Ionicons name="share-social-outline" size={22} color={backIconColor} />
         </TouchableOpacity>
@@ -1365,50 +1419,90 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
     );
   };
 
-  const renderActionBar = (style?: any) => (
-    <View
-      style={[
-        styles.bottomBar,
-        postThemeStyles.bottomBar,
-        style,
-      ]}
-    >
-      <TouchableOpacity style={[styles.heartBtn, postThemeStyles.heartBtn]} onPress={handleToggleLike}>
-        <Ionicons
-          name={liked ? 'heart' : 'heart-outline'}
-          size={24}
-          color={liked ? '#ef4444' : postText}
-        />
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.chatBtn, { backgroundColor: '#166534' }, chatStarting && styles.chatBtnDisabled]}
-        onPress={handleChat}
-        activeOpacity={0.85}
-        disabled={chatStarting}
+  const renderActionBar = (style?: any) => {
+    return (
+      <View
+        style={[
+          styles.bottomBar,
+          postThemeStyles.bottomBar,
+          style,
+        ]}
       >
-        {chatStarting ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.chatBtnText}>
-            {Platform.OS === 'web' ? '앱으로 채팅하기' : '채팅하기'}
-          </Text>
-        )}
-      </TouchableOpacity>
+        {isOwner ? (
+          <>
+            <TouchableOpacity
+              style={[styles.ownerEditBtn, postThemeStyles.heartBtn]}
+              onPress={handleEdit}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="create-outline" size={18} color={postText} />
+              <Text style={[styles.ownerEditText, postThemeStyles.text]}>수정하기</Text>
+            </TouchableOpacity>
 
-      {sellerType === 'store' && publicPhone ? (
-        <TouchableOpacity
-          style={[
-            styles.phoneBtn,
-            isDark && { backgroundColor: postSoft, borderWidth: 1, borderColor: postBorder },
-          ]}
-          onPress={handlePhone}
-        >
-          <Text style={styles.phoneBtnText}>전화하기</Text>
-        </TouchableOpacity>
-      ) : null}
-    </View>
-  );
+            <TouchableOpacity
+              style={[styles.ownerUpBtn, bumpDisabled && styles.chatBtnDisabled]}
+              onPress={() =>
+                runSinglePress(`bump-listing-${item?.id}`, handleBumpListing, 1400)
+              }
+              activeOpacity={0.85}
+              disabled={bumpDisabled}
+            >
+              {bumping ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="arrow-up-circle-outline" size={18} color="#fff" />
+                  <Text style={styles.chatBtnText}>
+                    {bumpDoneToday ? '오늘 UP 완료' : 'UP하기'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[styles.heartBtn, postThemeStyles.heartBtn]}
+              onPress={() => runSinglePress(`like-listing-${item?.id}`, handleToggleLike, 900)}
+            >
+              <Ionicons
+                name={liked ? 'heart' : 'heart-outline'}
+                size={24}
+                color={liked ? '#ef4444' : postText}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.chatBtn, { backgroundColor: '#166534' }, chatStarting && styles.chatBtnDisabled]}
+              onPress={() => runSinglePress(`chat-listing-${item?.id}`, handleChat, 1400)}
+              activeOpacity={0.85}
+              disabled={chatStarting}
+            >
+              {chatStarting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.chatBtnText}>
+                  {Platform.OS === 'web' ? '앱으로 채팅하기' : '채팅하기'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {sellerType === 'store' && publicPhone ? (
+              <TouchableOpacity
+                style={[
+                  styles.phoneBtn,
+                  isDark && { backgroundColor: postSoft, borderWidth: 1, borderColor: postBorder },
+                ]}
+                onPress={() => runSinglePress(`phone-listing-${item?.id}`, handlePhone, 1400)}
+              >
+                <Text style={styles.phoneBtnText}>전화하기</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        )}
+      </View>
+    );
+  };
 
   if (!item) {
     return (
@@ -1556,6 +1650,8 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
       {isVerifiedStore ? (
         <Text style={styles.sellerVerifiedBadge}>가게인증 완료</Text>
       ) : null}
+      {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
+      {isPremiumStore ? <PremiumStoreBadge /> : null}
       {showSellerLevel ? (
         <Text
           style={[
@@ -1585,6 +1681,9 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           >
             {sellerType === 'store' ? '인증가게' : '개인'}
           </Text>
+
+          {hasLocalAd ? <LocalAdStoreBadge label="광고" /> : null}
+          {isPremiumStore ? <PremiumStoreBadge /> : null}
 
           {item.urgent ? (
             <Text style={[styles.badge, styles.urgentBadge]}>긴급배송</Text>
@@ -1634,7 +1733,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
           </View>
         ) : null}
 	        <Text style={[styles.meta, postThemeStyles.mutedText]}>
-          {[item.region, formatTimeAgo(item.created_at)].filter(Boolean).join(' · ')}
+          {[item.region, getListingDisplayTime(item)].filter(Boolean).join(' · ')}
         </Text>
 
         {isStoreProduct ? (
@@ -1656,24 +1755,59 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
               ))}
             </View>
 
-            <View style={styles.storeActionRow}>
-              <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={handleChat}>
-                <Ionicons name="chatbubble-ellipses-outline" size={17} color={postText} />
-                <Text style={[styles.storeActionText, postThemeStyles.text]}>채팅 문의</Text>
-              </TouchableOpacity>
-
-              {publicPhone ? (
-                <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={handlePhone}>
-                  <Ionicons name="call-outline" size={17} color={postText} />
-                  <Text style={[styles.storeActionText, postThemeStyles.text]}>전화하기</Text>
+            {isOwner ? (
+              <View style={styles.storeActionRow}>
+                <TouchableOpacity
+                  style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]}
+                  onPress={handleEdit}
+                >
+                  <Ionicons name="create-outline" size={17} color={postText} />
+                  <Text style={[styles.storeActionText, postThemeStyles.text]}>수정하기</Text>
                 </TouchableOpacity>
-              ) : null}
 
-              <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={goToTradeMap}>
-                <Ionicons name="navigate-outline" size={17} color={postText} />
-                <Text style={[styles.storeActionText, postThemeStyles.text]}>길찾기</Text>
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={[
+                    styles.storeActionBtn,
+                    styles.storeOwnerUpActionBtn,
+                    bumpDisabled && styles.chatBtnDisabled,
+                  ]}
+                  onPress={() =>
+                    runSinglePress(`store-bump-listing-${item.id}`, handleBumpListing, 1400)
+                  }
+                  disabled={bumpDisabled}
+                >
+                  <Ionicons name="arrow-up-circle-outline" size={17} color="#fff" />
+                  <Text style={styles.storeOwnerUpText}>
+                    {bumpDoneToday ? '오늘 UP 완료' : 'UP하기'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.storeActionRow}>
+                <TouchableOpacity
+                  style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]}
+                  onPress={() => runSinglePress(`store-chat-${item.id}`, handleChat, 1400)}
+                >
+                  <Ionicons name="chatbubble-ellipses-outline" size={17} color={postText} />
+                  <Text style={[styles.storeActionText, postThemeStyles.text]}>채팅 문의</Text>
+                </TouchableOpacity>
+
+                {publicPhone ? (
+                  <TouchableOpacity
+                    style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]}
+                    onPress={() => runSinglePress(`store-phone-${item.id}`, handlePhone, 1400)}
+                  >
+                    <Ionicons name="call-outline" size={17} color={postText} />
+                    <Text style={[styles.storeActionText, postThemeStyles.text]}>전화하기</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity style={[styles.storeActionBtn, postThemeStyles.storeActionBtn]} onPress={goToTradeMap}>
+                  <Ionicons name="navigate-outline" size={17} color={postText} />
+                  <Text style={[styles.storeActionText, postThemeStyles.text]}>길찾기</Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             <TouchableOpacity style={[styles.otherStoreProductsBtn, postThemeStyles.storeActionBtn]} onPress={goToStoreDetail}>
               <Text style={[styles.otherStoreProductsText, { color: isDark ? postText : '#166534' }]}>가게 다른 상품 보기</Text>
@@ -1710,7 +1844,7 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
               </TouchableOpacity>
             </View>
 
-            <InlineMap latitude={item.latitude} longitude={item.longitude} />
+            <InlineMap latitude={item.latitude} longitude={item.longitude} onPress={goToTradeMap} />
           </View>
         ) : null}
 
@@ -1756,7 +1890,11 @@ const completeDealWithBuyer = async (buyerId: string, roomId?: string | null) =>
                     <TouchableOpacity
                       key={similar.id}
                       style={styles.similarCard}
-                      onPress={() => router.push(`/(tabs)/home/post/${similar.id}` as any)}
+                      onPress={() =>
+                        runSinglePress(`similar-listing-${similar.id}`, () =>
+                          router.push(`/(tabs)/home/post/${similar.id}` as any)
+                        )
+                      }
                     >
                       <View style={[styles.similarImageWrap, postThemeStyles.avatar]}>
                         {similarImageUrl ? (
@@ -2447,6 +2585,15 @@ emptyBuyerText: {
     fontSize: 12,
     fontWeight: '900',
   },
+  storeOwnerUpActionBtn: {
+    backgroundColor: '#166534',
+    borderColor: '#166534',
+  },
+  storeOwnerUpText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '900',
+  },
   otherStoreProductsBtn: {
     minHeight: 42,
     borderRadius: 12,
@@ -2718,6 +2865,36 @@ fullImageCount: {
     color: '#fff',
     fontWeight: '800',
     fontSize: 15,
+  },
+
+  ownerEditBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    gap: 6,
+  },
+
+  ownerEditText: {
+    color: '#111827',
+    fontWeight: '800',
+    fontSize: 15,
+  },
+
+  ownerUpBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: '#166534',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
   },
 
   phoneBtn: {

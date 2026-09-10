@@ -1,3 +1,4 @@
+// 판매자 레벨 화면: 후기/활동 점수를 기반으로 프로필에 표시할 레벨 정보를 보여준다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -45,9 +46,7 @@ export default function SellerLevelScreen() {
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error) {
-      console.log('레벨 프로필 조회 실패:', error);
-      showAlert('레벨 꾸미기', '레벨 정보를 불러오지 못했습니다.');
+    if (error) {      showAlert('레벨 꾸미기', '레벨 정보를 불러오지 못했습니다.');
       return;
     }
 
@@ -80,9 +79,7 @@ export default function SellerLevelScreen() {
 
     setSaving(false);
 
-    if (error) {
-      console.log('레벨 설정 저장 실패:', error);
-      showAlert('저장 실패', error.message);
+    if (error) {      showAlert('저장 실패', error.message);
       return;
     }
 

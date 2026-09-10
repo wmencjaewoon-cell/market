@@ -1,4 +1,7 @@
+// 홈 피드: 지역/검색/카테고리/프리미엄 노출을 조합해 게시글 목록을 보여준다.
+// 정렬 정책을 바꿀 때는 lib/storeExposure와 MaterialCard 배지도 함께 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -25,12 +28,19 @@ import {
   getDistanceKm,
   saveMyRegionSettings,
 } from '../../../lib/region';
+import {
+  fetchStorePublicExposureMap,
+  getStoreExposureScore,
+  mergeStoreExposureIntoProfile,
+} from '../../../lib/storeExposure';
 import { supabase } from '../../../lib/supabase';
 import { useTabRefresh } from '../../../lib/tabRefresh';
 import { Listing } from '../../../types';
 
 const tabs = ['전체', '가게', '거래', '나눔', '구함'] as const;
 type FilterTab = (typeof tabs)[number];
+const HOME_SEARCH_HISTORY_KEY = 'home_recent_search_keywords_v1';
+const MAX_SEARCH_HISTORY = 12;
 
 function getShortRegionName(regionName?: string | null) {
   if (!regionName) return '';
@@ -43,6 +53,70 @@ function getShortRegionName(regionName?: string | null) {
   return townName || parts.at(-1) || '';
 }
 
+function tokenizeSearchTerms(value?: string | null) {
+  return (value || '')
+    .toLowerCase()
+    .split(/[\s,./|]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2);
+}
+
+function normalizeSearchHistory(raw: unknown) {
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2)
+    .slice(0, MAX_SEARCH_HISTORY);
+}
+
+function getListingRankTime(item: Listing) {
+  const bumpedAt = item.last_bumped_at ? new Date(item.last_bumped_at).getTime() : NaN;
+  const createdAt = item.created_at ? new Date(item.created_at).getTime() : 0;
+  return Number.isFinite(bumpedAt) ? bumpedAt : createdAt;
+}
+
+function getListingKeywordScore(item: Listing, terms: string[]) {
+  if (terms.length === 0) return 0;
+
+  const source: any = item;
+  const title = String(source.title || '').toLowerCase();
+  const description = String(source.description || '').toLowerCase();
+  const region = String(source.region || '').toLowerCase();
+  const category = String(source.category || '').toLowerCase();
+  const storeName = String(source.profiles?.display_name || '').toLowerCase();
+
+  return terms.reduce((score, term) => {
+    let nextScore = score;
+    if (title.includes(term)) nextScore += 8;
+    if (storeName.includes(term)) nextScore += 5;
+    if (description.includes(term)) nextScore += 4;
+    if (region.includes(term)) nextScore += 3;
+    if (category.includes(term)) nextScore += 2;
+    return nextScore;
+  }, 0);
+}
+
+function sortHomeListings(listings: Listing[], terms: string[]) {
+  return [...listings].sort((a, b) => {
+    const aKeywordScore = getListingKeywordScore(a, terms);
+    const bKeywordScore = getListingKeywordScore(b, terms);
+
+    const exposureScore = getStoreExposureScore(b.profiles) - getStoreExposureScore(a.profiles);
+    if (exposureScore !== 0) return exposureScore;
+
+    if (aKeywordScore !== bKeywordScore) {
+      return bKeywordScore - aKeywordScore;
+    }
+
+    const timeScore = getListingRankTime(b) - getListingRankTime(a);
+    if (timeScore !== 0) return timeScore;
+
+    return Number(b.id) - Number(a.id);
+  });
+}
+
 export default function HomeScreen() {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -51,6 +125,7 @@ export default function HomeScreen() {
   const [items, setItems] = useState<Listing[]>([]);
   const [regions, setRegions] = useState<any[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [recentSearchKeywords, setRecentSearchKeywords] = useState<string[]>([]);
   const [activeRegionId, setActiveRegionId] = useState<number | null>(null);
   const [radiusKm, setRadiusKm] = useState(5);
   const [regionModalOpen, setRegionModalOpen] = useState(false);
@@ -61,10 +136,46 @@ export default function HomeScreen() {
     fetchListings();
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+
+    AsyncStorage.getItem(HOME_SEARCH_HISTORY_KEY)
+      .then((raw) => {
+        if (!mounted || !raw) return;
+        setRecentSearchKeywords(normalizeSearchHistory(JSON.parse(raw)));
+      })
+      .catch(() => {
+        if (mounted) setRecentSearchKeywords([]);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const keyword = searchKeyword.trim();
+    if (keyword.length < 2) return;
+
+    const timer = setTimeout(() => {
+      setRecentSearchKeywords((prev) => {
+        const next = [keyword, ...prev.filter((item) => item !== keyword)].slice(
+          0,
+          MAX_SEARCH_HISTORY
+        );
+        void AsyncStorage.setItem(HOME_SEARCH_HISTORY_KEY, JSON.stringify(next));
+        return next;
+      });
+    }, 700);
+
+    return () => clearTimeout(timer);
+  }, [searchKeyword]);
+
   useFocusEffect(
     useCallback(() => {
-      fetchRegionState();
-      fetchNotificationCount();
+      void fetchListings();
+      void fetchRegionState();
+      void fetchNotificationCount();
     }, [])
   );
 
@@ -98,22 +209,18 @@ export default function HomeScreen() {
       const { data: blockRows, error: blockError } = blockResult;
       const { data: hiddenRows, error: hiddenError } = hiddenResult;
 
-      if (blockError) {
-        console.log('홈 차단 목록 조회 실패:', blockError);
-      } else {
+      if (blockError) {      } else {
         blockedIds = new Set((blockRows || []).map((row: any) => row.blocked_id));
       }
 
-      if (hiddenError) {
-        console.log('홈 숨김 게시글 조회 실패:', hiddenError);
-      } else {
+      if (hiddenError) {      } else {
         hiddenListingIds = new Set((hiddenRows || []).map((row: any) => Number(row.listing_id)));
       }
     }
 
-    const { data, error } = await supabase
-      .from('listings')
-      .select(`
+    // Keep the base query simple, then merge public store exposure after the listing rows load.
+    // This avoids leaking subscription tables to public screens while still ranking premium stores.
+    const listingSelect = `
         *,
         profiles!listings_author_id_fkey (
           id,
@@ -132,16 +239,41 @@ export default function HomeScreen() {
           image_path,
           sort_order
         )
-      `)
+      `;
+
+    let { data, error } = await supabase
+      .from('listings')
+      .select(listingSelect)
       .eq('status', 'active')
+      .order('last_bumped_at', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false });
 
+    if (error && error.message.includes('last_bumped_at')) {
+      const fallback = await supabase
+        .from('listings')
+        .select(listingSelect)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      data = fallback.data;
+      error = fallback.error;
+    }
+
     if (!error && data) {
+      const exposureMap = await fetchStorePublicExposureMap(
+        (data as any[])
+          .filter((item) => item.profiles?.user_type === 'store' && item.profiles?.business_verified)
+          .map((item) => item.author_id)
+      );
       const mapped = (data as any[])
         .filter((item) => !blockedIds.has(item.author_id))
         .filter((item) => !hiddenListingIds.has(Number(item.id)))
         .map((item) => ({
           ...item,
+          profiles: mergeStoreExposureIntoProfile(
+            item.profiles,
+            exposureMap.get(item.author_id)
+          ),
           favorites_count: item.favorites_count ?? 0,
           chats_count: item.chats_count ?? 0,
           listing_images: [...(item.listing_images || [])].sort(
@@ -156,9 +288,7 @@ export default function HomeScreen() {
     try {
       const count = await getUnreadNotificationCount();
       setUnreadNotificationCount(count);
-    } catch (e) {
-      console.log(e);
-    }
+    } catch {    }
   };
 
   const handleRefresh = async () => {
@@ -261,8 +391,12 @@ export default function HomeScreen() {
       });
     }
 
-    return result;
-  }, [items, selectedTab, activeRegion, radiusKm, searchKeyword]);
+    const activeTerms = tokenizeSearchTerms(keyword);
+    const historyTerms = recentSearchKeywords.flatMap(tokenizeSearchTerms);
+    const rankingTerms = activeTerms.length > 0 ? activeTerms : historyTerms;
+
+    return sortHomeListings(result, rankingTerms);
+  }, [items, selectedTab, activeRegion, radiusKm, searchKeyword, recentSearchKeywords]);
 
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>

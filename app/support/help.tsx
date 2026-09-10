@@ -1,3 +1,4 @@
+// 도움말 화면: 운영자 연락처와 기본 문의 경로를 안내한다.
 import { useMemo } from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { type AppPalette } from '../../contexts/theme';

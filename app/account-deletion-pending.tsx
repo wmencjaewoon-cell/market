@@ -1,3 +1,4 @@
+// 탈퇴 대기 계정 차단 화면: 삭제 대기 상태인 사용자가 앱 기능으로 진입하지 못하게 막는다.
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {

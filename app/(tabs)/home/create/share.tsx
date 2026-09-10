@@ -1,3 +1,4 @@
+// 나눔 글 작성 화면: 무료 나눔 게시글 등록과 키워드 알림 발송을 담당한다.
 import { sendKeywordAlertsForListing } from '@/lib/listingNotifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -21,6 +22,7 @@ import { checkProhibitedContent } from '../../../../lib/prohibited';
 import { supabase } from '../../../../lib/supabase';
 
 export default function CreateShareScreen() {
+  // 대표 동네, 거래 희망 장소, 지도 좌표 불러오기
   const params = useLocalSearchParams<{
     lat?: string;
     lng?: string;
@@ -30,6 +32,7 @@ export default function CreateShareScreen() {
     regionLng?: string;
   }>();
 
+  //
   const [title, setTitle] = useState('');
   const [quantityText, setQuantityText] = useState('');
 
@@ -69,6 +72,7 @@ export default function CreateShareScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  
   useFocusEffect(
     useCallback(() => {
       if (params.regionChanged || params.regionName) return;
@@ -76,6 +80,7 @@ export default function CreateShareScreen() {
     }, [params.regionChanged, params.regionName])
   );
 
+  // 대표 동네, 거래 희망 장소 초기화
   useEffect(() => {
     const init = async () => {
       if (!params.regionName) {
@@ -88,6 +93,7 @@ export default function CreateShareScreen() {
     init();
   }, []);
 
+  // 대표 동네, 거래 희망 장소 변경 시 처리
   useEffect(() => {
     if (!params.regionChanged) return;
 
@@ -101,6 +107,7 @@ export default function CreateShareScreen() {
     loadActiveRegion();
   }, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
 
+  // 지도에서 거래 희망 장소 선택 후 처리
   useEffect(() => {
     if (params.lat && params.lng) {
       setLatitude(Number(params.lat));
@@ -109,6 +116,7 @@ export default function CreateShareScreen() {
     }
   }, [params.lat, params.lng]);
 
+  // 대표 동네 불러오기
   const loadActiveRegion = async () => {
     try {
       const region = await getMyActiveRegion();
@@ -121,6 +129,7 @@ export default function CreateShareScreen() {
     }
   };
 
+  // 초기 위치 불러오기
   const initDefaultLocation = async () => {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -132,11 +141,10 @@ export default function CreateShareScreen() {
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
+  // 대표 동네와 거래 희망 장소 간 거리 계산
   const getDistanceKm = (
     lat1: number,
     lng1: number,
@@ -170,6 +178,7 @@ export default function CreateShareScreen() {
   const isTooFarFromRegion =
     distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
 
+  // 수량 단위 최종값 가져오기
   const pickImage = async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -198,6 +207,7 @@ export default function CreateShareScreen() {
     }
   };
 
+  // 이미지 업로드
   const uploadImageToStorage = async (
     listingId: number,
     uri: string,
@@ -247,6 +257,7 @@ export default function CreateShareScreen() {
     return filePath;
   };
 
+  // 수량 단위 최종값 가져오기
   const getFinalQuantityUnit = () => {
     if (quantityUnit === '기타') {
       return customQuantityUnit.trim();
@@ -255,6 +266,7 @@ export default function CreateShareScreen() {
     return quantityUnit;
   };
 
+  // 판매글 등록
   const handleCreate = async () => {
     try {
       setErrorMessage('');

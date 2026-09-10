@@ -1,9 +1,16 @@
+// 가게 대시보드: 가게센터의 빠른 작업, 통계 요약, 구독 제한 상태를 보여주는 첫 화면이다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAppTheme } from '../../hooks/use-app-theme';
+import {
+  DEFAULT_STORE_LIMITS,
+  getPlanLabel,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { getMyStoreAccessContext } from '../../lib/storeStaff';
 import { supabase } from '../../lib/supabase';
 
@@ -12,6 +19,7 @@ export default function StoreDashboardScreen() {
   const theme = useAppTheme();
   const [profile, setProfile] = useState<any | null>(null);
   const [items, setItems] = useState<any[]>([]);
+  const [limits, setLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [chatCount, setChatCount] = useState(0);
   const [interactionCounts, setInteractionCounts] = useState({
     phone: 0,
@@ -32,6 +40,7 @@ export default function StoreDashboardScreen() {
     setProfile(profileData || null);
 
     if (!access.canManageStore || !storeUserId) {
+      setLimits(DEFAULT_STORE_LIMITS);
       setItems([]);
       setChatCount(0);
       setInteractionCounts({ phone: 0, directions: 0 });
@@ -39,6 +48,9 @@ export default function StoreDashboardScreen() {
       setLoading(false);
       return;
     }
+
+    const nextLimits = await getStoreSubscriptionLimits(storeUserId);
+    setLimits(nextLimits);
 
     const { data: listingData } = await supabase
       .from('listings')
@@ -52,34 +64,54 @@ export default function StoreDashboardScreen() {
 
     const listingIds = nextItems.map((item) => item.id);
     if (listingIds.length > 0) {
-      const { count } = await supabase
+      let chatQuery = supabase
         .from('chat_rooms')
         .select('*', { count: 'exact', head: true })
         .in('listing_id', listingIds);
+
+      if (nextLimits.statsRecentDays != null) {
+        const statsStart = new Date();
+        statsStart.setDate(statsStart.getDate() - nextLimits.statsRecentDays);
+        chatQuery = chatQuery.gte('created_at', statsStart.toISOString());
+      }
+
+      const { count } = await chatQuery;
 
       setChatCount(count || 0);
     } else {
       setChatCount(0);
     }
 
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const { data: interactions } = await supabase
+    let interactionQuery = supabase
       .from('store_interactions')
       .select('interaction_type')
-      .eq('store_user_id', storeUserId)
-      .gte('created_at', todayStart.toISOString());
+      .eq('store_user_id', storeUserId);
+
+    if (nextLimits.statsRecentDays != null) {
+      const statsStart = new Date();
+      statsStart.setDate(statsStart.getDate() - nextLimits.statsRecentDays);
+      interactionQuery = interactionQuery.gte('created_at', statsStart.toISOString());
+    }
+
+    const { data: interactions } = await interactionQuery;
 
     setInteractionCounts({
       phone: (interactions || []).filter((row: any) => row.interaction_type === 'phone').length,
       directions: (interactions || []).filter((row: any) => row.interaction_type === 'directions').length,
     });
 
-    const { count: openEstimateCount } = await supabase
+    let estimateQuery = supabase
       .from('estimate_requests')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'open');
+
+    if (nextLimits.statsRecentDays != null) {
+      const statsStart = new Date();
+      statsStart.setDate(statsStart.getDate() - nextLimits.statsRecentDays);
+      estimateQuery = estimateQuery.gte('created_at', statsStart.toISOString());
+    }
+
+    const { count: openEstimateCount } = await estimateQuery;
 
     setEstimateCount(openEstimateCount || 0);
 
@@ -114,6 +146,12 @@ export default function StoreDashboardScreen() {
         </View>
       ) : (
         <>
+          <View style={styles.planBox}>
+            <Text style={styles.planText}>
+              현재 플랜 {getPlanLabel(limits.plan)} · 문의 통계{' '}
+              {limits.statsRecentDays == null ? '전체 기간' : `최근 ${limits.statsRecentDays}일`}
+            </Text>
+          </View>
           <View style={styles.grid}>
             <StatCard label="상품 조회수" value={loading ? '-' : totalViews.toLocaleString()} />
             <StatCard label="채팅 문의" value={loading ? '-' : chatCount.toLocaleString()} />
@@ -136,7 +174,10 @@ export default function StoreDashboardScreen() {
             <Text style={styles.sectionTitle}>빠른 작업</Text>
             <ActionButton icon="add-circle-outline" label="상품 등록" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/product-create' as any)} />
             <ActionButton icon="cube-outline" label="상품 상태관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/products' as any)} />
-            <ActionButton icon="clipboard-outline" label="견적/고객관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/estimates' as any)} />
+            <ActionButton icon="person-add-outline" label="고객관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/customers' as any)} />
+            <ActionButton icon="clipboard-outline" label="견적관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/estimates' as any)} />
+            <ActionButton icon="business-outline" label="현장관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/projects' as any)} />
+            <ActionButton icon="calendar-outline" label="전체 일정표" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/my/calendar' as any)} />
             <ActionButton icon="people-outline" label="직원 관리" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/staff' as any)} />
             <ActionButton icon="storefront-outline" label="가게 정보 수정" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />
             <ActionButton icon="flash-outline" label="오늘 가능 켜기" iconColor={theme.text} chevronColor={theme.textSubtle} onPress={() => router.push('/store/profile' as any)} />
@@ -213,6 +254,14 @@ const styles = StyleSheet.create({
   },
   noticeTitle: { color: '#9a3412', fontSize: 16, fontWeight: '900' },
   noticeText: { color: '#7c2d12', fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  planBox: {
+    borderRadius: 14,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    padding: 12,
+  },
+  planText: { color: '#14532d', fontSize: 13, fontWeight: '900' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statCard: {

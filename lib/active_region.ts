@@ -1,3 +1,4 @@
+// 활성 지역 헬퍼: 사용자의 저장 지역과 반경 설정을 읽어 홈/지도 필터 기준을 만든다.
 import { supabase } from './supabase';
 import {
   fetchMyRegions,

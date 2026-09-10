@@ -1,6 +1,8 @@
+// 하단 탭 레이아웃: 홈/지도/채팅/내정보 탭, 채팅 배지, 탭 재선택 새로고침을 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { getUnreadChatCount } from '../../lib/chat';
@@ -11,16 +13,19 @@ export default function TabsLayout() {
   const { user } = useAuth();
   const pathname = usePathname();
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   const [chatBadge, setChatBadge] = useState(0);
+  const tabBarBottomPadding = Math.max(insets.bottom, 8);
+  const tabBarHeight = 58 + tabBarBottomPadding;
+  const shouldHideTabBar =
+    pathname.startsWith('/chat/') || pathname.startsWith('/open-chat/');
 
   const loadUnreadCount = async () => {
     try {
       const count = await getUnreadChatCount();
       setChatBadge(count);
-    } catch (e) {
-      console.log('채팅 배지 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
   useEffect(() => {
@@ -87,9 +92,21 @@ channel.subscribe();
         sceneStyle: { backgroundColor: theme.background },
         tabBarActiveTintColor: theme.text,
         tabBarInactiveTintColor: theme.textMuted,
-        tabBarStyle: {
-          backgroundColor: theme.surface,
-          borderTopColor: theme.border,
+        tabBarStyle: shouldHideTabBar
+          ? { display: 'none' }
+          : {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.border,
+              height: tabBarHeight,
+              paddingTop: 6,
+              paddingBottom: tabBarBottomPadding,
+            },
+        tabBarItemStyle: {
+          minHeight: 50,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
         },
         tabBarBadgeStyle: {
           backgroundColor: '#166534',

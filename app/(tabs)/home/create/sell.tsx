@@ -1,3 +1,5 @@
+// 판매 글 작성 화면: 이미지 업로드, 위치, 가격, 키워드 알림 발송까지 처리하는 기존 작성 플로우다.
+// 신규 작성 UI는 components/ListingForm과 기능이 겹치므로 수정 시 두 경로를 함께 확인한다.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decode } from 'base64-arraybuffer';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -61,6 +63,7 @@ export default function CreateSellScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+  
   useFocusEffect(
     useCallback(() => {
       if (params.regionChanged || params.regionName) return;
@@ -88,6 +91,7 @@ export default function CreateSellScreen() {
 
 
 
+  
   useEffect(() => {
     const init = async () => {
       if (!params.regionName) {
@@ -139,9 +143,7 @@ export default function CreateSellScreen() {
       setActiveRegionName(region.region_name);
       setActiveRegionLat(region.latitude);
       setActiveRegionLng(region.longitude);
-    } catch (e: any) {
-      console.log('대표 지역 불러오기 실패:', e);
-      setErrorMessage(e?.message || '대표 동네를 먼저 설정해 주세요.');
+    } catch (e: any) {      setErrorMessage(e?.message || '대표 동네를 먼저 설정해 주세요.');
     }
   };
 
@@ -156,11 +158,10 @@ export default function CreateSellScreen() {
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
 
+  //사진선택
   const pickImage = async () => {
     try {
       setErrorMessage('');
@@ -188,12 +189,11 @@ export default function CreateSellScreen() {
         setImageUris((prev) => [...prev, ...uris].slice(0, 10));
         setSuccessMessage('사진이 선택되었습니다.');
       }
-    } catch (error: any) {
-      console.log('이미지 선택 에러:', error);
-      setErrorMessage(error?.message || '이미지를 선택하지 못했습니다.');
+    } catch (error: any) {      setErrorMessage(error?.message || '이미지를 선택하지 못했습니다.');
     }
   };
 
+  //사진 업로드
   const uploadImageToStorage = async (
     listingId: number,
     uri: string,
@@ -240,6 +240,7 @@ export default function CreateSellScreen() {
     return filePath;
   };
 
+  // 임시저장
   const saveDraft = async () => {
     const draft = {
       title,
@@ -261,6 +262,7 @@ export default function CreateSellScreen() {
   };
 
 
+  // 임시저장 불러오기
   const loadDraft = async () => {
     try {
       const saved = await AsyncStorage.getItem(DRAFT_KEY);
@@ -288,14 +290,13 @@ export default function CreateSellScreen() {
       }
 
       return true;
-    } catch (e) {
-      console.log('임시저장 불러오기 실패:', e);
-      return false;
+    } catch {      return false;
     }
   };
 
   const MAX_DISTANCE_KM = 26;
 
+  // 대표 동네와 거래 희망 장소 간 거리 계산
   const distanceFromRegion =
     activeRegionLat != null &&
       activeRegionLng != null &&
@@ -304,9 +305,11 @@ export default function CreateSellScreen() {
       ? getDistanceKm(activeRegionLat, activeRegionLng, latitude, longitude)
       : null;
 
+      // 대표 동네와 거래 희망 장소 간 거리가 너무 먼지 확인
   const isTooFarFromRegion =
     distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
 
+  // 수량 단위 최종값 가져오기
   const getFinalQuantityUnit = () => {
     if (quantityUnit === '기타') {
       return customQuantityUnit.trim();
@@ -315,6 +318,7 @@ export default function CreateSellScreen() {
     return quantityUnit;
   };
 
+  // 판매글 등록
   const handleCreate = async () => {
     try {
       setErrorMessage('');
@@ -438,9 +442,7 @@ export default function CreateSellScreen() {
       setSuccessMessage('판매 글이 등록되었습니다.');
       await AsyncStorage.removeItem(DRAFT_KEY);
       router.replace('/(tabs)/home');
-    } catch (e: any) {
-      console.log('등록 실패:', e);
-      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
+    } catch (e: any) {      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }
@@ -509,9 +511,7 @@ export default function CreateSellScreen() {
                 mapLat = current.coords.latitude;
                 mapLng = current.coords.longitude;
               }
-            } catch (e) {
-              console.log('현재 위치 불러오기 실패:', e);
-            }
+            } catch {            }
 
             router.push({
               pathname: '/map-picker',

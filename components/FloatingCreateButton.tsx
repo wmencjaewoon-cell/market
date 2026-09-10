@@ -1,3 +1,4 @@
+// 홈 플로팅 등록 버튼: 로그인/사용 가능 상태를 확인한 뒤 글쓰기 선택으로 보낸다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useState } from 'react';

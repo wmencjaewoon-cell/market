@@ -1,7 +1,9 @@
+// 내정보 홈: 프로필, 판매/관심/알림, 가게센터, 요금제 진입점을 모아 보여준다.
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import StorePlanModal, { LocalAdStoreBadge, PremiumStoreBadge } from '../../components/StorePlanModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
@@ -12,6 +14,12 @@ import {
   getSellerLevelTitle,
   getSellerPoints,
 } from '../../lib/sellerLevel';
+import {
+  DEFAULT_STORE_LIMITS,
+  getPlanLabel,
+  getStoreSubscriptionLimits,
+  type StoreSubscriptionLimits,
+} from '../../lib/storeLimits';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
@@ -34,7 +42,9 @@ export default function MyScreen() {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<any>(null);
   const [staffMembership, setStaffMembership] = useState<any | null>(null);
+  const [storeLimits, setStoreLimits] = useState<StoreSubscriptionLimits>(DEFAULT_STORE_LIMITS);
   const [companyInfoOpen, setCompanyInfoOpen] = useState(false);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -45,9 +55,7 @@ export default function MyScreen() {
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error) {
-      console.log('프로필 조회 실패:', error);
-      return;
+    if (error) {      return;
     }
 
     if (data) {
@@ -61,6 +69,17 @@ export default function MyScreen() {
         .maybeSingle();
 
       setStaffMembership(staffData || null);
+
+      const storeUserId =
+        data.user_type === 'store' && data.business_verified
+          ? user.id
+          : staffData?.store_user_id;
+
+      if (storeUserId) {
+        setStoreLimits(await getStoreSubscriptionLimits(storeUserId));
+      } else {
+        setStoreLimits(DEFAULT_STORE_LIMITS);
+      }
       return;
     }
 
@@ -81,19 +100,19 @@ export default function MyScreen() {
       .select()
       .single();
 
-    if (createError) {
-      console.log('프로필 자동 생성 실패:', createError);
-      return;
+    if (createError) {      return;
     }
 
     setProfile(created);
     setStaffMembership(null);
+    setStoreLimits(DEFAULT_STORE_LIMITS);
   }, [user]);
 
   useEffect(() => {
     if (!user) {
       setProfile(null);
       setStaffMembership(null);
+      setStoreLimits(DEFAULT_STORE_LIMITS);
       return;
     }
 
@@ -127,6 +146,10 @@ export default function MyScreen() {
   const sellerLevelStyle = getSellerLevelStyle(profile, sellerLevel);
   const publicPhone =
     isVerifiedStore && profile?.is_phone_public ? profile?.phone : null;
+  const canViewStorePlan = isVerifiedStore || isActiveStoreStaff;
+  const storePlanLabel = getPlanLabel(storeLimits.plan);
+  const hasPremiumStorePlan = storeLimits.isPremium && (isVerifiedStore || isActiveStoreStaff);
+  const hasLocalAdPlan = storeLimits.hasLocalAd && (isVerifiedStore || isActiveStoreStaff);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -157,6 +180,12 @@ export default function MyScreen() {
               {isVerifiedStore ? (
                 <Text style={styles.verifiedText}>가게인증완료</Text>
               ) : null}
+
+              {hasPremiumStorePlan ? (
+                <PremiumStoreBadge label="프리미엄" onPress={() => setPlanModalOpen(true)} />
+              ) : null}
+
+              {hasLocalAdPlan ? <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} /> : null}
 
               <Text
                 style={[
@@ -202,14 +231,32 @@ export default function MyScreen() {
 
         {user ? (
           <>
+            <Section title="일정">
+              <MenuItem
+                title={canManageStore || isActiveStoreStaff ? '업무/개인 일정표' : '내 일정표'}
+                onPress={() => router.push('/my/calendar' as any)}
+              />
+            </Section>
+
+            {canViewStorePlan ? (
+              <Section title="가게 요금제">
+                <MenuItem
+                  title="요금제 보기"
+                  rightText={hasLocalAdPlan ? `${storePlanLabel} + 지역광고` : storePlanLabel}
+                  onPress={() => setPlanModalOpen(true)}
+                />
+              </Section>
+            ) : null}
+
             {canManageStore ? (
               <Section title="내 가게 관리">
-                <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
                 <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
                 <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
                 <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
                 <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
                 <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                <MenuItem title="현장관리" onPress={() => router.push('/store/projects' as any)} />
                 <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
               </Section>
             ) : null}
@@ -217,6 +264,7 @@ export default function MyScreen() {
             {isActiveStoreStaff && !isStoreManager ? (
               <Section title="직원 업무">
                 <MenuItem title="배정된 견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                <MenuItem title="배정된 현장관리" onPress={() => router.push('/store/projects' as any)} />
               </Section>
             ) : null}
 
@@ -235,6 +283,7 @@ export default function MyScreen() {
 
         <Section title="고객지원">
           <MenuItem title="공지사항" onPress={() => router.push('/support/notices' as any)} />
+          <MenuItem title="이벤트" onPress={() => router.push('/support/events' as any)} />
           <MenuItem title="고객센터" onPress={() => router.push('/support/help' as any)} />
         </Section>
 
@@ -299,6 +348,12 @@ export default function MyScreen() {
           </View>
         </View>
       </ScrollView>
+      <StorePlanModal
+        visible={planModalOpen}
+        currentPlan={storeLimits.plan}
+        hasLocalAd={storeLimits.hasLocalAd}
+        onClose={() => setPlanModalOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -315,14 +370,17 @@ function Section({ title, children }: any) {
   );
 }
 
-function MenuItem({ title, onPress }: any) {
+function MenuItem({ title, rightText, onPress }: any) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <TouchableOpacity style={styles.menuItem} onPress={onPress}>
       <Text style={styles.menuText}>{title}</Text>
-      <Text style={styles.arrow}>{'>'}</Text>
+      <View style={styles.menuRight}>
+        {rightText ? <Text style={styles.menuRightText}>{rightText}</Text> : null}
+        <Text style={styles.arrow}>{'>'}</Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -432,9 +490,21 @@ container: {
     borderBottomWidth: 1,
     borderBottomColor: theme.borderSoft,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
   },
-  menuText: { color: theme.text, fontSize: 15, fontWeight: '600' },
+  menuText: { flex: 1, color: theme.text, fontSize: 15, fontWeight: '600' },
+  menuRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  menuRightText: {
+    color: theme.primary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
   arrow: { color: theme.textSubtle },
 
   logoutBtn: {

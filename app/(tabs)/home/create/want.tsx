@@ -1,3 +1,4 @@
+// 구해요 글 작성 화면: 필요한 자재 요청 글과 거래 희망 위치를 등록한다.
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
@@ -58,6 +59,8 @@ export default function CreateWantScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
+
+  // 대표 동네 불러오기
   useFocusEffect(
     useCallback(() => {
       if (params.regionChanged || params.regionName) return;
@@ -65,6 +68,8 @@ export default function CreateWantScreen() {
     }, [params.regionChanged, params.regionName])
   );
 
+
+  // 초기 위치 불러오기
   useEffect(() => {
     const init = async () => {
       if (!params.regionName) {
@@ -75,6 +80,8 @@ export default function CreateWantScreen() {
     init();
   }, []);
 
+
+  // 대표 동네와 거래 희망 장소 간 거리 계산
   useEffect(() => {
     if (!params.regionChanged) return;
 
@@ -88,6 +95,8 @@ export default function CreateWantScreen() {
     loadActiveRegion();
   }, [params.regionChanged, params.regionName, params.regionLat, params.regionLng]);
 
+
+  // 거래 희망 장소 좌표 불러오기
   useEffect(() => {
     if (params.lat && params.lng) {
       setLatitude(Number(params.lat));
@@ -96,6 +105,7 @@ export default function CreateWantScreen() {
     }
   }, [params.lat, params.lng]);
 
+  // 대표 동네 불러오기
   const loadActiveRegion = async () => {
     try {
       const region = await getMyActiveRegion();
@@ -107,6 +117,7 @@ export default function CreateWantScreen() {
     }
   };
 
+  // 초기 위치 불러오기
   const initDefaultLocation = async () => {
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -118,10 +129,10 @@ export default function CreateWantScreen() {
 
       setLatitude(current.coords.latitude);
       setLongitude(current.coords.longitude);
-    } catch (e) {
-      console.log('초기 위치 불러오기 실패:', e);
-    }
+    } catch {    }
   };
+
+  // 대표 동네와 거래 희망 장소 간 거리 계산
   const getDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -149,6 +160,8 @@ export default function CreateWantScreen() {
   const isTooFarFromRegion =
     distanceFromRegion != null && distanceFromRegion > MAX_DISTANCE_KM;
 
+
+  // 수량 단위 최종값 가져오기
   const getFinalQuantityUnit = () => {
     if (quantityUnit === '기타') {
       return customQuantityUnit.trim();
@@ -157,6 +170,8 @@ export default function CreateWantScreen() {
     return quantityUnit;
   };
 
+
+  // 판매글 등록
   const handleCreate = async () => {
     try {
       setErrorMessage('');
@@ -261,9 +276,7 @@ export default function CreateWantScreen() {
 
       setSuccessMessage('구해요 글이 등록되었습니다.');
       router.replace('/(tabs)/home');
-    } catch (e: any) {
-      console.log('등록 실패:', e);
-      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
+    } catch (e: any) {      setErrorMessage(e?.message || '등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitting(false);
     }

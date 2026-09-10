@@ -1,11 +1,14 @@
+// 내 프로필 편집 화면: 개인/가게 전환, 사업자 1차 확인, 가게 인증 신청 정보를 관리한다.
+// 인증 완료 가게의 운영 정보 수정은 app/store/profile.tsx에서 처리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { decode } from 'base64-arraybuffer';
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   Platform,
   ScrollView,
@@ -20,6 +23,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { getOAuthProfileDefaults } from '../../lib/oauthProfile';
+import { getPersonalPhoneValidationMessage, normalizePersonalPhone } from '../../lib/phone';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import { supabase } from '../../lib/supabase';
 
@@ -92,6 +96,8 @@ type StoreVerificationStatus =
   | 'canceled'
   | 'revoked';
 
+type BusinessCheckStatus = 'idle' | 'checking' | 'success' | 'error';
+
 type StoreVerificationRequest = {
   id: number;
   business_number: string;
@@ -125,11 +131,21 @@ function getStoreVerificationStatusLabel(status?: StoreVerificationStatus | null
   return '가게 인증 전';
 }
 
+function isValidKoreanBusinessNumber(value: string) {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (digits.length !== 10) return false;
+
+  const weights = [1, 3, 7, 1, 3, 7, 1, 3];
+  const sum =
+    weights.reduce((acc, weight, index) => acc + Number(digits[index]) * weight, 0) +
+    Math.floor((Number(digits[8]) * 5) / 10) +
+    ((Number(digits[8]) * 5) % 10);
+  const checkDigit = (10 - (sum % 10)) % 10;
+
+  return checkDigit === Number(digits[9]);
+}
+
 export default function ProfileEditScreen() {
-  const params = useLocalSearchParams<{
-    lat?: string;
-    lng?: string;
-  }>();
   const { user } = useAuth();
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -150,6 +166,9 @@ export default function ProfileEditScreen() {
   const [businessNumber, setBusinessNumber] = useState('');
   const [businessVerified, setBusinessVerified] = useState(false);
   const [verifyingBusiness, setVerifyingBusiness] = useState(false);
+  const [businessCheckStatus, setBusinessCheckStatus] =
+    useState<BusinessCheckStatus>('idle');
+  const [businessCheckMessage, setBusinessCheckMessage] = useState('');
   const [representativeName, setRepresentativeName] = useState('');
   const [businessHours, setBusinessHours] = useState('');
   const [storeIntro, setStoreIntro] = useState('');
@@ -174,26 +193,52 @@ export default function ProfileEditScreen() {
     useState(false);
 
   const [message, setMessage] = useState('');
-  const hasStoreLocationParams = Boolean(params.lat && params.lng);
   const isApprovedStoreProfile =
     userType === 'store' && storeVerificationStatus === 'approved';
+  const shouldValidatePersonalPhone = userType === 'personal' && !isStaffProfile;
+  const businessCheckTone =
+    storeVerificationStatus === 'approved' || businessVerified
+      ? 'success'
+      : storeVerificationStatus === 'pending' || verifyingBusiness
+        ? 'checking'
+        : storeVerificationStatus === 'needs_more_info' || storeVerificationStatus === 'rejected'
+          ? 'error'
+          : businessCheckStatus;
+  const businessCheckText =
+    storeVerificationStatus === 'approved'
+      ? '관리자 승인으로 가게 인증이 완료되었습니다.'
+      : storeVerificationStatus === 'pending'
+        ? '제출한 사업자 정보가 관리자 검수를 기다리고 있습니다.'
+        : storeVerificationStatus === 'needs_more_info'
+          ? '사업자 정보 보완이 필요합니다. 내용을 확인하고 다시 확인해 주세요.'
+          : storeVerificationStatus === 'rejected'
+            ? '사업자 인증이 반려되었습니다. 내용을 확인하고 다시 확인해 주세요.'
+            : verifyingBusiness
+              ? '사업자등록번호를 확인 중입니다. 잠시만 기다려 주세요.'
+              : businessVerified
+                ? '사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.'
+                : businessCheckMessage || '사업자번호 1차 확인 후 인증 신청을 진행해 주세요.';
+  const businessCheckIcon: keyof typeof Ionicons.glyphMap =
+    businessCheckTone === 'success'
+      ? 'checkmark-circle'
+      : businessCheckTone === 'error'
+        ? 'alert-circle'
+        : businessCheckTone === 'checking'
+          ? 'sync-circle'
+          : 'information-circle';
+  const businessCheckIconColor =
+    businessCheckTone === 'success'
+      ? theme.successText
+      : businessCheckTone === 'error'
+        ? theme.danger
+        : businessCheckTone === 'checking'
+          ? theme.primary
+          : theme.textMuted;
 
   useEffect(() => {
     if (!user) return;
     fetchProfile();
   }, [user]);
-
-  useEffect(() => {
-    if (!params.lat || !params.lng) return;
-
-    const latitude = Number(params.lat);
-    const longitude = Number(params.lng);
-
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-
-    setStoreLatitude(latitude);
-    setStoreLongitude(longitude);
-  }, [params.lat, params.lng]);
 
   const fetchProfile = async () => {
     const oauthProfile = getOAuthProfileDefaults(user);
@@ -216,16 +261,15 @@ export default function ProfileEditScreen() {
       setSelectedAvatarAsset(null);
       setBusinessNumber(data.business_number || '');
       setBusinessVerified(!!data.business_verified);
+      setBusinessCheckStatus(data.business_verified ? 'success' : 'idle');
+      setBusinessCheckMessage('');
       setRepresentativeName(data.representative_name || '');
       setBusinessHours(data.business_hours || '');
       setStoreIntro(data.store_intro || '');
       setStoreVerificationStatus(data.store_verification_status || 'none');
       setStoreAddress(data.store_address || '');
-
-      if (!hasStoreLocationParams) {
-        setStoreLatitude(data.store_latitude ?? null);
-        setStoreLongitude(data.store_longitude ?? null);
-      }
+      setStoreLatitude(data.store_latitude ?? null);
+      setStoreLongitude(data.store_longitude ?? null);
     } else if (!data) {
       setIsStaffProfile(false);
       setDisplayName((current) => current || oauthProfile.displayName || '');
@@ -252,6 +296,9 @@ export default function ProfileEditScreen() {
       if (request.status === 'revoked') {
         setLatestStoreRequest(null);
         setStoreVerificationStatus('none');
+        setBusinessVerified(false);
+        setBusinessCheckStatus('idle');
+        setBusinessCheckMessage('');
         setBusinessDocumentPath(null);
         setBusinessDocumentMimeType(null);
         setBusinessDocumentName('');
@@ -295,14 +342,9 @@ export default function ProfileEditScreen() {
         setStoreIntro(request.store_intro || '');
         setPhone(request.phone || '');
         setStoreAddress(request.store_address || '');
-
-        if (!hasStoreLocationParams) {
-          setStoreLatitude(request.store_latitude ?? null);
-          setStoreLongitude(request.store_longitude ?? null);
-        }
+        setStoreLatitude(request.store_latitude ?? null);
+        setStoreLongitude(request.store_longitude ?? null);
       }
-    } else if (requestResult.error && requestResult.error.code !== 'PGRST205') {
-      console.log('가게 인증 신청 조회 실패:', requestResult.error);
     }
   };
 
@@ -419,9 +461,7 @@ export default function ProfileEditScreen() {
       if (result.canceled) return;
 
       setSelectedBusinessDocument(result.assets[0]);
-    } catch (error) {
-      console.log('사업자등록증 파일 선택기 로드 실패:', error);
-      setMessage(
+    } catch {      setMessage(
         '현재 설치된 앱에는 PDF 선택 모듈이 아직 없습니다. 앱을 새로 빌드하면 PDF를 선택할 수 있고, 지금은 이미지로 제출할 수 있습니다.'
       );
       await pickBusinessDocumentImage();
@@ -467,12 +507,25 @@ export default function ProfileEditScreen() {
 
   const handleVerifyBusiness = async () => {
     if (!businessNumber.trim()) {
+      setBusinessVerified(false);
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage('사업자등록번호를 입력한 뒤 다시 확인해 주세요.');
       setMessage('사업자등록번호를 입력해 주세요.');
+      return;
+    }
+
+    if (!isValidKoreanBusinessNumber(businessNumber)) {
+      setBusinessVerified(false);
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage('사업자등록번호 형식이 맞지 않습니다. 다시 확인해 주세요.');
+      setMessage('유효한 사업자등록번호 형식이 아닙니다. 다시 확인해 주세요.');
       return;
     }
 
     try {
       setVerifyingBusiness(true);
+      setBusinessCheckStatus('checking');
+      setBusinessCheckMessage('사업자등록번호를 확인 중입니다. 잠시만 기다려 주세요.');
       setMessage('');
 
       const { data, error } = await supabase.functions.invoke(
@@ -486,17 +539,23 @@ export default function ProfileEditScreen() {
 
       if (error) {
         setBusinessVerified(false);
-        setMessage(error.message);
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage(`${error.message || '사업자번호 확인에 실패했습니다.'} 다시 확인해 주세요.`);
+        setMessage(`${error.message || '사업자번호 확인에 실패했습니다.'} 다시 확인해 주세요.`);
         return;
       }
 
       if (!data?.valid) {
         setBusinessVerified(false);
-        setMessage(data?.error || '유효한 사업자등록번호가 아닙니다.');
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage(`${data?.error || '유효한 사업자등록번호가 아닙니다.'} 다시 확인해 주세요.`);
+        setMessage(`${data?.error || '유효한 사업자등록번호가 아닙니다.'} 다시 확인해 주세요.`);
         return;
       }
 
       setBusinessVerified(true);
+      setBusinessCheckStatus('success');
+      setBusinessCheckMessage('사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.');
 
       if (data?.companyName) {
         setDisplayName(data.companyName);
@@ -505,29 +564,16 @@ export default function ProfileEditScreen() {
       setMessage('사업자번호 1차 확인이 완료되었습니다. 등록증을 첨부하고 인증을 신청해 주세요.');
     } catch (e: any) {
       setBusinessVerified(false);
-      setMessage(e?.message || '사업자 확인 중 오류가 발생했습니다.');
+      setBusinessCheckStatus('error');
+      setBusinessCheckMessage(`${e?.message || '사업자 확인 중 오류가 발생했습니다.'} 다시 확인해 주세요.`);
+      setMessage(`${e?.message || '사업자 확인 중 오류가 발생했습니다.'} 다시 확인해 주세요.`);
     } finally {
       setVerifyingBusiness(false);
     }
   };
 
-  const openStoreLocationPicker = () => {
-    if (isApprovedStoreProfile) {
-      setMessage('가게 위치 변경은 내 가게 관리의 가게 프로필에서 진행해 주세요.');
-      return;
-    }
-
-    router.push({
-      pathname: '/map-picker',
-      params: {
-        lat: storeLatitude != null ? String(storeLatitude) : undefined,
-        lng: storeLongitude != null ? String(storeLongitude) : undefined,
-        returnTo: '/profile/edit',
-        title: '가게 위치 선택',
-        desc: '핀을 옮겨서 실제 가게 위치를 선택해 주세요.',
-        buttonText: '가게 위치로 선택',
-      },
-    } as any);
+  const openStoreProfileSettings = () => {
+    router.push('/store/profile' as any);
   };
 
   const handleSave = async () => {
@@ -554,7 +600,16 @@ export default function ProfileEditScreen() {
         ['pending', 'needs_more_info'].includes(latestStoreRequest.status);
 
       if (!businessNumber.trim()) {
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자등록번호를 입력한 뒤 다시 확인해 주세요.');
         setMessage('사업자등록번호를 입력해 주세요.');
+        return;
+      }
+
+      if (!isValidKoreanBusinessNumber(cleanBusinessNumber)) {
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자등록번호 형식이 맞지 않습니다. 다시 확인해 주세요.');
+        setMessage('유효한 사업자등록번호 형식이 아닙니다. 다시 확인해 주세요.');
         return;
       }
 
@@ -564,6 +619,8 @@ export default function ProfileEditScreen() {
       }
 
       if (!businessVerified && !canReuseBusinessCheck) {
+        setBusinessCheckStatus('error');
+        setBusinessCheckMessage('사업자번호 1차 확인을 먼저 진행해 주세요. 문제가 계속되면 다시 확인해 주세요.');
         setMessage('사업자번호 1차 확인을 먼저 진행해 주세요.');
         return;
       }
@@ -578,6 +635,15 @@ export default function ProfileEditScreen() {
         !storeRestrictionPolicyAgreed
       ) {
         setMessage('가게 인증 신청을 위해 판매자 의무 및 인증 정책에 모두 동의해 주세요.');
+        return;
+      }
+    }
+
+    if (shouldValidatePersonalPhone) {
+      const phoneValidationMessage = getPersonalPhoneValidationMessage(phone);
+
+      if (phoneValidationMessage) {
+        setMessage(phoneValidationMessage);
         return;
       }
     }
@@ -731,13 +797,16 @@ export default function ProfileEditScreen() {
         }
       }
 
+      const nextProfilePhone = shouldValidatePersonalPhone
+        ? normalizePersonalPhone(phone)
+        : phone.trim();
       const { error } = await supabase
         .from('profiles')
         .update({
           user_type: isStaffProfile ? 'staff' : 'personal',
           display_name: displayName.trim(),
           email: email.trim() || null,
-          phone: phone.trim() || null,
+          phone: nextProfilePhone || null,
           is_phone_public: false,
           avatar_path: nextAvatarPath,
           representative_name: null,
@@ -796,7 +865,6 @@ export default function ProfileEditScreen() {
   };
 
   const profileImageUrl = avatarPreviewUri || getProfileImageUrl(avatarPath);
-  const storeLocationSelected = storeLatitude != null && storeLongitude != null;
 
   return (
     <>
@@ -851,6 +919,8 @@ export default function ProfileEditScreen() {
             onPress={() => {
               setUserType('personal');
               setBusinessVerified(false);
+              setBusinessCheckStatus('idle');
+              setBusinessCheckMessage('');
               setBusinessNumber('');
               setRepresentativeName('');
               setBusinessHours('');
@@ -882,6 +952,8 @@ export default function ProfileEditScreen() {
               setUserType('store');
               if (storeVerificationStatus !== 'approved') {
                 setBusinessVerified(false);
+                setBusinessCheckStatus('idle');
+                setBusinessCheckMessage('');
               }
             }}
           >
@@ -920,6 +992,8 @@ export default function ProfileEditScreen() {
               onChangeText={(text) => {
                 setBusinessNumber(text);
                 setBusinessVerified(false);
+                setBusinessCheckStatus('idle');
+                setBusinessCheckMessage('');
               }}
               placeholder="123-45-67890"
               placeholderTextColor={theme.textSubtle}
@@ -929,25 +1003,46 @@ export default function ProfileEditScreen() {
 
             {storeVerificationStatus !== 'approved' ? (
               <TouchableOpacity
-                style={styles.verifyBtn}
+                style={[styles.verifyBtn, verifyingBusiness && styles.verifyBtnDisabled]}
                 onPress={handleVerifyBusiness}
                 disabled={verifyingBusiness}
+                activeOpacity={0.86}
               >
+                {verifyingBusiness ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="search-outline" size={18} color="#fff" />
+                )}
                 <Text style={styles.verifyBtnText}>
-                  {verifyingBusiness ? '사업자 확인 중...' : '사업자번호 1차 확인'}
+                  {verifyingBusiness ? '확인 중...' : '사업자번호 1차 확인'}
                 </Text>
               </TouchableOpacity>
             ) : null}
 
-            <Text style={[styles.statusText, businessVerified && styles.successText]}>
-              {storeVerificationStatus === 'approved'
-                ? '관리자 승인으로 가게 인증이 완료되었습니다.'
-                : storeVerificationStatus === 'pending'
-                  ? '제출한 사업자 정보가 관리자 검수를 기다리고 있습니다.'
-                  : businessVerified
-                    ? '사업자번호 1차 확인 완료'
-                    : '사업자번호 1차 확인 후 인증 신청을 진행해 주세요.'}
-            </Text>
+            <View
+              style={[
+                styles.businessCheckBox,
+                businessCheckTone === 'success' && styles.businessCheckBoxSuccess,
+                businessCheckTone === 'checking' && styles.businessCheckBoxChecking,
+                businessCheckTone === 'error' && styles.businessCheckBoxError,
+              ]}
+            >
+              {verifyingBusiness ? (
+                <ActivityIndicator size="small" color={businessCheckIconColor} />
+              ) : (
+                <Ionicons name={businessCheckIcon} size={18} color={businessCheckIconColor} />
+              )}
+              <Text
+                style={[
+                  styles.businessCheckText,
+                  businessCheckTone === 'success' && styles.businessCheckTextSuccess,
+                  businessCheckTone === 'checking' && styles.businessCheckTextChecking,
+                  businessCheckTone === 'error' && styles.businessCheckTextError,
+                ]}
+              >
+                {businessCheckText}
+              </Text>
+            </View>
 
             <Text style={styles.label}>대표자명</Text>
             <TextInput
@@ -989,18 +1084,20 @@ export default function ProfileEditScreen() {
               editable={!isApprovedStoreProfile}
             />
 
-            <TouchableOpacity
-              style={styles.locationBtn}
-              onPress={openStoreLocationPicker}
-            >
-              <Ionicons name="map-outline" size={18} color={theme.text} />
-              <Text style={styles.locationBtnText}>지도에서 가게 위치 선택</Text>
-            </TouchableOpacity>
+            {isApprovedStoreProfile ? (
+              <TouchableOpacity
+                style={styles.locationBtn}
+                onPress={openStoreProfileSettings}
+              >
+                <Ionicons name="location-outline" size={18} color={theme.primaryText} />
+                <Text style={styles.locationBtnText}>가게 위치 수정</Text>
+              </TouchableOpacity>
+            ) : null}
 
             <Text style={styles.statusText}>
-              {storeLocationSelected
-                ? `${storeLatitude?.toFixed(6)}, ${storeLongitude?.toFixed(6)}`
-                : '지도 위치를 선택하면 판매자 정보에서 지도로 확인할 수 있습니다.'}
+              {isApprovedStoreProfile
+                ? '가게 프로필 화면에서 지도 위치와 상세주소를 수정할 수 있습니다.'
+                : '가게 주소는 직접 입력하고, 지도 노출 위치는 인증 완료 후 내 가게 관리에서 설정할 수 있습니다.'}
             </Text>
 
             {storeVerificationStatus !== 'approved' ? (
@@ -1111,8 +1208,10 @@ export default function ProfileEditScreen() {
         <TextInput
           style={styles.input}
           value={phone}
-          onChangeText={setPhone}
-          placeholder="01012345678"
+          onChangeText={(value) => {
+            setPhone(shouldValidatePersonalPhone ? normalizePersonalPhone(value).slice(0, 11) : value);
+          }}
+          placeholder={shouldValidatePersonalPhone ? '01012341234' : '01012345678'}
           placeholderTextColor={theme.textSubtle}
           keyboardType="phone-pad"
           editable={!(userType === 'store' && storeVerificationStatus === 'approved')}
@@ -1298,32 +1397,85 @@ function createStyles(theme: AppPalette) {
   },
 
   verifyBtn: {
-    backgroundColor: theme.text,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: '#166534',
     borderRadius: 14,
     paddingVertical: 14,
-    alignItems: 'center',
+  },
+
+  verifyBtnDisabled: {
+    opacity: 0.78,
   },
 
   verifyBtnText: {
-    color: theme.background,
+    color: '#fff',
     fontWeight: '800',
   },
 
+  businessCheckBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 14,
+    backgroundColor: theme.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+
+  businessCheckBoxSuccess: {
+    borderColor: theme.successText,
+    backgroundColor: theme.successBg,
+  },
+
+  businessCheckBoxChecking: {
+    borderColor: theme.primary,
+    backgroundColor: theme.primarySoft,
+  },
+
+  businessCheckBoxError: {
+    borderColor: theme.danger,
+    backgroundColor: theme.dangerSoft,
+  },
+
+  businessCheckText: {
+    flex: 1,
+    color: theme.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+
+  businessCheckTextSuccess: {
+    color: theme.successText,
+  },
+
+  businessCheckTextChecking: {
+    color: theme.primary,
+  },
+
+  businessCheckTextError: {
+    color: theme.danger,
+  },
+
   locationBtn: {
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderWidth: 1,
-    borderColor: theme.border,
     borderRadius: 14,
     paddingVertical: 14,
-    backgroundColor: theme.surface,
+    backgroundColor: theme.primary,
   },
 
   locationBtnText: {
-    color: theme.text,
-    fontWeight: '800',
+    color: theme.primaryText,
+    fontWeight: '900',
   },
 
   agreementBox: {

@@ -1,3 +1,4 @@
+// 외부 링크 래퍼: 앱 안에서 브라우저를 열 때 Expo WebBrowser 설정을 통일한다.
 import { Href, Link } from 'expo-router';
 import { openBrowserAsync, WebBrowserPresentationStyle } from 'expo-web-browser';
 import { type ComponentProps } from 'react';
