@@ -1,0 +1,392 @@
+diff --git a/lib/appMode.ts b/lib/appMode.ts
+--- a/lib/appMode.ts
++++ b/lib/appMode.ts
+@@ -1,9 +1,6 @@
+-// 홈과 문의 작성 화면의 방향을 결정한다. 전체 메뉴 노출은 아래 설정과 별개다.
+-// true: AS/간단문의 중심 홈. false: 기존 장터 중심 홈.
++// 앱 노출 모드 스위치.
++// true: 일반 사용자에게 AS/간단문의 중심 화면만 보여준다.
++// false: 기존 인테리어마켓 거래/지도/가게찾기 화면을 다시 보여준다.
+ export const SIMPLE_AS_MODE = true;
+ 
+-// false로 바꾸면 AS 모드에서 레벨/가게 업무 메뉴를 다시 숨긴다.
+-// 판매관리, 구매내역, 관심목록, 키워드 알림은 장터 이용을 위해 계속 노출한다.
+-export const SHOW_FULL_APP_MENUS = true;
+-
+ export const SIMPLE_AS_SERVICE_NAME = '우리집 AS';
+diff --git a/lib/sellerLevel.ts b/lib/sellerLevel.ts
+--- a/lib/sellerLevel.ts
++++ b/lib/sellerLevel.ts
+@@ -1,4 +1,4 @@
+-// 사용자 레벨 규칙: 기존 DB 필드/API 이름은 유지하면서 개인과 가게의 활동 레벨을 표시한다.
++// 판매자 레벨 규칙: 후기/거래 활동 점수를 LV 표시용 값으로 변환한다.
+ export const MAX_SELLER_LEVEL = 100;
+ export const SELLER_LEVEL_POINTS = 100;
+ export const TRADE_COMPLETED_POINTS = 10;
+@@ -108,13 +108,13 @@
+ }
+ 
+ export function getSellerLevelTitle(level: number) {
+-  if (level >= 100) return '레전드 사용자';
+-  if (level >= 75) return '마스터 사용자';
+-  if (level >= 50) return '프리미엄 사용자';
+-  if (level >= 25) return '인기 사용자';
+-  if (level >= 10) return '신뢰 사용자';
+-  if (level >= 5) return '성장 사용자';
+-  return '새싹 사용자';
++  if (level >= 100) return '레전드 판매자';
++  if (level >= 75) return '마스터 판매자';
++  if (level >= 50) return '프리미엄 판매자';
++  if (level >= 25) return '인기 판매자';
++  if (level >= 10) return '신뢰 판매자';
++  if (level >= 5) return '성장 판매자';
++  return '새싹 판매자';
+ }
+ 
+ export function getSellerLevelProgress(points: number) {
+diff --git a/app/(tabs)/my.tsx b/app/(tabs)/my.tsx
+--- a/app/(tabs)/my.tsx
++++ b/app/(tabs)/my.tsx
+@@ -7,7 +7,7 @@
+ import { useAuth } from '../../contexts/AuthContext';
+ import { type AppPalette } from '../../contexts/theme';
+ import { useAppTheme } from '../../hooks/use-app-theme';
+-import { SHOW_FULL_APP_MENUS, SIMPLE_AS_MODE } from '../../lib/appMode';
++import { SIMPLE_AS_MODE } from '../../lib/appMode';
+ import { getProfileImageUrl } from '../../lib/profileImage';
+ import {
+     getSellerLevel,
+@@ -151,7 +151,6 @@
+   const storePlanLabel = getPlanLabel(storeLimits.plan);
+   const hasPremiumStorePlan = storeLimits.isPremium && (isVerifiedStore || isActiveStoreStaff);
+   const hasLocalAdPlan = storeLimits.hasLocalAd && (isVerifiedStore || isActiveStoreStaff);
+-  const showFullMenus = !SIMPLE_AS_MODE || SHOW_FULL_APP_MENUS;
+ 
+   return (
+     <SafeAreaView style={styles.safe} edges={['top']}>
+@@ -183,13 +182,13 @@
+                 <Text style={styles.verifiedText}>가게인증완료</Text>
+               ) : null}
+ 
+-              {hasPremiumStorePlan && showFullMenus ? (
++              {hasPremiumStorePlan && !SIMPLE_AS_MODE ? (
+                 <PremiumStoreBadge label="프리미엄" onPress={() => setPlanModalOpen(true)} />
+               ) : null}
+ 
+-              {hasLocalAdPlan && showFullMenus ? <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} /> : null}
++              {hasLocalAdPlan && !SIMPLE_AS_MODE ? <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} /> : null}
+ 
+-              {showFullMenus ? (
++              {!SIMPLE_AS_MODE ? (
+                 <Text
+                   style={[
+                     styles.levelBadge,
+@@ -206,7 +205,7 @@
+               ) : null}
+             </View>
+ 
+-            {showFullMenus ? (
++            {!SIMPLE_AS_MODE ? (
+               <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
+             ) : null}
+ 
+@@ -239,7 +238,6 @@
+           <>
+             {SIMPLE_AS_MODE ? (
+               <Section title="AS 문의">
+-                <MenuItem title="내 문의 내역" onPress={() => router.push('/my/inquiries' as any)} />
+                 <MenuItem title="문의 채팅" onPress={() => router.push('/(tabs)/chat' as any)} />
+                 <MenuItem title="알림" onPress={() => router.push('/my/notifications' as any)} />
+               </Section>
+@@ -252,7 +250,7 @@
+               />
+             </Section>
+ 
+-            {canViewStorePlan && showFullMenus ? (
++            {canViewStorePlan && !SIMPLE_AS_MODE ? (
+               <Section title="가게 요금제">
+                 <MenuItem
+                   title="요금제 보기"
+@@ -263,8 +261,8 @@
+             ) : null}
+ 
+             {canManageStore ? (
+-              <Section title={showFullMenus ? '내 가게 관리' : '업체 문의 관리'}>
+-                {!showFullMenus ? (
++              <Section title={SIMPLE_AS_MODE ? '업체 문의 관리' : '내 가게 관리'}>
++                {SIMPLE_AS_MODE ? (
+                   <>
+                     <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                     <MenuItem title="AS/문의 접수 관리" onPress={() => router.push('/store/estimates' as any)} />
+@@ -277,7 +275,7 @@
+                     <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
+                     <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
+                     <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
+-                    <MenuItem title={SIMPLE_AS_MODE ? 'AS/견적·고객관리' : '견적/고객관리'} onPress={() => router.push('/store/estimates' as any)} />
++                    <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
+                     <MenuItem title="현장관리" onPress={() => router.push('/store/projects' as any)} />
+                     <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
+                   </>
+@@ -286,12 +284,12 @@
+             ) : null}
+ 
+             {isActiveStoreStaff && !isStoreManager ? (
+-              <Section title={showFullMenus ? '직원 업무' : '직원 문의 관리'}>
++              <Section title={SIMPLE_AS_MODE ? '직원 문의 관리' : '직원 업무'}>
+                 <MenuItem
+-                  title={SIMPLE_AS_MODE ? '배정된 AS/견적·고객관리' : '배정된 견적/고객관리'}
++                  title={SIMPLE_AS_MODE ? '배정된 AS/문의 관리' : '배정된 견적/고객관리'}
+                   onPress={() => router.push('/store/estimates' as any)}
+                 />
+-                {showFullMenus ? (
++                {!SIMPLE_AS_MODE ? (
+                   <MenuItem title="배정된 현장관리" onPress={() => router.push('/store/projects' as any)} />
+                 ) : null}
+               </Section>
+@@ -300,18 +298,11 @@
+             <Section title="나의 거래">
+               <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
+               <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />
++              {!SIMPLE_AS_MODE ? (
++                <MenuItem title="레벨 꾸미기" onPress={() => router.push('/my/level' as any)} />
++              ) : null}
+             </Section>
+ 
+-            {showFullMenus ? (
+-              <Section title="나의 레벨">
+-                <MenuItem
+-                  title="레벨 꾸미기"
+-                  rightText={`LV.${sellerLevel}`}
+-                  onPress={() => router.push('/my/level' as any)}
+-                />
+-              </Section>
+-            ) : null}
+-
+             <Section title="나의 관심">
+               <MenuItem title="관심목록" onPress={() => router.push('/my/favorites' as any)} />
+               <MenuItem title="키워드 알림 설정" onPress={() => router.push('/my/keywords' as any)} />
+diff --git a/app/(tabs)/_layout.tsx b/app/(tabs)/_layout.tsx
+--- a/app/(tabs)/_layout.tsx
++++ b/app/(tabs)/_layout.tsx
+@@ -4,7 +4,7 @@
+ import { useEffect, useState } from 'react';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useAuth } from '../../contexts/AuthContext';
+-import { SHOW_FULL_APP_MENUS, SIMPLE_AS_MODE } from '../../lib/appMode';
++import { SIMPLE_AS_MODE } from '../../lib/appMode';
+ import { useAppTheme } from '../../hooks/use-app-theme';
+ import { getUnreadChatCount } from '../../lib/chat';
+ import { supabase } from '../../lib/supabase';
+@@ -15,7 +15,6 @@
+   const pathname = usePathname();
+   const theme = useAppTheme();
+   const insets = useSafeAreaInsets();
+-  const showFullMenus = !SIMPLE_AS_MODE || SHOW_FULL_APP_MENUS;
+ 
+   const [chatBadge, setChatBadge] = useState(0);
+   const tabBarBottomPadding = Math.max(insets.bottom, 8);
+@@ -162,7 +161,7 @@
+           },
+         }}
+         options={{
+-          title: SIMPLE_AS_MODE && !showFullMenus ? '문의채팅' : '채팅',
++          title: SIMPLE_AS_MODE ? '문의채팅' : '채팅',
+ 
+           tabBarBadge:
+             chatBadge > 0
+diff --git a/app/my/level.tsx b/app/my/level.tsx
+--- a/app/my/level.tsx
++++ b/app/my/level.tsx
+@@ -1,7 +1,7 @@
+-// 사용자 레벨 화면: 개인과 가게가 획득한 활동 점수와 해금된 프로필 꾸미기를 보여준다.
++// 판매자 레벨 화면: 후기/활동 점수를 기반으로 프로필에 표시할 레벨 정보를 보여준다.
+ import Ionicons from '@expo/vector-icons/Ionicons';
+ import { useFocusEffect } from 'expo-router';
+-import { useCallback, useMemo, useState } from 'react';
++import { useCallback, useState } from 'react';
+ import {
+   Alert,
+   Platform,
+@@ -13,8 +13,6 @@
+   View,
+ } from 'react-native';
+ import { useAuth } from '../../contexts/AuthContext';
+-import { type AppPalette } from '../../contexts/theme';
+-import { useAppTheme } from '../../hooks/use-app-theme';
+ import {
+   SELLER_LEVEL_STYLES,
+   getSellerLevel,
+@@ -36,8 +34,6 @@
+ 
+ export default function SellerLevelScreen() {
+   const { user } = useAuth();
+-  const theme = useAppTheme();
+-  const styles = useMemo(() => createStyles(theme), [theme]);
+   const [profile, setProfile] = useState<any | null>(null);
+   const [saving, setSaving] = useState(false);
+ 
+@@ -102,11 +98,11 @@
+           styles.summary,
+           {
+             borderColor: selectedStyle.borderColor,
+-            backgroundColor: theme.scheme === 'dark' ? theme.surface : selectedStyle.backgroundColor,
++            backgroundColor: selectedStyle.backgroundColor,
+           },
+         ]}
+       >
+-        <Text style={[styles.levelText, { color: theme.scheme === 'dark' ? theme.text : selectedStyle.textColor }]}>
++        <Text style={[styles.levelText, { color: selectedStyle.textColor }]}>
+           LV.{level}
+         </Text>
+         <Text style={styles.title}>{getSellerLevelTitle(level)}</Text>
+@@ -123,7 +119,7 @@
+       <View style={styles.section}>
+         <Text style={styles.sectionTitle}>표시 설정</Text>
+         <SettingRow
+-          label="프로필에 표시"
++          label="판매자 정보에 표시"
+           value={profile?.show_level_on_profile !== false}
+           onValueChange={(value) => updateProfile({ show_level_on_profile: value })}
+         />
+@@ -147,10 +143,8 @@
+                 style={[
+                   styles.styleCard,
+                   {
+-                    borderColor: selected
+-                      ? theme.scheme === 'dark' ? theme.primary : style.textColor
+-                      : style.borderColor,
+-                    backgroundColor: theme.scheme === 'dark' ? theme.surface : style.backgroundColor,
++                    borderColor: selected ? style.textColor : style.borderColor,
++                    backgroundColor: style.backgroundColor,
+                     opacity: unlocked ? 1 : 0.45,
+                   },
+                 ]}
+@@ -159,11 +153,11 @@
+                 activeOpacity={0.8}
+               >
+                 <View style={styles.styleHeader}>
+-                  <Text style={[styles.styleLabel, { color: theme.scheme === 'dark' ? theme.text : style.textColor }]}>
++                  <Text style={[styles.styleLabel, { color: style.textColor }]}>
+                     {style.label}
+                   </Text>
+                   {selected ? (
+-                    <Ionicons name="checkmark-circle" size={18} color={theme.scheme === 'dark' ? theme.primary : style.textColor} />
++                    <Ionicons name="checkmark-circle" size={18} color={style.textColor} />
+                   ) : null}
+                 </View>
+                 <Text style={styles.unlockText}>LV.{style.minLevel}부터</Text>
+@@ -185,26 +179,18 @@
+   value: boolean;
+   onValueChange: (value: boolean) => void;
+ }) {
+-  const theme = useAppTheme();
+-  const styles = useMemo(() => createStyles(theme), [theme]);
+-
+   return (
+     <View style={styles.settingRow}>
+       <Text style={styles.settingLabel}>{label}</Text>
+-      <Switch
+-        value={value}
+-        onValueChange={onValueChange}
+-        trackColor={{ false: theme.border, true: '#166534' }}
+-      />
++      <Switch value={value} onValueChange={onValueChange} />
+     </View>
+   );
+ }
+ 
+-function createStyles(theme: AppPalette) {
+-  return StyleSheet.create({
++const styles = StyleSheet.create({
+   screen: {
+     flex: 1,
+-    backgroundColor: theme.background,
++    backgroundColor: '#f9fafb',
+   },
+   content: {
+     padding: 16,
+@@ -224,52 +210,51 @@
+     marginTop: 4,
+     fontSize: 18,
+     fontWeight: '900',
+-    color: theme.text,
++    color: '#111827',
+   },
+   points: {
+     marginTop: 4,
+     fontSize: 14,
+     fontWeight: '800',
+-    color: theme.textMuted,
++    color: '#4b5563',
+   },
+   progressTrack: {
+     marginTop: 14,
+     height: 9,
+     borderRadius: 999,
+-    backgroundColor: theme.border,
++    backgroundColor: 'rgba(17,24,39,0.12)',
+     overflow: 'hidden',
+   },
+   progressFill: {
+     height: '100%',
+     borderRadius: 999,
+-    backgroundColor: theme.primary,
++    backgroundColor: '#111827',
+   },
+   progressText: {
+     marginTop: 8,
+-    color: theme.textMuted,
++    color: '#4b5563',
+     fontSize: 13,
+     fontWeight: '700',
+   },
+   section: {
+-    backgroundColor: theme.background,
++    backgroundColor: '#fff',
++    borderRadius: 16,
+     padding: 14,
+     gap: 12,
+   },
+   sectionTitle: {
+     fontSize: 15,
+     fontWeight: '900',
+-    color: theme.text,
++    color: '#111827',
+   },
+   settingRow: {
+     minHeight: 44,
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+-    gap: 12,
+   },
+   settingLabel: {
+-    color: theme.text,
+-    flexShrink: 1,
++    color: '#374151',
+     fontWeight: '800',
+   },
+   styleGrid: {
+@@ -291,9 +276,8 @@
+   },
+   unlockText: {
+     marginTop: 4,
+-    color: theme.textMuted,
++    color: '#6b7280',
+     fontSize: 12,
+     fontWeight: '700',
+   },
+ });
+-}
+diff --git a/app/review/create.tsx b/app/review/create.tsx
+--- a/app/review/create.tsx
++++ b/app/review/create.tsx
+@@ -365,7 +365,7 @@
+ 
+       <Text style={styles.title}>거래 후기를 남겨요</Text>
+       <Text style={styles.desc}>
+-        선택한 항목에 따라 상대방의 사용자 레벨 점수가 자동으로 반영됩니다.
++        선택한 항목에 따라 판매자 레벨 점수가 자동으로 반영됩니다.
+       </Text>
+ 
+       <View style={styles.segment}>

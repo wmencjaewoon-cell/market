@@ -39,6 +39,7 @@ export default function MyStackLayout() {
   <Stack.Screen name="level" options={{ title: '레벨 꾸미기' }} />
   <Stack.Screen name="keywords" options={{ title: '키워드 알림' }} />
   <Stack.Screen name="notifications" options={{ title: '알림' }} />
+  <Stack.Screen name="inquiries" options={{ title: '내 문의 내역' }} />
   <Stack.Screen name="privacy" options={{ title: '개인정보처리방침' }} />
   <Stack.Screen name="terms" options={{ title: '이용약관' }} />
   <Stack.Screen name="operation-policy" options={{ title: '운영정책' }} />

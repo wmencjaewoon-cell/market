@@ -1,9 +1,9 @@
 // 앱 최상위 레이아웃: 인증 컨텍스트, 테마, 알림 토큰, 네이티브 제스처 루트를 연결한다.
 // 전역 Provider나 네이티브 초기화가 필요하면 이 파일에서 시작한다.
 import {
-  DarkTheme,
-  DefaultTheme,
-  ThemeProvider,
+    DarkTheme,
+    DefaultTheme,
+    ThemeProvider,
 } from '@react-navigation/native';
 import * as NavigationBar from 'expo-navigation-bar';
 import { router, Stack, usePathname } from 'expo-router';
@@ -222,7 +222,14 @@ function RootNavigator() {
             fullScreenGestureEnabled: true,
           }}
         />
-       
+        <Stack.Screen
+          name="explore"
+          options={{
+            headerShown: false,
+            gestureEnabled: true,
+            fullScreenGestureEnabled: true,
+          }}
+        />
       </Stack>
     </SafeAreaView>
   );

@@ -7,18 +7,19 @@ import StorePlanModal, { LocalAdStoreBadge, PremiumStoreBadge } from '../../comp
 import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
+import { SHOW_FULL_APP_MENUS, SIMPLE_AS_MODE } from '../../lib/appMode';
 import { getProfileImageUrl } from '../../lib/profileImage';
 import {
-  getSellerLevel,
-  getSellerLevelStyle,
-  getSellerLevelTitle,
-  getSellerPoints,
+    getSellerLevel,
+    getSellerLevelStyle,
+    getSellerLevelTitle,
+    getSellerPoints,
 } from '../../lib/sellerLevel';
 import {
-  DEFAULT_STORE_LIMITS,
-  getPlanLabel,
-  getStoreSubscriptionLimits,
-  type StoreSubscriptionLimits,
+    DEFAULT_STORE_LIMITS,
+    getPlanLabel,
+    getStoreSubscriptionLimits,
+    type StoreSubscriptionLimits,
 } from '../../lib/storeLimits';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
@@ -150,6 +151,7 @@ export default function MyScreen() {
   const storePlanLabel = getPlanLabel(storeLimits.plan);
   const hasPremiumStorePlan = storeLimits.isPremium && (isVerifiedStore || isActiveStoreStaff);
   const hasLocalAdPlan = storeLimits.hasLocalAd && (isVerifiedStore || isActiveStoreStaff);
+  const showFullMenus = !SIMPLE_AS_MODE || SHOW_FULL_APP_MENUS;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -181,28 +183,32 @@ export default function MyScreen() {
                 <Text style={styles.verifiedText}>가게인증완료</Text>
               ) : null}
 
-              {hasPremiumStorePlan ? (
+              {hasPremiumStorePlan && showFullMenus ? (
                 <PremiumStoreBadge label="프리미엄" onPress={() => setPlanModalOpen(true)} />
               ) : null}
 
-              {hasLocalAdPlan ? <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} /> : null}
+              {hasLocalAdPlan && showFullMenus ? <LocalAdStoreBadge label="광고" onPress={() => setPlanModalOpen(true)} /> : null}
 
-              <Text
-                style={[
-                  styles.levelBadge,
-                  {
-                    borderColor: sellerLevelStyle.borderColor,
-                    backgroundColor:
-                      theme.scheme === 'dark' ? theme.surface : sellerLevelStyle.backgroundColor,
-                    color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
-                  },
-                ]}
-              >
-                LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
-              </Text>
+              {showFullMenus ? (
+                <Text
+                  style={[
+                    styles.levelBadge,
+                    {
+                      borderColor: sellerLevelStyle.borderColor,
+                      backgroundColor:
+                        theme.scheme === 'dark' ? theme.surface : sellerLevelStyle.backgroundColor,
+                      color: theme.scheme === 'dark' ? theme.text : sellerLevelStyle.textColor,
+                    },
+                  ]}
+                >
+                  LV.{sellerLevel} {getSellerLevelTitle(sellerLevel)}
+                </Text>
+              ) : null}
             </View>
 
-            <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
+            {showFullMenus ? (
+              <Text style={styles.levelSub}>{sellerPoints.toLocaleString()} XP</Text>
+            ) : null}
 
             {publicPhone ? <Text style={styles.sub}>{publicPhone}</Text> : null}
 
@@ -231,6 +237,14 @@ export default function MyScreen() {
 
         {user ? (
           <>
+            {SIMPLE_AS_MODE ? (
+              <Section title="AS 문의">
+                <MenuItem title="내 문의 내역" onPress={() => router.push('/my/inquiries' as any)} />
+                <MenuItem title="문의 채팅" onPress={() => router.push('/(tabs)/chat' as any)} />
+                <MenuItem title="알림" onPress={() => router.push('/my/notifications' as any)} />
+              </Section>
+            ) : null}
+
             <Section title="일정">
               <MenuItem
                 title={canManageStore || isActiveStoreStaff ? '업무/개인 일정표' : '내 일정표'}
@@ -238,7 +252,7 @@ export default function MyScreen() {
               />
             </Section>
 
-            {canViewStorePlan ? (
+            {canViewStorePlan && showFullMenus ? (
               <Section title="가게 요금제">
                 <MenuItem
                   title="요금제 보기"
@@ -249,30 +263,54 @@ export default function MyScreen() {
             ) : null}
 
             {canManageStore ? (
-              <Section title="내 가게 관리">
-                <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
-                <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
-                <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
-                <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
-                <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
-                <MenuItem title="견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
-                <MenuItem title="현장관리" onPress={() => router.push('/store/projects' as any)} />
-                <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
+              <Section title={showFullMenus ? '내 가게 관리' : '업체 문의 관리'}>
+                {!showFullMenus ? (
+                  <>
+                    <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                    <MenuItem title="AS/문의 접수 관리" onPress={() => router.push('/store/estimates' as any)} />
+                    <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
+                  </>
+                ) : (
+                  <>
+                    <MenuItem title="가게 프로필" onPress={() => router.push('/store/profile' as any)} />
+                    <MenuItem title="가게 대시보드" onPress={() => router.push('/store/dashboard' as any)} />
+                    <MenuItem title="직원 관리" onPress={() => router.push('/store/staff' as any)} />
+                    <MenuItem title="상품등록" onPress={() => router.push('/store/product-create' as any)} />
+                    <MenuItem title="상품 상태관리" onPress={() => router.push('/store/products' as any)} />
+                    <MenuItem title={SIMPLE_AS_MODE ? 'AS/견적·고객관리' : '견적/고객관리'} onPress={() => router.push('/store/estimates' as any)} />
+                    <MenuItem title="현장관리" onPress={() => router.push('/store/projects' as any)} />
+                    <MenuItem title="문의 통계" onPress={() => router.push('/store/dashboard' as any)} />
+                  </>
+                )}
               </Section>
             ) : null}
 
             {isActiveStoreStaff && !isStoreManager ? (
-              <Section title="직원 업무">
-                <MenuItem title="배정된 견적/고객관리" onPress={() => router.push('/store/estimates' as any)} />
-                <MenuItem title="배정된 현장관리" onPress={() => router.push('/store/projects' as any)} />
+              <Section title={showFullMenus ? '직원 업무' : '직원 문의 관리'}>
+                <MenuItem
+                  title={SIMPLE_AS_MODE ? '배정된 AS/견적·고객관리' : '배정된 견적/고객관리'}
+                  onPress={() => router.push('/store/estimates' as any)}
+                />
+                {showFullMenus ? (
+                  <MenuItem title="배정된 현장관리" onPress={() => router.push('/store/projects' as any)} />
+                ) : null}
               </Section>
             ) : null}
 
             <Section title="나의 거래">
               <MenuItem title="판매관리" onPress={() => router.push('/my/sales' as any)} />
               <MenuItem title="구매내역" onPress={() => router.push('/my/purchases' as any)} />
-              <MenuItem title="레벨 꾸미기" onPress={() => router.push('/my/level' as any)} />
             </Section>
+
+            {showFullMenus ? (
+              <Section title="나의 레벨">
+                <MenuItem
+                  title="레벨 꾸미기"
+                  rightText={`LV.${sellerLevel}`}
+                  onPress={() => router.push('/my/level' as any)}
+                />
+              </Section>
+            ) : null}
 
             <Section title="나의 관심">
               <MenuItem title="관심목록" onPress={() => router.push('/my/favorites' as any)} />

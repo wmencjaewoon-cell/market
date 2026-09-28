@@ -1,0 +1,548 @@
+diff --git a/components/AsHomeScreen.tsx b/components/AsHomeScreen.tsx
+index c832286..65a15ce 100644
+--- a/components/AsHomeScreen.tsx
++++ b/components/AsHomeScreen.tsx
+@@ -1,24 +1,18 @@
+ import Ionicons from '@expo/vector-icons/Ionicons';
+ import { router, useFocusEffect, type Href } from 'expo-router';
+ import { useCallback, useMemo, useRef, useState } from 'react';
+-import { ActivityIndicator, AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
++import { ActivityIndicator, Image, Platform, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+ import { SafeAreaView } from 'react-native-safe-area-context';
+ import { useAuth } from '../contexts/AuthContext';
+ import { useAppTheme } from '../hooks/use-app-theme';
+ import { getAsPalette, type AsPalette } from '../lib/asAppearance';
+ import { fetchAsHomeReviews, type AsHomeReview } from '../lib/asHomeData';
+-import { fetchAsHomeVisits, type AsHomeVisit } from '../lib/asHomeVisits';
+ import { AS_HOME_CATEGORIES } from '../lib/asInquiry';
+ import { fetchMyRegions, fetchMyRegionSettings } from '../lib/region';
+ import { supabase } from '../lib/supabase';
+ import { useTabRefresh } from '../lib/tabRefresh';
+ import AsServiceHeader from './AsServiceHeader';
+ import InlineMap from './InlineMap';
+-import AsHomeVisitSection from './AsHomeVisitSection';
+-
+-// 실제 후기가 충분히 쌓이면 true로 변경한다. 숨긴 동안에는 조회 요청도 보내지 않는다.
+-const SHOW_AS_HOME_REVIEWS = false;
+-const CATEGORY_ROWS = [AS_HOME_CATEGORIES.slice(0, 3), AS_HOME_CATEGORIES.slice(3, 6)];
+ 
+ type RecentInquiry = { id: number; title: string; created_at: string };
+ const shortcuts = [
+@@ -34,13 +28,12 @@ export default function AsHomeScreen() {
+   const theme = useMemo(() => getAsPalette(base), [base]);
+   const styles = useMemo(() => createStyles(theme), [theme]);
+   const [recent, setRecent] = useState<{ userId: string; inquiry: RecentInquiry | null; count: number } | null>(null);
+-  const [visitResult, setVisitResult] = useState<{ userId: string; visits: AsHomeVisit[] } | null>(null);
+-  const [visitsFailed, setVisitsFailed] = useState(false);
+   const [reviews, setReviews] = useState<AsHomeReview[]>([]);
+   const [reviewsFailed, setReviewsFailed] = useState(false);
+   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [refreshing, setRefreshing] = useState(false);
++  const [failed, setFailed] = useState(false);
+   const requestVersion = useRef(0);
+   const navigating = useRef(false);
+   const myRecent = recent?.userId === userId ? recent : null;
+@@ -56,14 +49,13 @@ export default function AsHomeScreen() {
+     const version = ++requestVersion.current;
+     setRefreshing(refresh);
+     setLoading(true);
+-    setVisitsFailed(false);
++    setFailed(false);
+     setReviewsFailed(false);
+-    const [inquiry, feedback, regions, visits] = await Promise.allSettled([
++    const [inquiry, feedback, regions] = await Promise.allSettled([
+       userId ? supabase.from('estimate_requests').select('id, title, created_at', { count: 'exact' })
+         .eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle() : Promise.resolve(null),
+-      SHOW_AS_HOME_REVIEWS ? fetchAsHomeReviews() : Promise.resolve([] as AsHomeReview[]),
++      fetchAsHomeReviews(),
+       Promise.all([fetchMyRegions(), fetchMyRegionSettings()]),
+-      userId ? fetchAsHomeVisits(userId) : Promise.resolve([] as AsHomeVisit[]),
+     ]);
+     // 계정 전환이나 화면 이탈 후 늦게 도착한 응답은 적용하지 않는다.
+     if (version !== requestVersion.current) return;
+@@ -71,9 +63,8 @@ export default function AsHomeScreen() {
+       setRecent(userId ? { userId, inquiry: inquiry.value?.data ?? null, count: inquiry.value?.count ?? 0 } : null);
+     } else {
+       setRecent(null);
++      setFailed(true);
+     }
+-    setVisitResult(userId && visits.status === 'fulfilled' ? { userId, visits: visits.value } : null);
+-    setVisitsFailed(visits.status === 'rejected');
+     setReviews(feedback.status === 'fulfilled' ? feedback.value : []);
+     setReviewsFailed(feedback.status === 'rejected');
+     if (regions.status === 'fulfilled') {
+@@ -88,13 +79,9 @@ export default function AsHomeScreen() {
+   useFocusEffect(useCallback(() => {
+     navigating.current = false;
+     setRecent(null);
+-    setVisitResult(null);
+     setLocation(null);
+     void loadHome();
+-    const subscription = AppState.addEventListener('change', state => {
+-      if (state === 'active') void loadHome();
+-    });
+-    return () => { requestVersion.current += 1; subscription.remove(); };
++    return () => { requestVersion.current += 1; };
+   }, [loadHome]));
+   useTabRefresh('home', () => { void loadHome(true); });
+ 
+@@ -138,24 +125,33 @@ export default function AsHomeScreen() {
+             <View style={styles.flex}><Text style={styles.sectionTitle}>분야별 빠른 접수</Text><Text style={styles.muted}>고장 난 곳을 선택해 주세요</Text></View>
+             <TouchableOpacity style={styles.textButton} accessibilityRole="button" onPress={() => startInquiry()}><Text style={styles.linkText}>전체보기</Text></TouchableOpacity>
+           </View>
+-          <View style={styles.categoryGrid} testID="as-home-categories">
+-            {/* ScrollView 안의 백분율 높이는 줄바꿈 높이를 잘못 키울 수 있어 두 행으로 나눈다. */}
+-            {CATEGORY_ROWS.map((row, rowIndex) => <View key={rowIndex} style={styles.categoryRow}>
+-              {row.map((item, index) => <TouchableOpacity key={item.category} style={styles.category} accessibilityRole="button" accessibilityLabel={`${item.label} 문의`} onPress={() => startInquiry(item.category)}>
+-                <View style={styles.categoryIcon}><Ionicons name={item.icon} size={27} color={index === 1 ? theme.accentText : index === 2 ? theme.positive : theme.primary} /></View>
++          <View style={styles.categoryGrid}>
++            {AS_HOME_CATEGORIES.map((item, index) => <View key={item.category} style={styles.categoryCell}>
++              <TouchableOpacity style={styles.category} accessibilityRole="button" accessibilityLabel={`${item.label} 문의`} onPress={() => startInquiry(item.category)}>
++                <View style={styles.categoryIcon}><Ionicons name={item.icon} size={27} color={index % 3 === 1 ? theme.accentText : index % 3 === 2 ? theme.positive : theme.primary} /></View>
+                 <Text style={styles.categoryTitle}>{item.label}</Text><Text style={styles.categoryDetail}>{item.detail}</Text>
+-              </TouchableOpacity>)}
++              </TouchableOpacity>
+             </View>)}
+           </View>
+         </View>
+ 
+-        <AsHomeVisitSection
+-          key={userId || 'guest'} theme={theme} loggedIn={!!userId} loading={loading}
+-          failed={visitsFailed} visits={visitResult?.userId === userId ? visitResult?.visits ?? [] : []}
+-          onRetry={() => void loadHome(true)} navigate={navigate}
+-        />
++        <View style={styles.requestBand}>
++          <View style={styles.requestIcon}><Ionicons name="notifications-outline" size={21} color="#fff" /></View>
++          <View style={styles.flex}>
++            <Text style={styles.requestLabel}>내 문의 현황</Text>
++            {!userId ? <TouchableOpacity accessibilityRole="button" style={styles.stateButton} onPress={() => navigate('/login?redirect=/my/inquiries' as Href)}><Text style={styles.rowText}>로그인하고 문의를 확인하세요</Text></TouchableOpacity>
++              : loading ? <View style={styles.inline}><ActivityIndicator color={theme.primary} /><Text style={styles.muted}>문의 내역 확인 중...</Text></View>
++              : failed ? <TouchableOpacity accessibilityRole="button" style={styles.stateButton} onPress={() => void loadHome(true)}><Text style={styles.rowText}>문의 내역 다시 불러오기</Text></TouchableOpacity>
++              : myRecent?.inquiry ? <><Text style={styles.rowText} numberOfLines={2}>{myRecent.inquiry.title}</Text><Text style={styles.muted}>{new Date(myRecent.inquiry.created_at).toLocaleDateString('ko-KR')} 접수</Text></>
++              : <Text style={styles.rowText}>아직 접수한 문의가 없어요</Text>}
++            <View style={styles.requestActions}>
++              <TouchableOpacity style={styles.secondaryButton} accessibilityRole="button" onPress={() => navigate('/my/inquiries' as Href)}><Ionicons name="document-text-outline" size={17} color={theme.primary} /><Text style={styles.linkText}>문의 내역</Text></TouchableOpacity>
++              <TouchableOpacity style={styles.chatButton} accessibilityRole="button" onPress={() => navigate('/(tabs)/chat')}><Ionicons name="chatbubble-outline" size={17} color="#fff" /><Text style={styles.chatText}>채팅 확인</Text></TouchableOpacity>
++            </View>
++          </View>
++        </View>
+ 
+-        {SHOW_AS_HOME_REVIEWS ? <View style={styles.section}>
++        <View style={styles.section}>
+           <Text style={styles.sectionTitle}>이웃들의 가게 이용 후기</Text><Text style={styles.muted}>실제 이용자가 남긴 이야기</Text>
+           {loading ? <ActivityIndicator color={theme.primary} /> : reviewsFailed ? <TouchableOpacity style={styles.emptyReview} accessibilityRole="button" onPress={() => void loadHome(true)}><Ionicons name="refresh" size={24} color={theme.primary} /><Text style={styles.muted}>후기 다시 불러오기</Text></TouchableOpacity>
+             : !reviews.length ? <View style={styles.emptyReview}><Ionicons name="chatbubbles-outline" size={30} color={theme.primary} /><Text style={styles.rowText}>등록된 가게 후기가 아직 없어요</Text></View>
+@@ -165,7 +161,7 @@ export default function AsHomeScreen() {
+               {review.images.length > 0 ? <View style={styles.reviewImages}>{review.images.map((photo) => <Image key={photo.image_path} source={{ uri: supabase.storage.from('review-images').getPublicUrl(photo.image_path).data.publicUrl }} style={styles.reviewImage} accessibilityLabel="후기 첨부사진" />)}</View> : null}
+               <View style={styles.reviewFooter}><Text style={styles.linkText}>{review.storeName}</Text><Ionicons name="chevron-forward" size={18} color={theme.primary} /></View>
+             </TouchableOpacity>)}
+-        </View> : null}
++        </View>
+ 
+         <View style={styles.mapSection}>
+           <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>내 주변 부품·철물점 찾기</Text><TouchableOpacity style={styles.textButton} accessibilityRole="button" onPress={() => navigate('/explore?tab=map' as Href)}><Text style={styles.linkText}>지도 보기</Text></TouchableOpacity></View>
+@@ -213,14 +209,22 @@ function createStyles(theme: AsPalette) {
+     sectionTitle: { fontSize: 19, lineHeight: 28, fontWeight: '700', color: theme.text, flexShrink: 1 },
+     textButton: { minHeight: 44, justifyContent: 'center' },
+     linkText: { color: theme.primary, fontSize: 13, lineHeight: 20, fontWeight: '600', flexShrink: 1 },
+-    categoryGrid: { gap: 10 },
+-    categoryRow: { flexDirection: 'row', alignItems: 'stretch', gap: 10 },
+-    category: { flex: 1, minWidth: 0, minHeight: 134, paddingHorizontal: 4, paddingVertical: 14, alignItems: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.surface, boxShadow: '0px 2px 8px rgba(30,41,59,0.06)' },
++    categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5, rowGap: 10 },
++    categoryCell: { width: '33.333333%', paddingHorizontal: 5 },
++    category: { minHeight: 134, height: '100%', paddingHorizontal: 4, paddingVertical: 14, alignItems: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.surface, boxShadow: '0px 2px 8px rgba(30,41,59,0.06)' },
+     categoryIcon: { width: 48, height: 48, borderRadius: 8, backgroundColor: theme.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+     categoryTitle: { fontSize: 13, lineHeight: 20, color: theme.text, fontWeight: '700', textAlign: 'center' },
+     categoryDetail: { fontSize: 11, lineHeight: 17, color: theme.textMuted, textAlign: 'center' },
++    requestBand: { padding: 20, flexDirection: 'row', gap: 12, backgroundColor: theme.surfaceSoft },
++    requestIcon: { width: 38, height: 38, borderRadius: 8, backgroundColor: theme.action, alignItems: 'center', justifyContent: 'center' },
++    requestLabel: { fontSize: 12, lineHeight: 18, fontWeight: '700', color: theme.primary, marginBottom: 4 },
++    requestActions: { flexDirection: 'row', gap: 8, marginTop: 12 },
++    secondaryButton: { flex: 1, minHeight: 44, padding: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.surface },
++    chatButton: { flex: 1, minHeight: 44, padding: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.action },
++    chatText: { fontSize: 13, lineHeight: 20, fontWeight: '600', color: '#fff', flexShrink: 1 },
+     rowText: { fontSize: 15, lineHeight: 23, fontWeight: '600', color: theme.text },
+     muted: { fontSize: 12, lineHeight: 19, color: theme.textMuted, flexShrink: 1 },
++    stateButton: { minHeight: 44, justifyContent: 'center' },
+     emptyReview: { paddingVertical: 26, gap: 10, alignItems: 'center' },
+     review: { borderRadius: 8, backgroundColor: theme.surface, padding: 16, gap: 12, boxShadow: '0px 2px 8px rgba(30,41,59,0.06)' },
+     reviewAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.primarySoft },
+diff --git a/components/AsHomeVisitSection.tsx b/components/AsHomeVisitSection.tsx
+deleted file mode 100644
+index 9362b0e..0000000
+--- a/components/AsHomeVisitSection.tsx
++++ /dev/null
+@@ -1,113 +0,0 @@
+-import Ionicons from '@expo/vector-icons/Ionicons';
+-import { type Href } from 'expo-router';
+-import { useMemo, useRef, useState } from 'react';
+-import { ActivityIndicator, Alert, Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+-import { type AsPalette } from '../lib/asAppearance';
+-import { type AsHomeVisit } from '../lib/asHomeVisits';
+-
+-type Props = {
+-  theme: AsPalette;
+-  loggedIn: boolean;
+-  loading: boolean;
+-  failed: boolean;
+-  visits: AsHomeVisit[];
+-  onRetry: () => void;
+-  navigate: (href: Href) => void;
+-};
+-
+-export default function AsHomeVisitSection({ theme, loggedIn, loading, failed, visits, onRetry, navigate }: Props) {
+-  const styles = useMemo(() => createStyles(theme), [theme]);
+-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+-  const [calling, setCalling] = useState(false);
+-  const callInFlight = useRef(false);
+-  const index = Math.max(0, visits.findIndex(visit => visit.roomId === selectedRoomId));
+-  const visit = visits[index];
+-  const ready = loggedIn && !loading && !failed && visit;
+-
+-  const callStore = async () => {
+-    if (!ready || !visit.storePhone || callInFlight.current) return;
+-    callInFlight.current = true;
+-    setCalling(true);
+-    try {
+-      await Linking.openURL(`tel:${visit.storePhone}`);
+-    } catch {
+-      const message = '전화 앱을 열지 못했습니다. 채팅으로 가게에 연락해 주세요.';
+-      if (Platform.OS === 'web') window.alert(message);
+-      else Alert.alert('전화 연결 실패', message);
+-    } finally {
+-      callInFlight.current = false;
+-      setCalling(false);
+-    }
+-  };
+-
+-  return <View style={styles.section} testID="as-home-visits">
+-    <View style={styles.header}>
+-      <View style={styles.icon}><Ionicons name="notifications-outline" size={21} color="#fff" /></View>
+-      <View style={styles.flex}>
+-        <Text style={styles.label}>{ready ? '방문 예약 진행중' : '방문 예약'}</Text>
+-        {ready ? <Text style={styles.date}>{new Date(visit.appointmentAt).toLocaleString('ko-KR', {
+-          month: 'long', day: 'numeric', weekday: 'short', hour: 'numeric', minute: '2-digit',
+-        })}</Text> : null}
+-      </View>
+-      {ready && visits.length > 1 ? <View style={styles.pager}>
+-        <TouchableOpacity style={styles.pagerButton} accessibilityRole="button" accessibilityLabel="이전 방문 일정" disabled={index === 0} accessibilityState={{ disabled: index === 0 }} onPress={() => setSelectedRoomId(visits[index - 1].roomId)}>
+-          <Ionicons name="chevron-back" size={18} color={index === 0 ? theme.textMuted : theme.primary} />
+-        </TouchableOpacity>
+-        <Text style={styles.count}>{index + 1}/{visits.length}</Text>
+-        <TouchableOpacity style={styles.pagerButton} accessibilityRole="button" accessibilityLabel="다음 방문 일정" disabled={index === visits.length - 1} accessibilityState={{ disabled: index === visits.length - 1 }} onPress={() => setSelectedRoomId(visits[index + 1].roomId)}>
+-          <Ionicons name="chevron-forward" size={18} color={index === visits.length - 1 ? theme.textMuted : theme.primary} />
+-        </TouchableOpacity>
+-      </View> : null}
+-    </View>
+-    {!loggedIn ? <>
+-      <Text style={styles.title}>로그인하고 방문 일정을 확인하세요</Text>
+-      <TouchableOpacity style={styles.primary} accessibilityRole="button" onPress={() => navigate('/login?redirect=/home' as Href)}><Text style={styles.primaryText}>로그인</Text></TouchableOpacity>
+-    </> : loading ? <View style={styles.loading}><ActivityIndicator color={theme.primary} /><Text style={styles.muted}>방문 일정 확인 중...</Text></View>
+-      : failed ? <>
+-        <Text style={styles.title}>방문 일정을 불러오지 못했어요</Text>
+-        <TouchableOpacity style={styles.secondary} accessibilityRole="button" accessibilityLabel="방문 일정 다시 불러오기" onPress={onRetry}><Ionicons name="refresh" size={18} color={theme.primary} /><Text style={styles.secondaryText}>다시 시도</Text></TouchableOpacity>
+-      </> : visit ? <>
+-        <Text style={styles.title}>{visit.title}</Text>
+-        <View style={styles.statusRow}><Text style={styles.status}>일정 제안</Text><Text style={styles.muted}>{visit.storeName}</Text></View>
+-        <View style={styles.actions}>
+-          <TouchableOpacity style={[styles.secondary, (!visit.storePhone || calling) && styles.disabled]} accessibilityRole="button" accessibilityLabel={visit.storePhone ? `${visit.storeName} 전화 연결` : '연락처 미등록'} accessibilityState={{ disabled: !visit.storePhone || calling }} disabled={!visit.storePhone || calling} onPress={() => void callStore()}>
+-            <Ionicons name="call-outline" size={18} color={theme.primary} /><Text style={styles.secondaryText}>{visit.storePhone ? '전화 연결' : '연락처 미등록'}</Text>
+-          </TouchableOpacity>
+-          <TouchableOpacity style={styles.primary} accessibilityRole="button" accessibilityLabel={`${visit.title} 실시간 상담`} onPress={() => navigate({ pathname: '/chat/[roomId]', params: { roomId: visit.roomId } })}>
+-            <Ionicons name="chatbubble-outline" size={18} color="#fff" /><Text style={styles.primaryText}>실시간 상담</Text>
+-          </TouchableOpacity>
+-        </View>
+-      </> : <>
+-        <Text style={styles.title}>등록된 방문 약속이 없어요</Text>
+-        <View style={styles.actions}>
+-          <TouchableOpacity style={styles.secondary} accessibilityRole="button" onPress={() => navigate('/my/inquiries' as Href)}><Ionicons name="document-text-outline" size={18} color={theme.primary} /><Text style={styles.secondaryText}>문의 내역</Text></TouchableOpacity>
+-          <TouchableOpacity style={styles.primary} accessibilityRole="button" onPress={() => navigate('/(tabs)/chat')}><Ionicons name="chatbubble-outline" size={18} color="#fff" /><Text style={styles.primaryText}>채팅 확인</Text></TouchableOpacity>
+-        </View>
+-      </>}
+-  </View>;
+-}
+-
+-function createStyles(theme: AsPalette) {
+-  return StyleSheet.create({
+-    section: { padding: 20, gap: 12, backgroundColor: theme.surfaceSoft },
+-    header: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+-    flex: { flex: 1, minWidth: 130, gap: 3 },
+-    icon: { width: 38, height: 38, borderRadius: 8, backgroundColor: theme.action, alignItems: 'center', justifyContent: 'center' },
+-    label: { fontSize: 13, lineHeight: 20, fontWeight: '700', color: theme.primary },
+-    date: { fontSize: 12, lineHeight: 19, color: theme.text },
+-    title: { fontSize: 16, lineHeight: 24, fontWeight: '700', color: theme.text },
+-    statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+-    status: { color: theme.primary, fontSize: 12, lineHeight: 19, fontWeight: '600' },
+-    muted: { fontSize: 12, lineHeight: 19, color: theme.textMuted, flexShrink: 1 },
+-    loading: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
+-    actions: { flexDirection: 'row', gap: 8 },
+-    secondary: { flexGrow: 1, flexBasis: 0, minHeight: 44, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.surface },
+-    primary: { flexGrow: 1, flexBasis: 0, minHeight: 44, padding: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 8, backgroundColor: theme.action },
+-    primaryText: { fontSize: 13, lineHeight: 20, fontWeight: '600', color: '#fff', flexShrink: 1 },
+-    secondaryText: { color: theme.primary, fontSize: 13, lineHeight: 20, fontWeight: '600', flexShrink: 1 },
+-    disabled: { opacity: 0.5 },
+-    pager: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto' },
+-    pagerButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+-    count: { fontSize: 12, color: theme.text, minWidth: 28, textAlign: 'center' },
+-  });
+-}
+diff --git a/lib/asHomeVisits.ts b/lib/asHomeVisits.ts
+deleted file mode 100644
+index ae5965b..0000000
+--- a/lib/asHomeVisits.ts
++++ /dev/null
+@@ -1,113 +0,0 @@
+-import { supabase } from './supabase';
+-
+-// 기존 채팅의 약속잡기가 저장하는 메시지 형식이다. 희망일(desired_date)은 예약으로 취급하지 않는다.
+-const APPOINTMENT_PREFIX = '📅 약속 제안\n';
+-const PAGE_SIZE = 100;
+-const INACTIVE_STATUSES = new Set(['completed', 'canceled', 'cancelled', 'closed']);
+-
+-export type AsHomeVisit = {
+-  roomId: string;
+-  requestId: number;
+-  title: string;
+-  storeName: string;
+-  storePhone: string | null;
+-  appointmentAt: number;
+-};
+-
+-type Relation<T> = T | T[] | null;
+-type VisitRoom = {
+-  id: string;
+-  title: string | null;
+-  listing_id: number | null;
+-  store_user_id: string | null;
+-  workflow_status: string | null;
+-  completed_at: string | null;
+-  estimate_requests: Relation<{ id: number; user_id: string; title: string; status: string | null }>;
+-  store_projects: Relation<{ name: string; status: string | null }>;
+-  chat_room_members: { user_id: string }[];
+-  chat_messages: { id: string; message: string; created_at: string }[];
+-};
+-
+-function first<T>(relation: Relation<T>): T | null {
+-  return Array.isArray(relation) ? relation[0] ?? null : relation;
+-}
+-
+-export function parseVisitAppointment(message: string): number | null {
+-  if (!message.startsWith(APPOINTMENT_PREFIX)) return null;
+-  const match = message.slice(APPOINTMENT_PREFIX.length).trim().match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+-  if (!match) return null;
+-  const [year, month, day, hour, minute] = match.slice(1).map(Number);
+-  // 채팅과 동일한 로컬 시각. Date의 2/30 -> 3/2 자동 보정은 허용하지 않는다.
+-  const date = new Date(year, month - 1, day, hour, minute);
+-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day
+-    || date.getHours() !== hour || date.getMinutes() !== minute) return null;
+-  return date.getTime();
+-}
+-
+-/** 본인의 문의이면서 현재 참여 중인 방만 읽는다. 접근 권한은 기존 Supabase RLS도 적용된다. */
+-export async function fetchAsHomeVisits(userId: string, now = new Date()): Promise<AsHomeVisit[]> {
+-  if (!userId) return [];
+-  const today = new Date(now);
+-  today.setHours(0, 0, 0, 0);
+-  const visits: (AsHomeVisit & { storeId: string })[] = [];
+-
+-  for (let offset = 0; ; offset += PAGE_SIZE) {
+-    const { data, error } = await supabase.from('chat_rooms').select(`
+-      id, title, listing_id, store_user_id, workflow_status, completed_at,
+-      estimate_requests!inner (id, user_id, title, status),
+-      store_projects (name, status),
+-      chat_room_members!inner (user_id),
+-      chat_messages (id, message, created_at)
+-    `)
+-      .eq('estimate_requests.user_id', userId)
+-      .eq('chat_room_members.user_id', userId)
+-      .is('listing_id', null)
+-      .like('chat_messages.message', `${APPOINTMENT_PREFIX}%`)
+-      .order('id', { ascending: true })
+-      .order('created_at', { ascending: false, foreignTable: 'chat_messages' })
+-      .order('id', { ascending: false, foreignTable: 'chat_messages' })
+-      .limit(1, { foreignTable: 'chat_messages' })
+-      .range(offset, offset + PAGE_SIZE - 1);
+-    if (error) throw error;
+-
+-    const rooms = (data ?? []) as unknown as VisitRoom[];
+-    for (const room of rooms) {
+-      const request = first(room.estimate_requests);
+-      const project = first(room.store_projects);
+-      if (!request || request.user_id !== userId || room.listing_id != null || !room.store_user_id
+-        || !room.chat_room_members.some(member => member.user_id === userId)
+-        || room.completed_at || [room.workflow_status, request.status, project?.status]
+-          .some(status => status && INACTIVE_STATUSES.has(status))) continue;
+-
+-      // 먼저 최신 약속 한 건을 선택한 뒤 날짜를 검사해야 변경 전의 약속이 다시 나타나지 않는다.
+-      const appointmentAt = parseVisitAppointment(room.chat_messages[0]?.message ?? '');
+-      if (appointmentAt === null || appointmentAt < today.getTime()) continue;
+-      visits.push({
+-        roomId: room.id, requestId: request.id,
+-        title: room.title || project?.name || request.title,
+-        appointmentAt, storeId: room.store_user_id,
+-        storeName: '담당 가게', storePhone: null,
+-      });
+-    }
+-    if (rooms.length < PAGE_SIZE) break;
+-  }
+-
+-  const storeIds = [...new Set(visits.map(visit => visit.storeId))];
+-  const stores = new Map<string, { display_name: string | null; phone: string | null }>();
+-  for (let offset = 0; offset < storeIds.length; offset += PAGE_SIZE) {
+-    const { data, error } = await supabase.from('profiles').select('id, display_name, phone')
+-      .in('id', storeIds.slice(offset, offset + PAGE_SIZE)).eq('user_type', 'store');
+-    if (error) throw error;
+-    for (const store of data ?? []) stores.set(store.id, store);
+-  }
+-
+-  return visits.sort((a, b) => a.appointmentAt - b.appointmentAt || a.roomId.localeCompare(b.roomId))
+-    .map(({ storeId, ...visit }) => {
+-      const store = stores.get(storeId);
+-      const phone = (store?.phone ?? '').replace(/[\s()-]/g, '');
+-      return {
+-        ...visit, storeName: store?.display_name || visit.storeName,
+-        storePhone: /^\+?\d{8,15}$/.test(phone) ? phone : null,
+-      };
+-    });
+-}
+diff --git a/tests/asHomeVisits.test.cjs b/tests/asHomeVisits.test.cjs
+deleted file mode 100644
+index 428d36a..0000000
+--- a/tests/asHomeVisits.test.cjs
++++ /dev/null
+@@ -1,134 +0,0 @@
+-const assert = require('node:assert/strict');
+-const { readFileSync } = require('node:fs');
+-const Module = require('node:module');
+-const path = require('node:path');
+-const { test } = require('node:test');
+-const ts = require('typescript');
+-
+-const now = new Date(2026, 8, 28, 12);
+-const proposal = value => `📅 약속 제안\n${value}`;
+-const room = (id, date = '2026-09-28 14:30', extra = {}) => ({
+-  id, title: '수전 교체', listing_id: null, store_user_id: 'store',
+-  workflow_status: 'active', completed_at: null,
+-  estimate_requests: { id: 10, title: '문의 제목', user_id: 'me', status: 'open' },
+-  store_projects: null,
+-  chat_room_members: [{ user_id: 'me' }],
+-  chat_messages: [{ id: 'message', message: proposal(date), created_at: '2026-09-27T04:00:00Z' }],
+-  ...extra,
+-});
+-
+-function harness({ rooms = [], stores = [{ id: 'store', display_name: '수리 가게', phone: '02-1234-5678' }], failTable = null } = {}) {
+-  const calls = [];
+-  const supabase = { from(table) {
+-    calls.push(['from', table]);
+-    let offset = 0;
+-    let end = Infinity;
+-    let ids;
+-    const query = {
+-      then(resolve, reject) {
+-        const rows = table === 'chat_rooms' ? rooms.slice(offset, end + 1) : stores.filter(store => ids.includes(store.id));
+-        return Promise.resolve({ data: rows, error: failTable === table ? new Error(`${table} unavailable`) : null }).then(resolve, reject);
+-      },
+-    };
+-    for (const method of ['select', 'order', 'limit', 'in', 'eq', 'is', 'like', 'range']) {
+-      query[method] = (...args) => {
+-        calls.push([method, ...args]);
+-        if (method === 'range') [offset, end] = args;
+-        if (method === 'in') ids = args[1];
+-        return query;
+-      };
+-    }
+-    return query;
+-  } };
+-  const filename = path.resolve(__dirname, '../lib/asHomeVisits.ts');
+-  const output = ts.transpileModule(readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
+-  const loaded = new Module(filename, module);
+-  loaded.require = name => { assert.equal(name, './supabase'); return { supabase }; };
+-  loaded._compile(output.outputText, filename);
+-  return { ...loaded.exports, calls };
+-}
+-
+-test('appointment parser accepts the chat format, not preferred dates or impossible dates', () => {
+-  const { parseVisitAppointment } = harness();
+-  assert.equal(parseVisitAppointment(proposal('2026-09-28 14:30')), new Date(2026, 8, 28, 14, 30).getTime());
+-  for (const value of ['2026-09-28', proposal('2026-02-30 14:30'), proposal('2026-13-28 14:30'), proposal('2026-09-28 24:30'), proposal('2026-09-28 14:61'), '일반 대화', '📍 약속 장소\n서울']) {
+-    assert.equal(parseVisitAppointment(value), null, value);
+-  }
+-});
+-
+-test('guests and accounts without appointments make no profile queries', async () => {
+-  const guest = harness();
+-  assert.deepEqual(await guest.fetchAsHomeVisits('', now), []);
+-  assert.deepEqual(guest.calls, []);
+-  const api = harness({ rooms: [room('no-message', '', { chat_messages: [] })] });
+-  assert.deepEqual(await api.fetchAsHomeVisits('me', now), []);
+-  assert.equal(api.calls.filter(call => call[0] === 'from').length, 1);
+-});
+-
+-test('only own requests with active membership are eligible, never ordinary marketplace appointments', async () => {
+-  const api = harness({ rooms: [
+-    room('other-request', undefined, { estimate_requests: { id: 11, title: '다른 고객', user_id: 'other', status: 'open' } }),
+-    room('removed', undefined, { chat_room_members: [] }),
+-    room('trade', undefined, { listing_id: 123 }),
+-    room('no-request', undefined, { estimate_requests: null }),
+-    room('no-store', undefined, { store_user_id: null }),
+-    room('valid'),
+-  ] });
+-  assert.deepEqual((await api.fetchAsHomeVisits('me', now)).map(visit => visit.roomId), ['valid']);
+-  assert.ok(api.calls.some(call => call[0] === 'eq' && call[1] === 'estimate_requests.user_id' && call[2] === 'me'));
+-  assert.ok(api.calls.some(call => call[0] === 'eq' && call[1] === 'chat_room_members.user_id' && call[2] === 'me'));
+-  assert.ok(api.calls.some(call => call[0] === 'is' && call[1] === 'listing_id' && call[2] === null));
+-});
+-
+-test('today and future appointments sort soonest first; completed and canceled work stays hidden', async () => {
+-  const api = harness({ rooms: [
+-    room('future', '2026-10-01 09:00'), room('today-afternoon'), room('today-morning', '2026-09-28 09:00'),
+-    room('past', '2026-09-27 22:00'),
+-    room('completed', undefined, { workflow_status: 'completed' }),
+-    room('timestamp', undefined, { completed_at: '2026-09-27T04:00:00Z' }),
+-    room('canceled', undefined, { store_projects: { name: '현장', status: 'canceled' } }),
+-    room('closed', undefined, { estimate_requests: { id: 11, user_id: 'me', title: '종료', status: 'closed' } }),
+-  ] });
+-  const result = await api.fetchAsHomeVisits('me', now);
+-  assert.deepEqual(result.map(visit => visit.roomId), ['today-morning', 'today-afternoon', 'future']);
+-  assert.equal(result[0].storeName, '수리 가게');
+-  assert.equal(result[0].storePhone, '0212345678');
+-  assert.equal(result[0].title, '수전 교체');
+-  assert.ok(!('storeId' in result[0]));
+-});
+-
+-test('uses the latest proposal per room before checking dates, never resurfaces the replaced date', async () => {
+-  const api = harness({ rooms: [room('changed', '2026-09-27 14:30')] });
+-  assert.deepEqual(await api.fetchAsHomeVisits('me', now), []);
+-  assert.ok(api.calls.some(call => call[0] === 'like' && call[1] === 'chat_messages.message' && call[2] === `${proposal('')}%`));
+-  assert.ok(api.calls.some(call => call[0] === 'order' && call[1] === 'created_at' && call[2].ascending === false && call[2].foreignTable === 'chat_messages'));
+-  assert.ok(api.calls.some(call => call[0] === 'limit' && call[1] === 1 && call[2].foreignTable === 'chat_messages'));
+-});
+-
+-test('paginates rooms instead of losing a future appointment after the first hundred rooms', async () => {
+-  const rooms = Array.from({ length: 100 }, (_, i) => room(`old-${i}`, '2026-09-27 10:00'));
+-  rooms.push(room('last-room'));
+-  const api = harness({ rooms });
+-  assert.deepEqual((await api.fetchAsHomeVisits('me', now)).map(visit => visit.roomId), ['last-room']);
+-  assert.deepEqual(api.calls.filter(call => call[0] === 'range'), [['range', 0, 99], ['range', 100, 199]]);
+-});
+-
+-test('supports relation shapes, title fallbacks and missing or invalid phone numbers', async () => {
+-  const api = harness({ rooms: [room('project', undefined, {
+-    title: null,
+-    estimate_requests: [{ id: 10, title: '문의 제목', user_id: 'me', status: 'open' }],
+-    store_projects: [{ name: '현장 이름', status: 'in_progress' }],
+-  })], stores: [{ id: 'store', display_name: '가게 이름', phone: 'tel:01012345678?bad' }] });
+-  const [visit] = await api.fetchAsHomeVisits('me', now);
+-  assert.equal(visit.title, '현장 이름');
+-  assert.equal(visit.storePhone, null);
+-  const [missing] = await harness({ rooms: [room('missing')], stores: [] }).fetchAsHomeVisits('me', now);
+-  assert.equal(missing.storeName, '담당 가게');
+-  assert.equal(missing.storePhone, null);
+-});
+-
+-test('database failures remain retryable failures, not empty appointment states', async () => {
+-  for (const failTable of ['chat_rooms', 'profiles']) {
+-    await assert.rejects(harness({ rooms: [room('valid')], failTable }).fetchAsHomeVisits('me', now), /unavailable/);
+-  }
+-});

@@ -141,6 +141,9 @@ serve(async (req) => {
         .select("staff_user_id, role, status")
         .eq("store_user_id", storeUserId)
         .eq("status", "active");
+      if (staffError) {
+        return errorResponse("문의 알림 수신 직원을 확인하지 못했습니다.", 500, staffError.message);
+      }
       (staffRows || []).forEach((staff: any) => {
         const staffUserId = staff?.staff_user_id;
         const isManager = staff?.role === "manager";
@@ -151,11 +154,15 @@ serve(async (req) => {
         }
       });
     } else {
+      // 가게 미선택 문의는 운영 관리자에게만 전달한다. 일반 가게나 직원은 수신하지 않는다.
       const { data: adminProfiles, error: adminError } = await adminClient
         .from("profiles")
         .select("id")
         .eq("role", "admin")
         .or("status.is.null,status.neq.blocked");
+      if (adminError) {
+        return errorResponse("문의 알림 수신 관리자를 확인하지 못했습니다.", 500, adminError.message);
+      }
       (adminProfiles || []).forEach((profile: any) => {
         if (profile?.id) recipientIds.add(profile.id);
       });
@@ -183,6 +190,7 @@ serve(async (req) => {
       type: "estimate_request",
       estimateRequestId: estimateRequest.id,
       storeUserId,
+      targetScreen: storeUserId ? "store_estimates" : "admin_estimates",
       applicantName,
       title: requestTitle,
     };

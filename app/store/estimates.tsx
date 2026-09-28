@@ -22,6 +22,8 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import AttachmentGallery from '../../components/AttachmentGallery';
+import { isVideoAttachment } from '../../lib/mediaAttachments';
 import {
   DEFAULT_STORE_LIMITS,
   getPlanLabel,
@@ -159,11 +161,14 @@ function buildEstimatePdfHtml({
   const amounts = getQuoteAmounts(draft);
   const quoteTitle = draft.quoteTitle || quote?.title || request?.title || '견적서';
   const createdAt = new Date().toLocaleString('ko-KR');
-  const requestImageAttachments = requestImages.filter((item) => item.signedUrl);
+  const requestImageAttachments = requestImages.filter((item) => item.signedUrl && !isVideoAttachment(item.image_path || ''));
   const imageAttachments = attachments.filter(
     (item) => item.file_type?.startsWith('image/') && item.signedUrl
   );
-  const fileAttachments = attachments.filter((item) => !item.file_type?.startsWith('image/'));
+  const fileAttachments = [
+    ...attachments.filter((item) => !item.file_type?.startsWith('image/')),
+    ...requestImages.filter((item) => item.signedUrl && isVideoAttachment(item.image_path || '')),
+  ];
   const renderImageSection = (title: string, items: any[]) => {
     if (items.length === 0) return '';
 
@@ -267,7 +272,7 @@ function buildEstimatePdfHtml({
     ${renderImageSection('견적서 첨부 사진', imageAttachments)}
 
     <h2>첨부 파일</h2>
-    ${fileAttachments.length === 0 ? '<div class="text-box">별도 PDF/문서 첨부 없음</div>' : ''}
+    ${fileAttachments.length === 0 ? '<div class="text-box">별도 파일 첨부 없음</div>' : ''}
     ${fileAttachments.map((attachment) => `
       <div class="attach">
         <div class="value">${escapeHtml(attachment.file_name || '첨부 파일')}</div>
@@ -1073,7 +1078,7 @@ export default function StoreEstimatesScreen() {
 
           return {
             ...image,
-            file_name: `문의 사진 ${index + 1}`,
+            file_name: `문의 ${isVideoAttachment(image.image_path) ? '영상' : '사진'} ${index + 1}`,
             signedUrl: supabase.storage.from('estimate-images').getPublicUrl(image.image_path).data.publicUrl,
           };
         })
@@ -1644,7 +1649,7 @@ export default function StoreEstimatesScreen() {
                   const requestId = Number(item.id);
                   const currentStatus = (statusRows[requestId]?.status || 'new') as CustomerStatus;
                   const draft = quoteDrafts[requestId] || {};
-                  const firstImage = item.estimate_request_images?.[0];
+                  const firstImage = item.estimate_request_images?.find((attachment: any) => !isVideoAttachment(attachment.image_path || ''));
                   const imageUrl = getEstimateImageUrl(firstImage?.image_path);
                   const attachments = attachmentRows[requestId] || [];
                   const uploadingAttachments = uploadingAttachmentId === requestId;
@@ -1756,6 +1761,9 @@ export default function StoreEstimatesScreen() {
                         ) : null}
                       </View>
                       <Text style={styles.bodyText}>{item.description || '상세 내용 없음'}</Text>
+                      {item.estimate_request_images?.length ? (
+                        <AttachmentGallery attachments={item.estimate_request_images} />
+                      ) : null}
 
                       {canAssignStaff && canEditEstimate ? (
                         <View style={styles.assignmentBox}>

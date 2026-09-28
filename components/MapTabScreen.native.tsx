@@ -5,18 +5,18 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Image,
-  LayoutChangeEvent,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    Image,
+    LayoutChangeEvent,
+    Modal,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -277,7 +277,7 @@ function sortStoresByExposure(stores: StoreMapItem[]) {
   });
 }
 
-export default function MapTabScreen() {
+export default function MapTabScreen({ topOffset }: { topOffset?: number } = {}) {
   const mapRef = useRef<MapView | null>(null);
   const insets = useSafeAreaInsets();
   const theme = useAppTheme();
@@ -969,7 +969,7 @@ export default function MapTabScreen() {
         </View>
       ) : null}
 
-      <View style={[styles.searchBox, { top: Math.max(insets.top + 8, 14) }]}>
+      <View style={[styles.searchBox, { top: topOffset !== undefined ? topOffset : Math.max(insets.top + 8, 14) }]}>
         <TextInput
           style={styles.searchInput}
           placeholder="제목, 지역, 물품, 가격으로 검색"

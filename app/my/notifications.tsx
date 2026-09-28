@@ -18,6 +18,7 @@ import {
     markAllNotificationsAsRead,
     markNotificationAsRead,
 } from '../../lib/notificationsData';
+import { getEstimateNotificationRoute, type EstimateNotificationData } from '../../lib/estimateNotificationRoute';
 
 type NotificationItem = {
   id: number;
@@ -26,15 +27,14 @@ type NotificationItem = {
   body: string | null;
   read_at: string | null;
   created_at: string;
-  data?: {
+  data?: (EstimateNotificationData & {
     listingId?: number | string;
     roomId?: number | string;
-    estimateRequestId?: number | string;
     projectId?: string;
     projectMemberId?: string;
     inviteToken?: string;
     staffMemberId?: string;
-  } | null;
+  }) | null;
 };
 
 function showAlert(title: string, message = '') {
@@ -119,13 +119,7 @@ export default function NotificationsScreen() {
     }
 
     if (item.type === 'estimate_request') {
-      const estimateRequestId = item.data?.estimateRequestId;
-      if (estimateRequestId) {
-        router.push(`/store/estimates?requestId=${estimateRequestId}` as any);
-        return;
-      }
-
-      router.push('/store/estimates' as any);
+      router.push(getEstimateNotificationRoute(item.data) as any);
       return;
     }
 

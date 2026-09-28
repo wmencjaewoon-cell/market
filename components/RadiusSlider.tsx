@@ -7,6 +7,9 @@ type Props = {
   min?: number;
   max?: number;
   step?: number;
+  activeColor?: string;
+  trackColor?: string;
+  disabled?: boolean;
   onChangeEnd: (value: number) => void;
 };
 

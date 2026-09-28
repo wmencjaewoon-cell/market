@@ -1,7 +1,7 @@
 // 관리자 콘솔: 신고/공지/가게인증/구독/지역광고 같은 운영자 전용 기능을 한 화면에서 처리한다.
 // 서버 권한 검증은 Supabase RPC/RLS가 최종 기준이고, 이 화면의 분기는 UX용이다.
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Linking,
@@ -15,6 +15,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AttachmentGallery from '../components/AttachmentGallery';
+import { getEstimateNotificationRoute, normalizeEstimateRequestId } from '../lib/estimateNotificationRoute';
 import { getStoreCategoryLabel } from '../lib/storeCategories';
 import { supabase } from '../lib/supabase';
 
@@ -171,6 +173,8 @@ type AdminEstimateRequest = {
   region: string | null;
   address: string | null;
   title: string;
+  description: string | null;
+  estimate_request_images: { image_path: string; sort_order: number | null }[];
   status: string | null;
   routing_status: string | null;
   fallback_destination: string | null;
@@ -439,7 +443,11 @@ function canCancelListingDelete(item: AdminListing) {
 }
 
 export default function AdminScreen() {
-  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const params = useLocalSearchParams<{ tab?: string; requestId?: string }>();
+  const targetEstimateId = normalizeEstimateRequestId(params.requestId);
+  const [activeTab, setActiveTab] = useState<AdminTab>(
+    params.tab === 'estimates' || targetEstimateId ? 'estimates' : 'overview'
+  );
   const [loading, setLoading] = useState(true);
   const [unauthorized, setUnauthorized] = useState(false);
   const [adminName, setAdminName] = useState('');
@@ -451,8 +459,14 @@ export default function AdminScreen() {
   const [listings, setListings] = useState<AdminListing[]>([]);
   const [storeRequests, setStoreRequests] = useState<StoreVerificationRequest[]>([]);
   const [estimateRequests, setEstimateRequests] = useState<AdminEstimateRequest[]>([]);
+  const [expandedEstimateId, setExpandedEstimateId] = useState<number | null>(targetEstimateId);
   const [verifiedStores, setVerifiedStores] = useState<VerifiedStoreOption[]>([]);
   const [authActivityLogs, setAuthActivityLogs] = useState<AdminAuthActivityLog[]>([]);
+
+  useEffect(() => {
+    if (params.tab === 'estimates' || targetEstimateId) setActiveTab('estimates');
+    setExpandedEstimateId(targetEstimateId);
+  }, [params.tab, targetEstimateId]);
 
   const [noticeTitle, setNoticeTitle] = useState('');
   const [noticeContent, setNoticeContent] = useState('');
@@ -546,6 +560,12 @@ const goToListingDetail = (listingId: number) => {
       Date.now() - 90 * 24 * 60 * 60 * 1000
     ).toISOString();
 
+    // 알림에서 연 문의는 최근 80건 밖의 오래된 문의도 ID로 직접 조회한다.
+    let estimateQuery = supabase
+      .from('estimate_requests')
+      .select('id, user_id, category, applicant_name, applicant_phone, region, address, title, description, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at, estimate_request_images(image_path, sort_order)');
+    if (targetEstimateId) estimateQuery = estimateQuery.eq('id', targetEstimateId);
+
     const [
       noticeResult,
       eventResult,
@@ -627,11 +647,7 @@ const goToListingDetail = (listingId: number) => {
         )
         .order('created_at', { ascending: false })
         .limit(100),
-      supabase
-        .from('estimate_requests')
-        .select(
-          'id, user_id, category, applicant_name, applicant_phone, region, address, title, status, routing_status, fallback_destination, preferred_store_user_id, assigned_store_user_id, created_at'
-        )
+      estimateQuery
         .order('created_at', { ascending: false })
         .limit(80),
       supabase
@@ -775,7 +791,7 @@ const goToListingDetail = (listingId: number) => {
         ? []
         : ((authActivityResult.data || []) as unknown as AdminAuthActivityLog[])
     );
-  }, [refreshExpiredUserRestrictions, runExpiredListingCleanup]);
+  }, [refreshExpiredUserRestrictions, runExpiredListingCleanup, targetEstimateId]);
 
   const loadAdmin = useCallback(async () => {
     setLoading(true);
@@ -785,7 +801,10 @@ const goToListingDetail = (listingId: number) => {
       const currentUser = authData.user;
 
       if (!currentUser) {
-        router.replace('/login?redirect=/admin' as any);
+        const redirect = targetEstimateId || params.tab === 'estimates'
+          ? getEstimateNotificationRoute({ targetScreen: 'admin_estimates', estimateRequestId: targetEstimateId ?? undefined })
+          : '/admin';
+        router.replace(`/login?redirect=${encodeURIComponent(redirect)}` as any);
         return;
       }
 
@@ -809,7 +828,7 @@ const goToListingDetail = (listingId: number) => {
     } finally {
       setLoading(false);
     }
-  }, [loadAdminData]);
+  }, [loadAdminData, params.tab, targetEstimateId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -1492,7 +1511,10 @@ const filteredStoreRequests = useMemo(() => {
             <TouchableOpacity
               key={key}
               style={[styles.tabBtn, activeTab === key && styles.tabBtnActive]}
-              onPress={() => setActiveTab(key as AdminTab)}
+              onPress={() => {
+                setActiveTab(key as AdminTab);
+                if (targetEstimateId) router.setParams({ tab: key, requestId: undefined });
+              }}
             >
               <Text style={[styles.tabText, activeTab === key && styles.tabTextActive]}>
                 {label}
@@ -1863,11 +1885,25 @@ const filteredStoreRequests = useMemo(() => {
         {activeTab === 'estimates' ? (
   <View>
     <View style={styles.toolCard}>
-      <Text style={styles.toolTitle}>견적문의 {estimateRequests.length}건</Text>
+      <Text style={styles.toolTitle}>{targetEstimateId ? `견적문의 #${targetEstimateId}` : `견적문의 ${estimateRequests.length}건`}</Text>
       <Text style={styles.desc}>
         가게 미선택 문의는 디자인위쇼 접수 상태이며, 아래에서 인증 가게로 배정할 수 있습니다.
       </Text>
+      {targetEstimateId ? (
+        <TouchableOpacity
+          style={styles.secondaryBtn}
+          onPress={() => router.setParams({ tab: 'estimates', requestId: undefined })}
+        >
+          <Text style={styles.secondaryText}>전체 문의 보기</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
+
+    {estimateRequests.length === 0 ? (
+      <Text style={styles.desc}>
+        {targetEstimateId ? '해당 문의가 삭제되었거나 조회할 수 없습니다.' : '접수된 견적문의가 없습니다.'}
+      </Text>
+    ) : null}
 
     {estimateRequests.map((item) => {
       const assignedStoreId = item.assigned_store_user_id || item.preferred_store_user_id;
@@ -1889,7 +1925,12 @@ const filteredStoreRequests = useMemo(() => {
           <Text style={styles.metaText}>
             라우팅: {item.routing_status || 'admin_pending'} · {item.fallback_destination || 'designwish'}
           </Text>
-
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => setExpandedEstimateId((current) => current === item.id ? null : item.id)}
+          >
+            <Text style={styles.secondaryText}>{expandedEstimateId === item.id ? '문의 내용 접기' : `문의 내용·첨부 보기 (${item.estimate_request_images?.length || 0})`}</Text>
+          </TouchableOpacity>
           {assignedStore ? (
             <TouchableOpacity
               style={styles.secondaryBtn}
@@ -1899,6 +1940,8 @@ const filteredStoreRequests = useMemo(() => {
             </TouchableOpacity>
           ) : null}
 
+          <Text style={styles.itemText}>가게 배정</Text>
+          {verifiedStores.length === 0 ? <Text style={styles.desc}>배정 가능한 인증 가게가 없습니다.</Text> : null}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
             {verifiedStores.map((store) => {
               const selected = assignedStoreId === store.id;
@@ -1916,6 +1959,12 @@ const filteredStoreRequests = useMemo(() => {
               );
             })}
           </ScrollView>
+          {expandedEstimateId === item.id ? (
+            <View>
+              <Text style={styles.desc}>{item.description || '상세 내용 없음'}</Text>
+              <AttachmentGallery attachments={item.estimate_request_images || []} />
+            </View>
+          ) : null}
         </View>
       );
     })}

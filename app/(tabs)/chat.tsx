@@ -21,6 +21,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { getUnreadCountByRoom } from '../../lib/chat';
+import { VIDEO_MESSAGE_PREFIX } from '../../lib/mediaAttachments';
 import { supabase } from '../../lib/supabase';
 import { useTabRefresh } from '../../lib/tabRefresh';
 
@@ -133,6 +134,8 @@ function showChatListAlert(title: string, message = '') {
 
 function getChatPreviewText(message?: string | null) {
   if (!message) return '아직 메시지가 없습니다.';
+  if (message.startsWith(VIDEO_MESSAGE_PREFIX)) return '영상을 보냈습니다.';
+  if (message.startsWith('📷')) return '사진을 보냈습니다.';
 
   if (message.startsWith('📍 약속 장소')) {
     const addressLine = message

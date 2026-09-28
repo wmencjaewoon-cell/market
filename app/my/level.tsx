@@ -1,7 +1,7 @@
-// 판매자 레벨 화면: 후기/활동 점수를 기반으로 프로필에 표시할 레벨 정보를 보여준다.
+// 사용자 레벨 화면: 개인과 가게가 획득한 활동 점수와 해금된 프로필 꾸미기를 보여준다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -13,6 +13,8 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { type AppPalette } from '../../contexts/theme';
+import { useAppTheme } from '../../hooks/use-app-theme';
 import {
   SELLER_LEVEL_STYLES,
   getSellerLevel,
@@ -34,6 +36,8 @@ function showAlert(title: string, message = '') {
 
 export default function SellerLevelScreen() {
   const { user } = useAuth();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const [profile, setProfile] = useState<any | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -98,11 +102,11 @@ export default function SellerLevelScreen() {
           styles.summary,
           {
             borderColor: selectedStyle.borderColor,
-            backgroundColor: selectedStyle.backgroundColor,
+            backgroundColor: theme.scheme === 'dark' ? theme.surface : selectedStyle.backgroundColor,
           },
         ]}
       >
-        <Text style={[styles.levelText, { color: selectedStyle.textColor }]}>
+        <Text style={[styles.levelText, { color: theme.scheme === 'dark' ? theme.text : selectedStyle.textColor }]}>
           LV.{level}
         </Text>
         <Text style={styles.title}>{getSellerLevelTitle(level)}</Text>
@@ -119,7 +123,7 @@ export default function SellerLevelScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>표시 설정</Text>
         <SettingRow
-          label="판매자 정보에 표시"
+          label="프로필에 표시"
           value={profile?.show_level_on_profile !== false}
           onValueChange={(value) => updateProfile({ show_level_on_profile: value })}
         />
@@ -143,8 +147,10 @@ export default function SellerLevelScreen() {
                 style={[
                   styles.styleCard,
                   {
-                    borderColor: selected ? style.textColor : style.borderColor,
-                    backgroundColor: style.backgroundColor,
+                    borderColor: selected
+                      ? theme.scheme === 'dark' ? theme.primary : style.textColor
+                      : style.borderColor,
+                    backgroundColor: theme.scheme === 'dark' ? theme.surface : style.backgroundColor,
                     opacity: unlocked ? 1 : 0.45,
                   },
                 ]}
@@ -153,11 +159,11 @@ export default function SellerLevelScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.styleHeader}>
-                  <Text style={[styles.styleLabel, { color: style.textColor }]}>
+                  <Text style={[styles.styleLabel, { color: theme.scheme === 'dark' ? theme.text : style.textColor }]}>
                     {style.label}
                   </Text>
                   {selected ? (
-                    <Ionicons name="checkmark-circle" size={18} color={style.textColor} />
+                    <Ionicons name="checkmark-circle" size={18} color={theme.scheme === 'dark' ? theme.primary : style.textColor} />
                   ) : null}
                 </View>
                 <Text style={styles.unlockText}>LV.{style.minLevel}부터</Text>
@@ -179,18 +185,26 @@ function SettingRow({
   value: boolean;
   onValueChange: (value: boolean) => void;
 }) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   return (
     <View style={styles.settingRow}>
       <Text style={styles.settingLabel}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} />
+      <Switch
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: theme.border, true: '#166534' }}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: theme.background,
   },
   content: {
     padding: 16,
@@ -210,51 +224,52 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 18,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   points: {
     marginTop: 4,
     fontSize: 14,
     fontWeight: '800',
-    color: '#4b5563',
+    color: theme.textMuted,
   },
   progressTrack: {
     marginTop: 14,
     height: 9,
     borderRadius: 999,
-    backgroundColor: 'rgba(17,24,39,0.12)',
+    backgroundColor: theme.border,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: 999,
-    backgroundColor: '#111827',
+    backgroundColor: theme.primary,
   },
   progressText: {
     marginTop: 8,
-    color: '#4b5563',
+    color: theme.textMuted,
     fontSize: 13,
     fontWeight: '700',
   },
   section: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: theme.background,
     padding: 14,
     gap: 12,
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#111827',
+    color: theme.text,
   },
   settingRow: {
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
   },
   settingLabel: {
-    color: '#374151',
+    color: theme.text,
+    flexShrink: 1,
     fontWeight: '800',
   },
   styleGrid: {
@@ -276,8 +291,9 @@ const styles = StyleSheet.create({
   },
   unlockText: {
     marginTop: 4,
-    color: '#6b7280',
+    color: theme.textMuted,
     fontSize: 12,
     fontWeight: '700',
   },
 });
+}
