@@ -23,7 +23,15 @@
           }
         }
       ],
-      "expo-video"
+      "expo-video",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "A/S 증상을 음성으로 입력하고 통화 중 목소리를 전달하기 위해 마이크를 사용합니다.",
+          "speechRecognitionPermission": "A/S 증상을 말로 입력하면 한국어 텍스트로 변환하기 위해 음성 인식을 사용합니다.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "androidNavigationBar": {
       "backgroundColor": "#0f1115",
@@ -39,7 +47,8 @@
         "CFBundleLocalizations": ["ko", "en"],
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "게시글 사진 촬영과 영상통화를 위해 카메라를 사용합니다. 예: 판매할 자재 사진을 직접 촬영하거나 채팅방에서 영상통화를 할 때 사용합니다.",
-        "NSMicrophoneUsageDescription": "보이스톡과 영상통화 중 음성 전달을 위해 마이크를 사용합니다. 예: 채팅 상대와 통화할 때 내 목소리를 전달하는 데 사용합니다.",
+        "NSMicrophoneUsageDescription": "A/S 증상을 음성으로 입력하고 보이스톡·영상통화 중 목소리를 전달하기 위해 마이크를 사용합니다.",
+        "NSSpeechRecognitionUsageDescription": "A/S 증상을 말로 입력하면 한국어 텍스트로 변환하기 위해 음성 인식을 사용합니다.",
         "NSPhotoLibraryUsageDescription": "AS 문의에 사진과 영상을 첨부하거나 채팅에서 전송하기 위해 선택한 파일을 불러옵니다. 게시글 사진, 프로필 사진, 가게 인증 서류 첨부에도 사용합니다.",
         "NSPhotoLibraryAddUsageDescription": "앱에서 생성하거나 선택한 이미지를 사진 보관함에 저장할 때만 사용합니다. 예: 필요한 이미지를 기기에 저장하는 기능에서 사용합니다.",
         "NSLocationWhenInUseUsageDescription": "주변 게시글 지도 표시, 거래 장소 선택, 약속장소 공유, 가게 위치 등록을 위해 앱 사용 중 현재 위치를 사용합니다. 예: 지도에서 내 위치 주변 매물을 보거나 선택한 약속장소를 채팅으로 보내는 데 사용합니다."

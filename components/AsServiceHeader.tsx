@@ -9,7 +9,7 @@ import { getAsPalette, type AsPalette } from '../lib/asAppearance';
 import { getUnreadNotificationCount } from '../lib/notificationsData';
 import { fetchMyRegions, fetchMyRegionSettings } from '../lib/region';
 
-export default function AsServiceHeader({ back = false }: { back?: boolean }) {
+export default function AsServiceHeader({ back = false, onBack }: { back?: boolean; onBack?: () => void }) {
   const { user } = useAuth();
   const base = useAppTheme();
   const theme = useMemo(() => getAsPalette(base), [base]);
@@ -47,7 +47,7 @@ export default function AsServiceHeader({ back = false }: { back?: boolean }) {
   return (
     <View style={styles.header}>
       <View style={styles.brand}>
-        {back ? <TouchableOpacity style={styles.back} accessibilityRole="button" accessibilityLabel="뒤로가기" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/home')}>
+        {back ? <TouchableOpacity style={styles.back} accessibilityRole="button" accessibilityLabel="뒤로가기" onPress={onBack ?? (() => router.canGoBack() ? router.back() : router.replace('/(tabs)/home'))}>
           <Ionicons name="arrow-back" size={22} color={theme.primary} />
         </TouchableOpacity> : <Image source={require('../assets/images/interior-market.jpg')} style={styles.logo} />}
         <Text style={styles.name}>{SIMPLE_AS_SERVICE_NAME}</Text>

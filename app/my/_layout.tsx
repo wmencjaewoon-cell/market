@@ -40,6 +40,9 @@ export default function MyStackLayout() {
   <Stack.Screen name="keywords" options={{ title: '키워드 알림' }} />
   <Stack.Screen name="notifications" options={{ title: '알림' }} />
   <Stack.Screen name="inquiries" options={{ title: '내 문의 내역' }} />
+  <Stack.Screen name="homes" options={{ title: '내 집 관리' }} />
+  <Stack.Screen name="home-edit" options={{ title: '집 정보' }} />
+  <Stack.Screen name="as-analyses" options={{ title: '내 A/S 기록' }} />
   <Stack.Screen name="privacy" options={{ title: '개인정보처리방침' }} />
   <Stack.Screen name="terms" options={{ title: '이용약관' }} />
   <Stack.Screen name="operation-policy" options={{ title: '운영정책' }} />

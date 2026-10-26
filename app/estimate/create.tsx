@@ -2,11 +2,12 @@
 // 한 가게당 중복 문의 제한과 알림 발송 흐름을 수정할 때 이 파일을 확인한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   ActivityIndicator,
+  Alert,
+  BackHandler,
   Image,
   Keyboard,
   Platform,
@@ -18,12 +19,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '../../contexts/AuthContext';
-import VideoAttachment from '../../components/VideoAttachment';
-import AsServiceHeader from '../../components/AsServiceHeader';
+import AsAnalysisPanel from '../../components/AsAnalysisPanel';
 import AsInquiryNavigation from '../../components/AsInquiryNavigation';
+import AsServiceHeader from '../../components/AsServiceHeader';
+import VideoAttachment from '../../components/VideoAttachment';
+import VoiceDescriptionInput from '../../components/VoiceDescriptionInput';
+import { useAuth } from '../../contexts/AuthContext';
 import { useAppTheme } from '../../hooks/use-app-theme';
-import { SIMPLE_AS_MODE } from '../../lib/appMode';
+import { SHOW_AS_AI_ANALYSIS, SIMPLE_AS_MODE } from '../../lib/appMode';
 import { getAsPalette, type AsPalette } from '../../lib/asAppearance';
 import { AS_CATEGORIES, AS_SYMPTOMS, buildAsInquiryText, getInitialAsCategory } from '../../lib/asInquiry';
 import { getMediaFormat } from '../../lib/mediaAttachments';
@@ -32,6 +35,7 @@ import { getProfileImageUrl } from '../../lib/profileImage';
 import { fetchMyRegions, fetchMyRegionSettings } from '../../lib/region';
 import { getStoreCategoryLabel, STORE_CATEGORY_OPTIONS } from '../../lib/storeCategories';
 import { supabase } from '../../lib/supabase';
+import { fetchUserHomes, formatHomeAddress, formatHomeSummary, type UserHome } from '../../lib/userHomes';
 
 const ESTIMATE_CATEGORIES = [
   '전체 인테리어',
@@ -133,7 +137,16 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
   const [previewIndex, setPreviewIndex] = useState(0);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const descriptionInput = useRef<TextInput>(null);
-  const maxAttachments = SIMPLE_AS_MODE ? 5 : 6;
+  const scrollRef = useRef<ScrollView>(null);
+  // const maxAttachments = SIMPLE_AS_MODE ? 5 : 6;
+  const maxImages =
+  SIMPLE_AS_MODE ? 5 : 6;
+
+const maxVideos =
+  SIMPLE_AS_MODE ? 1 : 1;
+
+const maxAttachments =
+  maxImages + maxVideos;
   const requestedCategory = getInitialAsCategory(category);
   const [title, setTitle] = useState('');
   const [region, setRegion] = useState('');
@@ -149,7 +162,24 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
   const [budget] = useState('');
   const [preferredContact] = useState('앱 채팅');
   const [description, setDescription] = useState('');
+  const [homes, setHomes] = useState<UserHome[]>([]);
+  const [selectedHomeId, setSelectedHomeId] = useState<string | null>(null);
+  const [homeSelectorOpen, setHomeSelectorOpen] = useState(false);
+  const [homeLoadError, setHomeLoadError] = useState('');
   const [mediaAssets, setMediaAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [inquiryStep, setInquiryStep] = useState<'question' | 'answer' | 'consult'>('question');
+  const [skipAI, setSkipAI] = useState(false);
+  const [consultFrom, setConsultFrom] = useState<'question' | 'answer'>('question');
+  const stagedAs = SIMPLE_AS_MODE && SHOW_AS_AI_ANALYSIS;
+  const showQuestion = !stagedAs || inquiryStep === 'question';
+  const showContact = !stagedAs || inquiryStep === 'consult';
+  const [analysisSelection, setAnalysisSelection] = useState<{ id: string; fingerprint: string } | null>(null);
+  const analysisFingerprint = JSON.stringify([selectedHomeId, selectedCategories, selectedSymptoms, description, mediaAssets.map(asset => [asset.uri, asset.fileSize, asset.duration])]);
+  const linkedAnalysisId = stagedAs && !skipAI && analysisSelection?.fingerprint === analysisFingerprint ? analysisSelection.id : null;
+  const selectAnalysis = useCallback((id: string | null) => {
+    setAnalysisSelection(id ? { id, fingerprint: analysisFingerprint } : null);
+  }, [analysisFingerprint]);
   const [createdRequestId, setCreatedRequestId] = useState<number | null>(null);
   const [uploadLabel, setUploadLabel] = useState('');
   const uploadedCount = useRef(0);
@@ -163,6 +193,49 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
   const [selectedStaffUserId, setSelectedStaffUserId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
+  const selectedHome = useMemo(() => homes.find(home => home.id === selectedHomeId) ?? null, [homes, selectedHomeId]);
+
+  const loadHomes = useCallback(async () => {
+    if (!user) { setHomes([]); setSelectedHomeId(null); return; }
+    try {
+      const next = await fetchUserHomes();
+      setHomes(next); setHomeLoadError('');
+      setSelectedHomeId(previous => next.some(home => home.id === previous)
+        ? previous
+        : next.find(home => home.is_default)?.id ?? next[0]?.id ?? null);
+    } catch {
+      setHomeLoadError('등록한 집을 불러오지 못했습니다.');
+    }
+  }, [user]);
+
+  const changeStep = useCallback((step: 'question' | 'answer' | 'consult') => {
+    Keyboard.dismiss();
+    setMessage('');
+    setInquiryStep(step);
+  }, []);
+  const openConsultation = () => {
+    if (analysisBusy || pickingMedia || submitting || createdRequestId) return;
+    if (!description.trim() && !selectedSymptoms.length) {
+      setMessage('증상을 선택하거나 간단히 입력해 주세요.');
+      return;
+    }
+    setConsultFrom(inquiryStep === 'answer' ? 'answer' : 'question');
+    changeStep('consult');
+  };
+  const previousStep = useCallback(() => {
+    if (analysisBusy || submitting || createdRequestId) return;
+    changeStep(inquiryStep === 'consult' ? consultFrom : 'question');
+  }, [analysisBusy, submitting, createdRequestId, inquiryStep, consultFrom, changeStep]);
+  useFocusEffect(useCallback(() => {
+    if (!stagedAs || inquiryStep === 'question') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => { previousStep(); return true; });
+    return () => subscription.remove();
+  }, [stagedAs, inquiryStep, previousStep]));
+  useFocusEffect(useCallback(() => { void loadHomes(); }, [loadHomes]));
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+    return () => cancelAnimationFrame(frame);
+  }, [inquiryStep]);
 
   useEffect(() => {
     if (SIMPLE_AS_MODE && !createdRequestId) setSelectedCategories([requestedCategory]);
@@ -173,6 +246,10 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
     const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
     return () => { show.remove(); hide.remove(); };
   }, []);
+
+  useEffect(() => {
+    if (selectedHome) setAddress(formatHomeAddress(selectedHome));
+  }, [selectedHome]);
 
   useEffect(() => {
     const loadDefaultRegion = async () => {
@@ -349,50 +426,138 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
     }
   }, [selectedStaffUserId, selectedStoreId, selectedStoreStaff]);
 
-  const pickMedia = async (kind: 'images' | 'videos' | 'all' = 'all', camera = false) => {
-    if (pickerLock.current || submitLock.current || createdRequestId) return;
-    const remain = maxAttachments - mediaAssets.length;
-    if (remain <= 0) {
-      showAlert('첨부파일', `사진과 영상은 합쳐서 최대 ${maxAttachments}개까지 첨부할 수 있습니다.`);
+  const pickMedia = async (
+  kind: 'images' | 'videos' | 'all' = 'all',
+  camera = false
+) => {
+  if (
+    pickerLock.current ||
+    submitLock.current ||
+    createdRequestId ||
+    analysisBusy
+  ) {
+    return;
+  }
+
+  const imageCount = mediaAssets.filter(
+    (asset) => getMediaFormat(asset).kind === 'image'
+  ).length;
+
+  const videoCount = mediaAssets.filter(
+    (asset) => getMediaFormat(asset).kind === 'video'
+  ).length;
+
+  if (kind === 'images' && imageCount >= maxImages) {
+    showAlert(
+      '사진 첨부',
+      `사진은 최대 ${maxImages}장까지 첨부할 수 있습니다.`
+    );
+    return;
+  }
+
+  if (kind === 'videos' && videoCount >= maxVideos) {
+    showAlert(
+      '영상 첨부',
+      '영상은 최대 1개까지 첨부할 수 있습니다.'
+    );
+    return;
+  }
+
+  pickerLock.current = true;
+  setPickingMedia(true);
+
+  try {
+    if (camera) {
+      const permission =
+        await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        showAlert(
+          '카메라 권한 필요',
+          '기기 설정에서 카메라 권한을 허용하거나 앨범에서 첨부해 주세요.'
+        );
+        return;
+      }
+    }
+
+    const options: ImagePicker.ImagePickerOptions = {
+      mediaTypes:
+        kind === 'all'
+          ? ['images', 'videos']
+          : [kind],
+      quality: 0.8,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    };
+
+    const remainingImages = maxImages - imageCount;
+
+    const result = camera
+      ? await ImagePicker.launchCameraAsync({
+          ...options,
+          videoMaxDuration: 60,
+          videoQuality:
+            ImagePicker.UIImagePickerControllerQualityType.Medium,
+        })
+      : await ImagePicker.launchImageLibraryAsync({
+          ...options,
+          allowsMultipleSelection: kind === 'images',
+          orderedSelection: true,
+          selectionLimit:
+            kind === 'videos'
+              ? 1
+              : Math.max(1, remainingImages),
+        });
+
+    if (result.canceled) {
       return;
     }
-    pickerLock.current = true;
-    setPickingMedia(true);
-    try {
-      if (camera) {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permission.granted) {
-          showAlert('카메라 권한 필요', '기기 설정에서 카메라 권한을 허용하거나 앨범에서 첨부해 주세요.');
-          return;
-        }
-      }
-      const options: ImagePicker.ImagePickerOptions = {
-        mediaTypes: kind === 'all' ? ['images', 'videos'] : [kind],
-        quality: 0.8,
-        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-      };
-      const result = camera ? await ImagePicker.launchCameraAsync({
-        ...options,
-        videoMaxDuration: 10,
-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
-      }) : await ImagePicker.launchImageLibraryAsync({
-        ...options,
-        allowsMultipleSelection: true,
-        orderedSelection: true,
-        selectionLimit: remain,
-      });
-      if (result.canceled) return;
-      const assets = result.assets.slice(0, remain);
-      for (const asset of assets) await validateMediaAsset(asset);
-      setPreviewIndex(mediaAssets.length);
-      setMediaAssets((prev) => [...prev, ...assets].slice(0, maxAttachments));
-    } catch (error: any) {
-      showAlert('첨부파일 선택 실패', error?.message || '사진이나 영상을 다시 선택해 주세요.');
-    } finally {
-      pickerLock.current = false;
-      setPickingMedia(false);
+
+    let assets = result.assets;
+
+    if (kind === 'images') {
+      assets = assets
+        .filter(
+          (asset) =>
+            getMediaFormat(asset).kind === 'image'
+        )
+        .slice(0, remainingImages);
     }
-  };
+
+    if (kind === 'videos') {
+      assets = assets
+        .filter(
+          (asset) =>
+            getMediaFormat(asset).kind === 'video'
+        )
+        .slice(0, maxVideos - videoCount);
+    }
+
+    for (const asset of assets) {
+      await validateMediaAsset(asset);
+    }
+
+    if (assets.length === 0) {
+      return;
+    }
+
+    setPreviewIndex(mediaAssets.length);
+
+    setMediaAssets((previous) => [
+      ...previous,
+      ...assets,
+    ]);
+  } catch (error: any) {
+    showAlert(
+      '첨부파일 선택 실패',
+      error?.message ||
+        '사진이나 영상을 다시 선택해 주세요.'
+    );
+  } finally {
+    pickerLock.current = false;
+    setPickingMedia(false);
+  }
+};
 
   const chooseMedia = (kind: 'images' | 'videos') => {
     if (pickerLock.current || submitLock.current || createdRequestId) return;
@@ -401,7 +566,13 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
       return;
     }
     Alert.alert(kind === 'images' ? '사진 첨부' : '영상 첨부', undefined, [
-      { text: kind === 'images' ? '사진 촬영' : '10초 영상 촬영', onPress: () => void pickMedia(kind, true) },
+      {
+  text: kind === 'images'
+    ? '사진 촬영'
+    : '영상 촬영',
+  onPress: () =>
+    void pickMedia(kind, true)
+},
       { text: '앨범에서 선택', onPress: () => void pickMedia(kind) },
       { text: '취소', style: 'cancel' },
     ]);
@@ -458,7 +629,7 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
   };
 
   const submitEstimate = async () => {
-    if (submitLock.current || pickerLock.current) return;
+    if (submitLock.current || pickerLock.current || analysisBusy || !showContact) return;
 
     if (!user) {
       router.push('/login?redirect=/estimate/create' as any);
@@ -531,6 +702,7 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
           .from('estimate_requests')
           .insert({
             user_id: user.id,
+            ...(linkedAnalysisId ? { ai_analysis_id: linkedAnalysisId } : {}),
             category: selectedCategoryText,
             applicant_name: trimmedApplicantName,
             applicant_phone: trimmedApplicantPhone,
@@ -600,6 +772,10 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
       setDesiredDate('');
       setCalendarVisible(false);
       setMediaAssets([]);
+      setAnalysisSelection(null);
+      setInquiryStep('question');
+      setSkipAI(false);
+      setConsultFrom('question');
       setPreviewIndex(0);
       setCreatedRequestId(null);
       setSelectedStoreId(null);
@@ -624,19 +800,25 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
   const mediaSection = (
     <View style={styles.imageSection}>
       <View style={styles.sectionHeader}>
-        <View style={styles.inline}><Ionicons name="images" size={20} color={theme.primary} /><Text style={styles.sectionTitle}>고장 현장 담기</Text></View>
+        <View style={styles.inline}><Ionicons name="images" size={20} color={theme.primary} /><Text style={styles.sectionTitle}>{stagedAs ? '사진·영상 (선택)' : '고장 현장 담기'}</Text></View>
         <Text style={styles.counter}>{mediaAssets.length}/{maxAttachments}</Text>
       </View>
       <View style={styles.uploadRow}>
         <TouchableOpacity style={styles.uploadButton} accessibilityRole="button" accessibilityLabel="사진 촬영 또는 선택" onPress={() => chooseMedia('images')} disabled={pickingMedia || mediaAssets.length >= maxAttachments}>
           <View style={styles.uploadIcon}><Ionicons name="camera" size={28} color={theme.primary} /></View>
           <Text style={styles.uploadTitle}>사진 촬영 / 선택</Text>
-          <Text style={styles.uploadDetail}>최대 {maxAttachments}개 첨부</Text>
+          <Text style={styles.uploadDetail}>사진 최대 {maxImages}장</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.uploadButton} accessibilityRole="button" accessibilityLabel="영상 촬영 또는 선택" onPress={() => chooseMedia('videos')} disabled={pickingMedia || mediaAssets.length >= maxAttachments}>
           <View style={[styles.uploadIcon, { backgroundColor: theme.accentSoft }]}><Ionicons name="videocam" size={28} color={theme.accentText} /></View>
-          <Text style={styles.uploadTitle}>{Platform.OS === 'web' ? '영상 선택' : '10초 영상 촬영'}</Text>
-          <Text style={styles.uploadDetail}>물새는 소리 · 모터음</Text>
+          <Text style={styles.uploadTitle}>
+  {Platform.OS === 'web'
+    ? '영상 선택'
+    : '영상 촬영 / 선택'}
+</Text>
+          <Text style={styles.uploadDetail}>
+  최대 60초 · 영상 1개
+</Text>
         </TouchableOpacity>
       </View>
       {pickingMedia ? <View style={styles.mediaLoading}><ActivityIndicator color={theme.primary} /><Text style={styles.imageHelp}>첨부파일 확인 중...</Text></View> : null}
@@ -663,20 +845,23 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
           <Text style={styles.imageHelp}>사진과 영상은 상담 담당자가 확인합니다.</Text>
         </View>
       ) : null}
-      <Text style={styles.imageHelp}>{mediaAssets.length >= maxAttachments ? `최대 ${maxAttachments}개 첨부됨 · 삭제 후 다른 파일을 추가할 수 있어요` : '사진 10MB · 영상 30MB 이하'}</Text>
+      <Text style={styles.imageHelp}>
+  사진 최대 5장 · 영상 최대 1개 · 영상 60초 이하
+</Text>
     </View>
   );
 
   const descriptionField = (
     <View style={styles.formSection}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.label}>{SIMPLE_AS_MODE ? '자세한 증상 설명 (선택)' : '상세 내용'}</Text>
+        <Text style={styles.label}>{stagedAs ? '증상 설명' : SIMPLE_AS_MODE ? '자세한 증상 설명 (선택)' : '상세 내용'}</Text>
         {SIMPLE_AS_MODE ? <Text style={styles.counter}>{description.length}/300</Text> : null}
       </View>
       <TextInput
         ref={descriptionInput}
         style={[styles.input, styles.textarea]}
         accessibilityLabel="상세 내용"
+        editable={!analysisBusy}
         value={description}
         onChangeText={setDescription}
         placeholder={SIMPLE_AS_MODE ? '언제부터, 어떤 문제가 생겼나요?' : '공간 상태, 원하는 공사 범위, 필요한 자재, 참고사항을 적어주세요.'}
@@ -685,23 +870,41 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
         multiline
         textAlignVertical="top"
       />
+      {SIMPLE_AS_MODE ? <VoiceDescriptionInput value={description} disabled={analysisBusy} onChangeText={value => setDescription(value.slice(0, 300))} /> : null}
     </View>
   );
 
   return (
     <SafeAreaView style={styles.screen} edges={SIMPLE_AS_MODE ? ['top'] : []}>
     {!isTab ? <Stack.Screen options={{ title: SIMPLE_AS_MODE ? 'AS 문의' : '견적문의', headerShown: !SIMPLE_AS_MODE }} /> : null}
-    {SIMPLE_AS_MODE ? <AsServiceHeader back={!isTab} /> : null}
-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: 32 + (SIMPLE_AS_MODE ? 0 : insets.bottom) }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
-      <View style={{ gap: 18 }} pointerEvents={submitting || createdRequestId ? 'none' : 'auto'}>
+    {SIMPLE_AS_MODE ? <AsServiceHeader back={!isTab} onBack={stagedAs && inquiryStep !== 'question' ? previousStep : undefined} /> : null}
+    <ScrollView ref={scrollRef} style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: 32 + (SIMPLE_AS_MODE ? 0 : insets.bottom) }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
+      <View style={{ gap: 18 }} pointerEvents={submitting || createdRequestId || analysisBusy ? 'none' : 'auto'}>
+      {stagedAs && inquiryStep !== 'question' ? <TouchableOpacity style={styles.stepBack} accessibilityRole="button" accessibilityLabel={inquiryStep === 'consult' && consultFrom === 'answer' ? '답변으로 돌아가기' : '질문 수정하기'} disabled={submitting || !!createdRequestId} onPress={previousStep}>
+        <Ionicons name="arrow-back" size={18} color={theme.text} /><Text style={styles.linkText}>{inquiryStep === 'consult' && consultFrom === 'answer' ? '답변으로 돌아가기' : '질문 수정하기'}</Text>
+      </TouchableOpacity> : null}
       <View style={styles.intro}>
-        {SIMPLE_AS_MODE ? <View style={styles.introBadge}><View style={styles.introDot} /><Text style={styles.eyebrow}>사진·영상으로 간편 접수</Text></View> : null}
+        {SIMPLE_AS_MODE ? <View style={styles.introBadge}><View style={styles.introDot} /><Text style={styles.eyebrow}>{stagedAs ? inquiryStep === 'consult' ? '상담 요청' : inquiryStep === 'answer' ? 'AI 사전 분석' : '간편 AS 질문' : '사진·영상으로 간편 접수'}</Text></View> : null}
         <Text style={styles.title}>
-          {SIMPLE_AS_MODE ? '어디가 고장났나요?\n사진만 올려주세요' : '어떤 공사가 필요하세요?'}
+          {stagedAs ? inquiryStep === 'consult' ? '어디로 연락드릴까요?' : inquiryStep === 'answer' ? '질문에 대한 답변이에요' : '어디가 불편한가요?' : SIMPLE_AS_MODE ? '어디가 고장났나요?\n사진만 올려주세요' : '어떤 공사가 필요하세요?'}
         </Text>
-        {SIMPLE_AS_MODE ? <Text style={styles.introDescription}>고장 난 곳을 사진·영상으로 보여주세요.{ '\n' }상담과 업체 연결을 도와드려요.</Text> : null}
+        {SIMPLE_AS_MODE ? <Text style={styles.introDescription}>{stagedAs ? inquiryStep === 'consult' ? createdRequestId ? '문의는 접수되었지만 첨부 전송이 남아 있어요. 아래에서 재시도해 주세요.' : '아직 문의가 접수되지 않았어요. 연락받을 정보를 확인해 주세요.' : inquiryStep === 'answer' ? '확정 진단이 아닌 예상 원인과 점검 안내입니다.' : '증상을 알려주세요. 사진·영상은 없어도 괜찮아요.' : '고장 난 곳을 사진·영상으로 보여주세요.\n상담과 업체 연결을 도와드려요.'}</Text> : null}
       </View>
 
+      {showQuestion ? <>
+      {SIMPLE_AS_MODE ? <View style={styles.homeSection}>
+        <Text style={styles.label}>A/S 받을 장소</Text>
+        {!user ? <TouchableOpacity style={styles.homeEmpty} onPress={() => router.push('/login?redirect=/estimate/create' as any)}><Text style={styles.imageHelp}>로그인하면 등록한 집을 선택할 수 있어요.</Text><Text style={styles.linkText}>로그인</Text></TouchableOpacity>
+          : homes.length ? <>
+            <TouchableOpacity style={styles.homeSelect} accessibilityRole="button" accessibilityState={{ expanded: homeSelectorOpen }} onPress={() => setHomeSelectorOpen(value => !value)}>
+              <Ionicons name="home-outline" size={22} color={theme.primary} />
+              <View style={styles.flex}><Text style={styles.label}>{selectedHome?.name || '집 선택'}</Text>{selectedHome ? <Text style={styles.imageHelp}>{formatHomeAddress(selectedHome)}{formatHomeSummary(selectedHome) ? `\n${formatHomeSummary(selectedHome)}` : ''}</Text> : null}</View>
+              <Ionicons name={homeSelectorOpen ? 'chevron-up' : 'chevron-down'} size={20} color={theme.text} />
+            </TouchableOpacity>
+            {homeSelectorOpen ? <View style={styles.homeOptions}>{homes.map(home => <TouchableOpacity key={home.id} style={[styles.homeOption, home.id === selectedHomeId && styles.homeOptionActive]} onPress={() => { setSelectedHomeId(home.id); setAddress(formatHomeAddress(home)); setHomeSelectorOpen(false); }}><View style={styles.flex}><Text style={styles.label}>{home.name}{home.is_default ? ' · 기본 집' : ''}</Text><Text style={styles.imageHelp}>{formatHomeAddress(home)}</Text></View>{home.id === selectedHomeId ? <Ionicons name="checkmark-circle" size={22} color={theme.primary} /> : null}</TouchableOpacity>)}</View> : null}
+            <TouchableOpacity style={styles.homeManage} onPress={() => router.push('/my/homes' as any)}><Text style={styles.linkText}>내 집 관리</Text></TouchableOpacity>
+          </> : <View style={styles.homeEmpty}><Text style={styles.imageHelp}>{homeLoadError || '등록된 집이 없습니다. 내 집을 먼저 등록해주세요.'}</Text><TouchableOpacity onPress={() => router.push('/my/home-edit' as any)}><Text style={styles.linkText}>집 등록하기</Text></TouchableOpacity></View>}
+      </View> : null}
       {SIMPLE_AS_MODE ? mediaSection : null}
       {SIMPLE_AS_MODE ? <View style={styles.voiceBand}>
         <View style={styles.voiceIcon}><Ionicons name="mic" size={24} color="#341100" /></View>
@@ -771,6 +974,32 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
         </View>
       ) : null}
 
+      {stagedAs ? <TouchableOpacity style={styles.skipChoice} accessibilityRole="checkbox" accessibilityLabel="AI 답변 없이 바로 상담" accessibilityState={{ checked: skipAI }} onPress={() => { setSkipAI(value => !value); setMessage(''); }}>
+        <Ionicons name={skipAI ? 'checkbox' : 'square-outline'} size={23} color={theme.primary} /><Text style={styles.label}>AI 답변 없이 바로 상담</Text>
+      </TouchableOpacity> : null}
+      </> : null}
+
+      {stagedAs && inquiryStep !== 'question' ? <View style={styles.questionSummary}>
+        <Text style={styles.label}>작성한 증상</Text>
+        <Text style={styles.introDescription}>{[...selectedSymptoms, description.trim()].filter(Boolean).join('\n')}</Text>
+        {mediaAssets.length ? <Text style={styles.imageHelp}>사진·영상 {mediaAssets.length}개 첨부</Text> : null}
+      </View> : null}
+
+      {/* 단계 이동 때 패널을 유지해 답변/동의를 보존하되, 질문이 바뀌면 새 분석으로 분리한다. */}
+      {stagedAs ? <AsAnalysisPanel
+        key={analysisFingerprint}
+        homeId={selectedHomeId}
+        assets={mediaAssets} description={description} categories={selectedCategories} symptoms={selectedSymptoms}
+        step={inquiryStep} skipAI={skipAI} disabled={pickingMedia}
+        onBusy={setAnalysisBusy} onResult={selectAnalysis}
+        onAnswered={() => changeStep('answer')} onConsult={openConsultation}
+      /> : null}
+
+      {stagedAs && inquiryStep === 'question' && skipAI ? <TouchableOpacity style={styles.submitBtn} accessibilityRole="button" accessibilityLabel="상담 정보 입력하기" disabled={pickingMedia} onPress={openConsultation}>
+        <Ionicons name="arrow-forward" size={20} color="#fff" /><Text style={styles.submitText}>상담 정보 입력하기</Text>
+      </TouchableOpacity> : null}
+
+      {showContact ? <>
       <View style={styles.formSection}>
         {SIMPLE_AS_MODE ? <Text style={styles.formHeading}>연락받을 정보</Text> : null}
         <Text style={styles.label}>신청자 이름 (필수)</Text>
@@ -1135,26 +1364,28 @@ function EstimateCreateForm({ isTab }: { isTab: boolean }) {
         </> : null}
       </View>
 
+      </> : null}
       </View>
       {message ? <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="assertive">{message}</Text> : null}
 
-      {SIMPLE_AS_MODE ? <View style={styles.careNote}>
+      {showContact && SIMPLE_AS_MODE ? <View style={styles.careNote}>
         <View style={styles.inline}><Ionicons name="shield-checkmark-outline" size={21} color={theme.primary} /><Text style={styles.careTitle}>상담부터 차근차근 도와드려요</Text></View>
         <Text style={styles.imageHelp}>담당자가 접수 내용을 확인하고 상담을 진행합니다. 방문 일정과 비용은 상담 후 가게와 협의해 주세요.</Text>
       </View> : null}
 
-      <TouchableOpacity
-        style={[styles.submitBtn, (submitting || pickingMedia) && styles.submitBtnDisabled]}
+      {showContact ? <TouchableOpacity
+        style={[styles.submitBtn, (submitting || pickingMedia || analysisBusy) && styles.submitBtnDisabled]}
         onPress={submitEstimate}
-        disabled={submitting || pickingMedia}
+        disabled={submitting || pickingMedia || analysisBusy}
         accessibilityRole="button"
+        accessibilityLabel={submitting ? uploadLabel || '등록 중...' : createdRequestId ? '첨부 재시도' : SIMPLE_AS_MODE ? '견적 및 상담 요청하기' : '등록하기'}
       >
         <Ionicons name="send-outline" size={21} color="#fff" />
         <Text style={styles.submitText}>
           {submitting ? uploadLabel || '등록 중...' : createdRequestId ? '첨부 재시도' : SIMPLE_AS_MODE ? '견적 및 상담 요청하기' : '등록하기'}
         </Text>
-      </TouchableOpacity>
-      {SIMPLE_AS_MODE ? <View style={styles.privacyLine}><Ionicons name="lock-closed-outline" size={14} color={theme.textMuted} /><Text style={styles.submitHelp}>입력한 연락처는 관리자와 담당 가게의 상담에 사용됩니다.</Text></View> : null}
+      </TouchableOpacity> : null}
+      {showContact && SIMPLE_AS_MODE ? <View style={styles.privacyLine}><Ionicons name="lock-closed-outline" size={14} color={theme.textMuted} /><Text style={styles.submitHelp}>입력한 연락처는 관리자와 담당 가게의 상담에 사용됩니다.</Text></View> : null}
     </ScrollView>
     {SIMPLE_AS_MODE && !isTab && !keyboardVisible ? <AsInquiryNavigation /> : null}
     </SafeAreaView>
@@ -1166,6 +1397,16 @@ function createStyles(theme: AsPalette) {
   screen: { flex: 1, backgroundColor: theme.background },
   content: { padding: 20, paddingBottom: 48, gap: 24, width: '100%', maxWidth: 680, alignSelf: 'center' },
   flex: { flex: 1, minWidth: 0, gap: 4 },
+  stepBack: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, alignSelf: 'flex-start' },
+  skipChoice: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingVertical: 10 },
+  questionSummary: { gap: 8, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: theme.border },
+  homeSection: { gap: 9, padding: 16, borderRadius: 14, backgroundColor: theme.surfaceMuted },
+  homeSelect: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface },
+  homeOptions: { borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: theme.border },
+  homeOption: { minHeight: 58, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border },
+  homeOptionActive: { backgroundColor: theme.primarySoft },
+  homeEmpty: { minHeight: 58, padding: 12, gap: 7, borderRadius: 12, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.surface },
+  homeManage: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   intro: { gap: 10, paddingBottom: 4 },
   introBadge: { alignSelf: 'flex-start', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.primarySoft },

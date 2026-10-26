@@ -13,7 +13,7 @@ export async function validateMediaAsset(asset: ImagePickerAsset) {
   return format;
 }
 
-export async function uploadMediaAsset(bucket: 'estimate-images' | 'chat-images', pathWithoutExtension: string, asset: ImagePickerAsset) {
+export async function readMediaAsset(asset: ImagePickerAsset) {
   const format = await validateMediaAsset(asset);
   // RN의 Blob/base64 변환을 피하고 실제 파일 크기를 먼저 검사해 큰 영상의 메모리 사용을 제한한다.
   let body: Blob | ArrayBuffer;
@@ -30,13 +30,18 @@ export async function uploadMediaAsset(bucket: 'estimate-images' | 'chat-images'
     body = await new File(asset.uri).arrayBuffer();
     validateMediaSize(format.kind, body.byteLength);
   }
+  return { body, format, bytes: body instanceof ArrayBuffer ? body.byteLength : body.size };
+}
+
+export async function uploadMediaAsset(bucket: 'estimate-images' | 'chat-images' | 'as-analysis-media', pathWithoutExtension: string, asset: ImagePickerAsset) {
+  const { body, format } = await readMediaAsset(asset);
   const path = `${pathWithoutExtension}.${format.extension}`;
   const { error } = await supabase.storage.from(bucket).upload(path, body, {
     contentType: format.contentType,
     upsert: false,
   });
   if (error) throw error;
-  return { path, url: supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl, ...format };
+  return { path, url: bucket === 'as-analysis-media' ? '' : supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl, ...format };
 }
 
 export async function removeUploadedMedia(bucket: 'estimate-images' | 'chat-images', paths: string[]) {

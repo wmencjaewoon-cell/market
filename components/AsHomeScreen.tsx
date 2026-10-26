@@ -12,9 +12,9 @@ import { AS_HOME_CATEGORIES } from '../lib/asInquiry';
 import { fetchMyRegions, fetchMyRegionSettings } from '../lib/region';
 import { supabase } from '../lib/supabase';
 import { useTabRefresh } from '../lib/tabRefresh';
+import AsHomeVisitSection from './AsHomeVisitSection';
 import AsServiceHeader from './AsServiceHeader';
 import InlineMap from './InlineMap';
-import AsHomeVisitSection from './AsHomeVisitSection';
 
 // 실제 후기가 충분히 쌓이면 true로 변경한다. 숨긴 동안에는 조회 요청도 보내지 않는다.
 const SHOW_AS_HOME_REVIEWS = false;
@@ -104,7 +104,7 @@ export default function AsHomeScreen() {
       <ScrollView contentContainerStyle={styles.content} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadHome(true)} tintColor={theme.primary} colors={[theme.action]} />}>
         <View style={styles.greeting}>
           <View style={styles.flex}>
-            <View style={styles.inline}><View style={styles.statusDot} /><Text style={styles.muted}>사진·영상으로 간편하게 접수하세요</Text></View>
+            <View style={styles.inline}><View style={styles.statusDot} /><Text style={styles.muted}>사진, 영상, 간단한 내용으로 간편하게 접수해주세요</Text></View>
             <Text style={styles.greetingTitle}>어디가 고장났나요?{'\n'}<Text style={{ color: theme.primary }}>수리를 도와드려요!</Text></Text>
           </View>
           <Image source={require('../assets/images/interior-market.jpg')} style={styles.greetingLogo} />

@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
 import VideoAttachment from '../../components/VideoAttachment';
+import InquiryAsAnalysis from '../../components/InquiryAsAnalysis';
 import { type AppPalette } from '../../contexts/theme';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { isVideoAttachment } from '../../lib/mediaAttachments';
@@ -279,6 +280,7 @@ export default function MyInquiriesScreen() {
               <View style={styles.details}>
                 <Text style={styles.sectionTitle}>문의 내용</Text>
                 <Text style={styles.description} selectable>{item.description}</Text>
+                <InquiryAsAnalysis requestId={item.id} />
                 {fields.filter(([, value]) => value).map(([label, value]) => (
                   <View key={label} style={styles.fieldRow}>
                     <Text style={styles.fieldLabel}>{label}</Text>

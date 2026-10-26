@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import AttachmentGallery from '../../components/AttachmentGallery';
+import InquiryAsAnalysis from '../../components/InquiryAsAnalysis';
 import { isVideoAttachment } from '../../lib/mediaAttachments';
 import {
   DEFAULT_STORE_LIMITS,
@@ -1761,6 +1762,7 @@ export default function StoreEstimatesScreen() {
                         ) : null}
                       </View>
                       <Text style={styles.bodyText}>{item.description || '상세 내용 없음'}</Text>
+                      <InquiryAsAnalysis requestId={Number(item.id)} />
                       {item.estimate_request_images?.length ? (
                         <AttachmentGallery attachments={item.estimate_request_images} />
                       ) : null}

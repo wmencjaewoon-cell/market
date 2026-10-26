@@ -94,3 +94,23 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/log-auth-activity/deno.json"
 entrypoint = "./functions/log-auth-activity/index.ts"
+
+[functions.analyze-as-issue]
+enabled = true
+# Authentication is mandatory inside the handler via auth.getUser (also supports asymmetric JWT keys).
+verify_jwt = false
+import_map = "./functions/analyze-as-issue/deno.json"
+entrypoint = "./functions/analyze-as-issue/index.ts"
+
+[functions.cleanup-as-analyses]
+enabled = true
+verify_jwt = false
+import_map = "./functions/cleanup-as-analyses/deno.json"
+entrypoint = "./functions/cleanup-as-analyses/index.ts"
+
+[functions.nearby-as-places]
+enabled = true
+# Authentication is verified inside the handler to support current JWT signing modes.
+verify_jwt = false
+import_map = "./functions/nearby-as-places/deno.json"
+entrypoint = "./functions/nearby-as-places/index.ts"

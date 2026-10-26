@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AttachmentGallery from '../components/AttachmentGallery';
+import InquiryAsAnalysis from '../components/InquiryAsAnalysis';
 import { getEstimateNotificationRoute, normalizeEstimateRequestId } from '../lib/estimateNotificationRoute';
 import { getStoreCategoryLabel } from '../lib/storeCategories';
 import { supabase } from '../lib/supabase';
@@ -1497,6 +1498,9 @@ const filteredStoreRequests = useMemo(() => {
         </View>
 
         <View style={styles.tabRow}>
+          <TouchableOpacity style={styles.tabBtn} accessibilityRole="button" onPress={() => router.push('/admin/as-guides' as any)}>
+            <Text style={styles.tabText}>AI 셀프 가이드</Text>
+          </TouchableOpacity>
           {[
             ['overview', '요약'],
             ['notices', '공지'],
@@ -1962,6 +1966,7 @@ const filteredStoreRequests = useMemo(() => {
           {expandedEstimateId === item.id ? (
             <View>
               <Text style={styles.desc}>{item.description || '상세 내용 없음'}</Text>
+              <InquiryAsAnalysis requestId={item.id} />
               <AttachmentGallery attachments={item.estimate_request_images || []} />
             </View>
           ) : null}

@@ -239,7 +239,9 @@ export default function MyScreen() {
           <>
             {SIMPLE_AS_MODE ? (
               <Section title="AS 문의">
+                <MenuItem title="내 집 관리" onPress={() => router.push('/my/homes' as any)} />
                 <MenuItem title="내 문의 내역" onPress={() => router.push('/my/inquiries' as any)} />
+                <MenuItem title="내 A/S 기록" onPress={() => router.push('/my/as-analyses' as any)} />
                 <MenuItem title="문의 채팅" onPress={() => router.push('/(tabs)/chat' as any)} />
                 <MenuItem title="알림" onPress={() => router.push('/my/notifications' as any)} />
               </Section>

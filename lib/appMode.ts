@@ -2,6 +2,9 @@
 // true: AS/간단문의 중심 홈. false: 기존 장터 중심 홈.
 export const SIMPLE_AS_MODE = true;
 
+// UI rollback switch. The Edge Function also requires AS_AI_ENABLED=true before processing.
+export const SHOW_AS_AI_ANALYSIS = true;
+
 // false로 바꾸면 AS 모드에서 레벨/가게 업무 메뉴를 다시 숨긴다.
 // 판매관리, 구매내역, 관심목록, 키워드 알림은 장터 이용을 위해 계속 노출한다.
 export const SHOW_FULL_APP_MENUS = true;
