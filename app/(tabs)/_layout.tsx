@@ -1,19 +1,24 @@
-// 하단 탭 레이아웃: 홈/지도/채팅/내정보 탭, 채팅 배지, 탭 재선택 새로고침을 관리한다.
+// 하단 탭: 홈/AS문의/채팅/내정보와 채팅 배지, 탭 재선택 새로고침을 관리한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs, router, usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { SHOW_FULL_APP_MENUS, SIMPLE_AS_MODE } from '../../lib/appMode';
 import { useAppTheme } from '../../hooks/use-app-theme';
+import { getAsPalette } from '../../lib/asAppearance';
 import { getUnreadChatCount } from '../../lib/chat';
 import { supabase } from '../../lib/supabase';
 import { emitTabRefresh, type RefreshableTab } from '../../lib/tabRefresh';
 
 export default function TabsLayout() {
   const { user } = useAuth();
+  const userId = user?.id;
   const pathname = usePathname();
-  const theme = useAppTheme();
+  const appTheme = useAppTheme();
+  const theme = SIMPLE_AS_MODE ? getAsPalette(appTheme) : appTheme;
   const insets = useSafeAreaInsets();
+  const showFullMenus = !SIMPLE_AS_MODE || SHOW_FULL_APP_MENUS;
 
   const [chatBadge, setChatBadge] = useState(0);
   const tabBarBottomPadding = Math.max(insets.bottom, 8);
@@ -29,14 +34,14 @@ export default function TabsLayout() {
   };
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       setChatBadge(0);
       return;
     }
 
     loadUnreadCount();
 
-    const channel = supabase.channel(`chat-badge-${user.id}-${Date.now()}`);
+    const channel = supabase.channel(`chat-badge-${userId}-${Date.now()}`);
 
 channel.on(
   'postgres_changes',
@@ -67,7 +72,7 @@ channel.subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [userId]);
 
   const openTab = (tab: RefreshableTab, href: string) => {
     const rootPath = `/${tab}`;
@@ -90,7 +95,7 @@ channel.subscribe();
       screenOptions={{
         headerShown: false,
         sceneStyle: { backgroundColor: theme.background },
-        tabBarActiveTintColor: theme.text,
+        tabBarActiveTintColor: SIMPLE_AS_MODE ? theme.primary : theme.text,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarStyle: shouldHideTabBar
           ? { display: 'none' }
@@ -109,7 +114,7 @@ channel.subscribe();
           fontWeight: '700',
         },
         tabBarBadgeStyle: {
-          backgroundColor: '#166534',
+          backgroundColor: SIMPLE_AS_MODE ? '#0037b0' : '#166534',
           color: '#fff',
         },
       }}
@@ -124,9 +129,25 @@ channel.subscribe();
         }}
         options={{
           title: '홈',
+          tabBarAccessibilityLabel: '홈',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+            <Ionicons
+              name="home-outline"
+              size={size}
+              color={color}
+            />
           ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="as-inquiry"
+        options={{
+          href: SIMPLE_AS_MODE ? undefined : null,
+          title: 'AS문의',
+          tabBarAccessibilityLabel: 'AS문의',
+          tabBarHideOnKeyboard: true,
+          tabBarIcon: ({ color, size }) => <Ionicons name="construct-outline" color={color} size={size} />,
         }}
       />
 
@@ -139,6 +160,7 @@ channel.subscribe();
           },
         }}
         options={{
+          href: null,
           title: '지도',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="map-outline" size={size} color={color} />
@@ -155,7 +177,8 @@ channel.subscribe();
           },
         }}
         options={{
-          title: '채팅',
+          title: SIMPLE_AS_MODE && !showFullMenus ? '문의채팅' : '채팅',
+          tabBarAccessibilityLabel: '채팅',
 
           tabBarBadge:
             chatBadge > 0
@@ -184,6 +207,7 @@ channel.subscribe();
         }}
         options={{
           title: '내정보',
+          tabBarAccessibilityLabel: '내정보',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" size={size} color={color} />
           ),

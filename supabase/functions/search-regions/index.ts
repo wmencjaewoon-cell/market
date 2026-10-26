@@ -28,7 +28,7 @@ serve(async (req) => {
     const body = await req.json();
     const query = body?.query;
 
-    if (!query || typeof query !== "string") {
+    if (!query || typeof query !== "string" || query.trim().length > 120) {
       return new Response(
         JSON.stringify({ error: "query is required" }),
         {
@@ -56,22 +56,19 @@ serve(async (req) => {
       );
     }
 
-    const url =
-      `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=15`;
-
-    const kakaoRes = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `KakaoAK ${restKey}`,
-      },
-    });
-
-    const kakaoText = await kakaoRes.text();    if (!kakaoRes.ok) {
+    const headers = { Authorization: `KakaoAK ${restKey}` };
+    const addressUrl = `https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(query.trim())}&size=15`;
+    const keywordUrl = `https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(query.trim())}&size=15`;
+    const [addressRes, keywordRes] = await Promise.all([
+      fetch(addressUrl, { method: "GET", headers }),
+      fetch(keywordUrl, { method: "GET", headers }),
+    ]);
+    const [addressText, keywordText] = await Promise.all([addressRes.text(), keywordRes.text()]);
+    if (!addressRes.ok && !keywordRes.ok) {
       return new Response(
         JSON.stringify({
           error: "Kakao API error",
-          status: kakaoRes.status,
-          raw: kakaoText,
+          status: addressRes.status,
         }),
         {
           status: 502,
@@ -83,23 +80,31 @@ serve(async (req) => {
       );
     }
 
-    const kakaoData = JSON.parse(kakaoText);
-
-    const documents = (kakaoData?.documents || []).map((doc: any) => {
+    const addressData = addressRes.ok ? JSON.parse(addressText) : { documents: [] };
+    const keywordData = keywordRes.ok ? JSON.parse(keywordText) : { documents: [] };
+    const rawDocuments = [...(addressData?.documents || []), ...(keywordData?.documents || [])];
+    const seen = new Set<string>();
+    const documents = rawDocuments.flatMap((doc: any) => {
+      const roadAddress = doc.road_address_name || doc.road_address?.address_name || '';
+      const jibunAddress = doc.address_name || doc.address?.address_name || '';
+      const key = `${doc.x}:${doc.y}`;
+      if (!doc.x || !doc.y || seen.has(key)) return [];
+      seen.add(key);
       const regionName =
-        doc.address_name ||
-        [doc.road_address_name, doc.place_name].filter(Boolean).join(" ");
+        roadAddress || jibunAddress || doc.place_name || '';
 
-      return {
-        id: doc.id,
-        place_name: doc.place_name,
-        address_name: doc.address_name,
-        road_address_name: doc.road_address_name,
+      return [{
+        id: doc.id || key,
+        place_name: doc.place_name || doc.road_address?.building_name || '',
+        address_name: jibunAddress,
+        road_address_name: roadAddress,
+        zonecode: doc.road_address?.zone_no || '',
+        bcode: doc.address?.b_code || '',
         region_name: regionName,
         x: doc.x,
         y: doc.y,
-      };
-    });
+      }];
+    }).slice(0, 15);
 
     return new Response(
       JSON.stringify({ items: documents }),

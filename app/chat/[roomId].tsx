@@ -2,8 +2,6 @@
 // 기능이 많으므로 새 업무 데이터는 채팅 테이블에 소유시키지 말고 견적/현장 테이블에 연결한다.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decode } from 'base64-arraybuffer';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,9 +43,12 @@ import Reanimated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FullWindowOverlay } from 'react-native-screens';
 import { useAuth } from '../../contexts/AuthContext';
+import VideoAttachment from '../../components/VideoAttachment';
 import { useAppTheme } from '../../hooks/use-app-theme';
 import { markMessagesAsRead, sendMessage } from '../../lib/chat';
 import { canStartChat, canUseApp } from '../../lib/guard';
+import { makeVideoMessage, parseVideoMessage } from '../../lib/mediaAttachments';
+import { removeUploadedMedia, uploadMediaAsset, validateMediaAsset } from '../../lib/mediaUpload';
 import {
   InCallManager,
   isNativeCallSupported,
@@ -623,33 +624,6 @@ function parsePlaceMessage(message: string): PlaceMessagePayload | null {
   return { address, latitude, longitude };
 }
 
-function getChatImageUploadInfo(asset: ImagePicker.ImagePickerAsset) {
-  const rawMimeType = asset.mimeType?.toLowerCase() || '';
-  const fileName = asset.fileName?.toLowerCase() || asset.uri.toLowerCase();
-
-  if (rawMimeType.includes('png') || fileName.endsWith('.png')) {
-    return { ext: 'png', contentType: 'image/png' };
-  }
-
-  if (rawMimeType.includes('webp') || fileName.endsWith('.webp')) {
-    return { ext: 'webp', contentType: 'image/webp' };
-  }
-
-  return { ext: 'jpg', contentType: 'image/jpeg' };
-}
-
-async function prepareChatImageForUpload(asset: ImagePicker.ImagePickerAsset) {
-  const { ext, contentType } = getChatImageUploadInfo(asset);
-
-  return {
-    uri: asset.uri,
-    base64: asset.base64 ?? null,
-    file: asset.file,
-    ext,
-    contentType,
-  };
-}
-
 function getChatImageStoragePath(url: string) {
   const cleanUrl = url.split('?')[0];
   const markers = [
@@ -930,6 +904,9 @@ export default function ChatRoomScreen() {
   const [reads, setReads] = useState<MessageRead[]>([]);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaUploadLabel, setMediaUploadLabel] = useState('');
+  const mediaSendLock = useRef(false);
 
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
@@ -2916,7 +2893,7 @@ export default function ChatRoomScreen() {
    * 이렇게 해야 내 메시지도 상대 메시지도 같은 경로로 들어와 읽음/정렬/날짜 구분 로직이 일관된다.
    */
   const sendTextMessage = async (messageText: string) => {
-  if (!roomId || sending || !user) return;
+  if (!roomId || sending || mediaSendLock.current || !user) return;
 
   const blockedKeyword = checkProhibitedContent(messageText);
 
@@ -2972,78 +2949,6 @@ export default function ChatRoomScreen() {
     }
 
     await sendTextMessage(messageText);
-  };
-
-  // 이미지 업로드 처리
-  const uploadChatImage = async (asset: ImagePicker.ImagePickerAsset) => {
-    if (!roomId || !user) return null;
-
-    let prepared: Awaited<ReturnType<typeof prepareChatImageForUpload>>;
-
-    try {
-      prepared = await prepareChatImageForUpload(asset);
-    } catch {      Alert.alert('오류', '사진을 전송하기 좋은 크기로 변환하지 못했습니다.');
-      return null;
-    }
-
-    const { ext, contentType } = prepared;
-    const filePath = `${roomId}/${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}.${ext}`;
-
-    let fileData: Blob | ArrayBuffer;
-
-    try {
-      if (Platform.OS === 'web') {
-        let blob: Blob;
-
-        if (prepared.file) {
-          blob = prepared.file;
-        } else {
-          const response = await fetch(prepared.uri);
-          blob = await response.blob();
-        }
-
-        if (blob.size === 0) {
-          throw new Error('선택한 사진 파일이 비어 있습니다.');
-        }
-
-        fileData = blob;
-      } else {
-        const base64 =
-          prepared.base64 ||
-          (await FileSystem.readAsStringAsync(prepared.uri, {
-            encoding: 'base64',
-          }));
-
-        if (!base64) {
-          throw new Error('사진 데이터를 읽지 못했습니다.');
-        }
-
-        const decoded = decode(base64);
-
-        if (decoded.byteLength === 0) {
-          throw new Error('선택한 사진 파일이 비어 있습니다.');
-        }
-
-        fileData = decoded;
-      }
-    } catch {      Alert.alert('오류', '사진 데이터를 읽지 못했습니다.');
-      return null;
-    }
-
-    const { error: uploadError } = await supabase.storage
-      .from('chat-images')
-      .upload(filePath, fileData, {
-        contentType,
-      });
-
-    if (uploadError) {      Alert.alert('오류', '사진을 업로드하지 못했습니다.');
-      return null;
-    }
-
-    const { data } = supabase.storage.from('chat-images').getPublicUrl(filePath);
-    return data.publicUrl;
   };
 
   // 채팅방 관련 이미지 URL
@@ -3526,89 +3431,73 @@ export default function ChatRoomScreen() {
     });
   };
 
-  // 이미지 선택 처리
-  const handleAlbum = async () => {
+  // 사진/영상 선택 및 순차 업로드 처리
+  const pickAndSendMedia = async (camera: boolean) => {
+    if (!roomId || !user || mediaSendLock.current || sending) return;
+    mediaSendLock.current = true;
+    setMediaBusy(true);
     setPlusMenuOpen(false);
-
-    const guard = await canStartChat();
-
-    if (!guard.ok) {
-      showChatAlert('채팅 제한', guard.reason || '채팅 이용이 제한되어 있습니다.');
-      return;
-    }
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('권한 필요', '앨범 접근 권한이 필요합니다.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: CHAT_IMAGE_PICKER_QUALITY,
-      allowsMultipleSelection: true,
-      selectionLimit: 10,
-      preferredAssetRepresentationMode:
-        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-    });
-
-    if (result.canceled) return;
-
-    const urls: string[] = [];
-
-    for (const asset of result.assets) {
-      const url = await uploadChatImage(asset);
-      if (url) urls.push(url);
-    }
-
-    if (urls.length > 0 && roomId) {
-      try {
-        await sendMessage(roomId, makeImageMessage(urls), {
-          skipProhibitedCheck: true,
-        });
-      } catch (e: any) {
-        showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
+    let sentCount = 0;
+    const pendingPaths = new Set<string>();
+    try {
+      const guard = await canStartChat();
+      if (!guard.ok) throw new Error(guard.reason || '채팅 이용이 제한되어 있습니다.');
+      if (camera) {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) throw new Error('카메라 권한이 필요합니다.');
       }
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: camera ? ['images'] : ['images', 'videos'],
+        quality: CHAT_IMAGE_PICKER_QUALITY,
+        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      };
+      const result = camera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync({ ...options, allowsMultipleSelection: true, orderedSelection: true, selectionLimit: 10 });
+      if (result.canceled) return;
+      const assets = result.assets.slice(0, 10);
+      for (const asset of assets) await validateMediaAsset(asset);
+
+      let photos: { path: string; url: string }[] = [];
+      const flushPhotos = async () => {
+        if (!photos.length) return;
+        await sendMessage(roomId, makeImageMessage(photos.map((photo) => photo.url)), { skipProhibitedCheck: true });
+        for (const photo of photos) pendingPaths.delete(photo.path);
+        sentCount += photos.length;
+        photos = [];
+      };
+      // 사진은 기존 묶음 형식을 유지하고, 영상은 개별 메시지로 보내 선택 순서를 보존한다.
+      for (const [index, asset] of assets.entries()) {
+        setMediaUploadLabel(`첨부 전송 중 ${index + 1}/${assets.length}`);
+        const uploaded = await uploadMediaAsset('chat-images', `${roomId}/${Date.now()}-${Math.random().toString(36).slice(2)}`, asset);
+        pendingPaths.add(uploaded.path);
+        if (uploaded.kind === 'image') {
+          photos.push(uploaded);
+          continue;
+        }
+        await flushPhotos();
+        await sendMessage(roomId, makeVideoMessage({
+          url: uploaded.url,
+          name: asset.fileName || '영상',
+          duration: asset.duration ?? undefined,
+        }), { skipProhibitedCheck: true });
+        pendingPaths.delete(uploaded.path);
+        sentCount += 1;
+      }
+      await flushPhotos();
+      flatListRef.current?.scrollToEnd({ animated: true });
+    } catch (error: any) {
+      await removeUploadedMedia('chat-images', [...pendingPaths]);
+      showChatAlert('첨부 전송 실패', `${sentCount ? `${sentCount}개는 전송되었습니다. 남은 파일만 다시 선택해 주세요.\n` : ''}${error?.message || '사진이나 영상을 전송하지 못했습니다.'}`);
+    } finally {
+      mediaSendLock.current = false;
+      setMediaBusy(false);
+      setMediaUploadLabel('');
     }
   };
 
-  // 카메라 촬영 처리
-  const handleCamera = async () => {
-    setPlusMenuOpen(false);
-
-    const guard = await canStartChat();
-
-    if (!guard.ok) {
-      showChatAlert('채팅 제한', guard.reason || '채팅 이용이 제한되어 있습니다.');
-      return;
-    }
-
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('권한 필요', '카메라 권한이 필요합니다.');
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      quality: CHAT_IMAGE_PICKER_QUALITY,
-      preferredAssetRepresentationMode:
-        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-    });
-
-    if (result.canceled) return;
-
-    const url = await uploadChatImage(result.assets[0]);
-
-    if (url && roomId) {
-      try {
-        await sendMessage(roomId, makeImageMessage([url]), {
-          skipProhibitedCheck: true,
-        });
-      } catch (e: any) {
-        showChatAlert('사진 전송 실패', e?.message || '사진 메시지를 보내지 못했습니다.');
-      }
-    }
-  };
+  const handleAlbum = () => pickAndSendMedia(false);
+  const handleCamera = () => pickAndSendMedia(true);
 
   // 장소 선택 처리
   const handlePlace = () => {
@@ -3713,7 +3602,7 @@ export default function ChatRoomScreen() {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['취소', '앨범', '카메라', '장소', '약속'],
+          options: ['취소', '사진·영상', '카메라', '장소', '약속'],
           cancelButtonIndex: 0,
         },
         (buttonIndex) => {
@@ -4606,6 +4495,7 @@ export default function ChatRoomScreen() {
 
     // 이미지/장소/약속 메시지는 일반 텍스트처럼 보이지만 prefix를 파싱해 전용 UI와 버튼을 보여준다.
     const imageItems = parseImageMessage(item.message);
+    const video = parseVideoMessage(item.message);
     const isImageMessage = imageItems.length > 0;
     const placeMessage = parsePlaceMessage(item.message);
     const appointmentCompletionDate = !isWorkChatRoom && item.message.startsWith(
@@ -4711,6 +4601,8 @@ export default function ChatRoomScreen() {
                   지도에서 보기
                 </Text>
               </TouchableOpacity>
+            ) : video ? (
+              <VideoAttachment uri={video.url} name={video.name} duration={video.duration} onOpen={prepareChatNavigation} />
             ) : isImageMessage ? (
               <TouchableOpacity
                 onPress={() => {
@@ -4839,6 +4731,7 @@ export default function ChatRoomScreen() {
         onPress={() => {
           openPlusMenu();
         }}
+        disabled={mediaBusy}
         hitSlop={10}
       >
         <Ionicons name="add" size={24} color={isDarkMode ? '#fff' : '#111827'} />
@@ -4853,7 +4746,7 @@ export default function ChatRoomScreen() {
         <TextInput
           ref={messageInputRef}
           style={[styles.input, isDarkMode && styles.inputDark]}
-          placeholder="메시지를 입력하세요"
+          placeholder={mediaUploadLabel || '메시지를 입력하세요'}
           placeholderTextColor={isDarkMode ? '#9ca3af' : '#6b7280'}
           selectionColor="#166534"
           value={text}
@@ -4870,16 +4763,16 @@ export default function ChatRoomScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.sendBtn,
-          sending && styles.sendBtnDisabled,
-          pressed && !sending && styles.controlPressed,
+          (sending || mediaBusy) && styles.sendBtnDisabled,
+          pressed && !sending && !mediaBusy && styles.controlPressed,
         ]}
         onPress={() => {
           void onSend();
         }}
-        disabled={sending}
+        disabled={sending || mediaBusy}
         hitSlop={10}
       >
-        <Text style={styles.sendBtnText}>{sending ? '전송중' : '전송'}</Text>
+        <Text style={styles.sendBtnText}>{sending || mediaBusy ? '전송중' : '전송'}</Text>
       </Pressable>
     </View>
   );
@@ -5807,7 +5700,7 @@ export default function ChatRoomScreen() {
             <TouchableWithoutFeedback>
               <View style={styles.bottomMenuBox}>
                 <TouchableOpacity style={styles.menuItem} onPress={handleAlbum}>
-                  <Text style={styles.menuText}>앨범</Text>
+                  <Text style={styles.menuText}>사진·영상</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={handleCamera}>
                   <Text style={styles.menuText}>카메라</Text>

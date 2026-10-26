@@ -1,0 +1,1214 @@
+diff --git a/app/(tabs)/home/index.tsx b/app/(tabs)/home/index.tsx
+index 101da1f..fd857c1 100644
+--- a/app/(tabs)/home/index.tsx
++++ b/app/(tabs)/home/index.tsx
+@@ -17,11 +17,10 @@ import {
+ import { SafeAreaView } from 'react-native-safe-area-context';
+ import FloatingCreateButton from '../../../components/FloatingCreateButton';
+ import MaterialCard from '../../../components/MaterialCard';
+-import AsHomeScreen from '../../../components/AsHomeScreen';
+ import RadiusSlider from '../../../components/RadiusSlider';
+ import { type AppPalette } from '../../../contexts/theme';
+ import { useAppTheme } from '../../../hooks/use-app-theme';
+-import { SIMPLE_AS_MODE } from '../../../lib/appMode';
++import { SIMPLE_AS_MODE, SIMPLE_AS_SERVICE_NAME } from '../../../lib/appMode';
+ import { getUnreadNotificationCount } from '../../../lib/notificationsData';
+ import {
+   deleteMyRegion,
+@@ -119,9 +118,117 @@ function sortHomeListings(listings: Listing[], terms: string[]) {
+ }
+ 
+ export default function HomeScreen() {
+-  return SIMPLE_AS_MODE ? <AsHomeScreen /> : <MarketplaceHomeScreen />;
++  return SIMPLE_AS_MODE ? <SimpleAsHomeScreen /> : <MarketplaceHomeScreen />;
+ }
+ 
++function SimpleAsHomeScreen() {
++  const theme = useAppTheme();
++  const styles = useMemo(() => createStyles(theme), [theme]);
++  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
++  const [refreshing, setRefreshing] = useState(false);
++
++  const fetchNotificationCount = async () => {
++    try {
++      const count = await getUnreadNotificationCount();
++      setUnreadNotificationCount(count);
++    } catch {    }
++  };
++
++  const handleRefresh = async () => {
++    try {
++      setRefreshing(true);
++      await fetchNotificationCount();
++    } finally {
++      setRefreshing(false);
++    }
++  };
++
++  useFocusEffect(
++    useCallback(() => {
++      void fetchNotificationCount();
++    }, [])
++  );
++
++  useTabRefresh('home', () => {
++    void handleRefresh();
++  });
++
++  return (
++    <SafeAreaView style={styles.screen} edges={['top']}>
++      <ScrollView
++        contentContainerStyle={styles.simpleContent}
++        refreshControl={
++          <RefreshControl
++            refreshing={refreshing}
++            onRefresh={handleRefresh}
++            tintColor="#166534"
++            colors={['#166534']}
++          />
++        }
++      >
++        <View style={styles.simpleTopRow}>
++          <Text style={styles.simpleBrand}>{SIMPLE_AS_SERVICE_NAME}</Text>
++
++          <TouchableOpacity
++            style={styles.notificationBtn}
++            accessibilityRole="button"
++            accessibilityLabel={unreadNotificationCount > 0 ? `알림, 읽지 않은 알림 ${unreadNotificationCount}개` : '알림'}
++            onPress={() => router.push('../my/notifications' as any)}
++          >
++            <Ionicons name="notifications-outline" size={24} color={theme.text} />
++            {unreadNotificationCount > 0 ? (
++              <View style={styles.notificationBadge}>
++                <Text style={styles.notificationBadgeText}>
++                  {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
++                </Text>
++              </View>
++            ) : null}
++          </TouchableOpacity>
++        </View>
++
++        <View style={styles.simpleIntro}>
++          <Text style={styles.simpleTitle}>집수리·AS 문의</Text>
++          <Text style={styles.simpleSubtitle}>누수 · 조명 · 문 · 타일 등</Text>
++        </View>
++
++        <TouchableOpacity
++          style={styles.simplePrimaryButton}
++          activeOpacity={0.88}
++          accessibilityRole="button"
++          onPress={() => router.push('/estimate/create' as any)}
++        >
++          <Ionicons name="create-outline" size={24} color="#fff" />
++          <Text style={styles.simplePrimaryTitle}>수리·AS 문의하기</Text>
++          <Ionicons name="chevron-forward" size={20} color="#fff" />
++        </TouchableOpacity>
++
++        <View style={styles.simpleLinks}>
++          <TouchableOpacity
++            style={styles.simpleLinkRow}
++            activeOpacity={0.75}
++            accessibilityRole="button"
++            onPress={() => router.push('/my/inquiries' as any)}
++          >
++            <Ionicons name="document-text-outline" size={22} color={theme.text} />
++            <Text style={styles.simpleLinkTitle}>내 문의 내역</Text>
++            <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++          </TouchableOpacity>
++
++          <TouchableOpacity
++            style={styles.simpleLinkRow}
++            activeOpacity={0.75}
++            accessibilityRole="button"
++            onPress={() => router.push('/explore' as any)}
++          >
++            <Ionicons name="storefront-outline" size={22} color={theme.text} />
++            <Text style={styles.simpleLinkTitle}>근처 가게·장터</Text>
++            <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++          </TouchableOpacity>
++        </View>
++      </ScrollView>
++    </SafeAreaView>
++  );
++}
+ 
+ export function MarketplaceHomeScreen({ isEmbedded }: { isEmbedded?: boolean } = {}) {
+   const theme = useAppTheme();
+@@ -626,6 +733,81 @@ function createStyles(theme: AppPalette) {
+   return StyleSheet.create({
+   screen: { flex: 1, backgroundColor: theme.background },
+   content: { padding: 16, paddingBottom: 120 },
++  simpleContent: {
++    padding: 20,
++    paddingBottom: 32,
++    width: '100%',
++    maxWidth: 640,
++    alignSelf: 'center',
++  },
++  simpleTopRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++    gap: 16,
++  },
++  simpleBrand: {
++    flex: 1,
++    color: theme.text,
++    fontSize: 22,
++    lineHeight: 30,
++    fontWeight: '800',
++  },
++  simpleIntro: {
++    marginTop: 32,
++    marginBottom: 20,
++    gap: 8,
++  },
++  simpleTitle: {
++    color: theme.text,
++    fontSize: 24,
++    lineHeight: 32,
++    fontWeight: '800',
++    letterSpacing: 0,
++  },
++  simpleSubtitle: {
++    color: theme.textMuted,
++    fontSize: 15,
++    lineHeight: 23,
++  },
++  simplePrimaryButton: {
++    minHeight: 64,
++    borderRadius: 8,
++    backgroundColor: '#166534',
++    padding: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++  },
++  simplePrimaryTitle: {
++    flex: 1,
++    color: '#fff',
++    fontSize: 18,
++    lineHeight: 26,
++    fontWeight: '800',
++  },
++  simpleLinks: {
++    marginTop: 24,
++    borderBottomWidth: StyleSheet.hairlineWidth,
++    borderBottomColor: theme.border,
++  },
++  simpleLinkRow: {
++    minHeight: 64,
++    paddingVertical: 16,
++    paddingHorizontal: 4,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++    borderTopWidth: StyleSheet.hairlineWidth,
++    borderTopColor: theme.border,
++  },
++  simpleLinkTitle: {
++    flex: 1,
++    color: theme.text,
++    fontSize: 16,
++    lineHeight: 24,
++    fontWeight: '700',
++  },
+   topRow: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+diff --git a/app/estimate/create.tsx b/app/estimate/create.tsx
+index 7bb2d23..6f3241d 100644
+--- a/app/estimate/create.tsx
++++ b/app/estimate/create.tsx
+@@ -2,11 +2,10 @@
+ // 한 가게당 중복 문의 제한과 알림 발송 흐름을 수정할 때 이 파일을 확인한다.
+ import Ionicons from '@expo/vector-icons/Ionicons';
+ import * as ImagePicker from 'expo-image-picker';
+-import { router, Stack, useLocalSearchParams } from 'expo-router';
++import { router, Stack } from 'expo-router';
+ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+ import {
+   Alert,
+-  ActivityIndicator,
+   Image,
+   Keyboard,
+   Platform,
+@@ -17,13 +16,11 @@ import {
+   TouchableOpacity,
+   View,
+ } from 'react-native';
+-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useAuth } from '../../contexts/AuthContext';
+ import VideoAttachment from '../../components/VideoAttachment';
+ import { type AppPalette } from '../../contexts/theme';
+ import { useAppTheme } from '../../hooks/use-app-theme';
+ import { SIMPLE_AS_MODE } from '../../lib/appMode';
+-import { AS_CATEGORIES, AS_SYMPTOMS, buildAsInquiryText, getInitialAsCategory } from '../../lib/asInquiry';
+ import { getMediaFormat } from '../../lib/mediaAttachments';
+ import { removeUploadedMedia, uploadMediaAsset, validateMediaAsset } from '../../lib/mediaUpload';
+ import { getProfileImageUrl } from '../../lib/profileImage';
+@@ -48,6 +45,18 @@ const ESTIMATE_CATEGORIES = [
+   '유지보수',
+ ];
+ 
++const SIMPLE_AS_CATEGORIES = [
++  '간단 AS',
++  '누수/배관',
++  '전기/조명',
++  '문/창호',
++  '타일/욕실',
++  '도배/장판',
++  '가구/수납',
++  '마감 보수',
++  '기타 수리',
++];
++
+ const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+ 
+ function showAlert(title: string, message = '') {
+@@ -108,17 +117,12 @@ function getMonthDays(monthDate: Date) {
+ 
+ export default function EstimateCreateScreen() {
+   const { user } = useAuth();
+-  const { category } = useLocalSearchParams<{ category?: string | string[] }>();
+-  const insets = useSafeAreaInsets();
+   const theme = useAppTheme();
+   const styles = useMemo(() => createStyles(theme), [theme]);
+-  const requestCategories = SIMPLE_AS_MODE ? AS_CATEGORIES : ESTIMATE_CATEGORIES;
++  const requestCategories = SIMPLE_AS_MODE ? SIMPLE_AS_CATEGORIES : ESTIMATE_CATEGORIES;
+   const [selectedCategories, setSelectedCategories] = useState<string[]>(() => [
+-    SIMPLE_AS_MODE ? getInitialAsCategory(category) : requestCategories[0],
++    requestCategories[0],
+   ]);
+-  const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
+-  const [storeSelectionOpen, setStoreSelectionOpen] = useState(!SIMPLE_AS_MODE);
+-  const [pickingMedia, setPickingMedia] = useState(false);
+   const [title, setTitle] = useState('');
+   const [region, setRegion] = useState('');
+   const [address, setAddress] = useState('');
+@@ -130,8 +134,8 @@ export default function EstimateCreateScreen() {
+   });
+   const [applicantName, setApplicantName] = useState('');
+   const [applicantPhone, setApplicantPhone] = useState('');
+-  const [budget] = useState('');
+-  const [preferredContact] = useState('앱 채팅');
++  const [budget, setBudget] = useState('');
++  const [preferredContact, setPreferredContact] = useState('앱 채팅');
+   const [description, setDescription] = useState('');
+   const [mediaAssets, setMediaAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
+   const [createdRequestId, setCreatedRequestId] = useState<number | null>(null);
+@@ -323,7 +327,7 @@ export default function EstimateCreateScreen() {
+     }
+   }, [selectedStaffUserId, selectedStoreId, selectedStoreStaff]);
+ 
+-  const pickMedia = async (kind: 'images' | 'videos' | 'all' = 'all', camera = false) => {
++  const pickMedia = async () => {
+     if (pickerLock.current || submitLock.current || createdRequestId) return;
+     const remain = 6 - mediaAssets.length;
+     if (remain <= 0) {
+@@ -331,29 +335,14 @@ export default function EstimateCreateScreen() {
+       return;
+     }
+     pickerLock.current = true;
+-    setPickingMedia(true);
+     try {
+-      if (camera) {
+-        const permission = await ImagePicker.requestCameraPermissionsAsync();
+-        if (!permission.granted) {
+-          showAlert('카메라 권한 필요', '기기 설정에서 카메라 권한을 허용하거나 앨범에서 첨부해 주세요.');
+-          return;
+-        }
+-      }
+-      const options: ImagePicker.ImagePickerOptions = {
+-        mediaTypes: kind === 'all' ? ['images', 'videos'] : [kind],
+-        quality: 0.8,
+-        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+-      };
+-      const result = camera ? await ImagePicker.launchCameraAsync({
+-        ...options,
+-        videoMaxDuration: 10,
+-        videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+-      }) : await ImagePicker.launchImageLibraryAsync({
+-        ...options,
++      const result = await ImagePicker.launchImageLibraryAsync({
++        mediaTypes: ['images', 'videos'],
+         allowsMultipleSelection: true,
+         orderedSelection: true,
+         selectionLimit: remain,
++        quality: 0.8,
++        preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+       });
+       if (result.canceled) return;
+       const assets = result.assets.slice(0, remain);
+@@ -363,33 +352,15 @@ export default function EstimateCreateScreen() {
+       showAlert('첨부파일 선택 실패', error?.message || '사진이나 영상을 다시 선택해 주세요.');
+     } finally {
+       pickerLock.current = false;
+-      setPickingMedia(false);
+     }
+   };
+ 
+-  const chooseMedia = (kind: 'images' | 'videos') => {
+-    if (pickerLock.current || submitLock.current || createdRequestId) return;
+-    if (Platform.OS === 'web') {
+-      void pickMedia(kind);
+-      return;
+-    }
+-    Alert.alert(kind === 'images' ? '사진 첨부' : '영상 첨부', undefined, [
+-      { text: kind === 'images' ? '사진 촬영' : '10초 영상 촬영', onPress: () => void pickMedia(kind, true) },
+-      { text: '앨범에서 선택', onPress: () => void pickMedia(kind) },
+-      { text: '취소', style: 'cancel' },
+-    ]);
+-  };
+-
+   const toggleCategory = (item: string) => {
+     setSelectedCategories((prev) => {
+       if (prev.includes(item)) {
+         return prev.length === 1 ? prev : prev.filter((category) => category !== item);
+       }
+ 
+-      // 기본 분류와 구체적인 수리 분야가 함께 남지 않도록 한다.
+-      if (SIMPLE_AS_MODE) {
+-        return item === '간단 AS' ? [item] : [...prev.filter((value) => value !== '간단 AS'), item];
+-      }
+       return [...prev, item];
+     });
+   };
+@@ -425,7 +396,7 @@ export default function EstimateCreateScreen() {
+ 
+   const sendEstimateNotification = async (requestId: number) => {
+     try {
+-      await supabase.functions.invoke('send-estimate-request-notification', {
++      const { error } = await supabase.functions.invoke('send-estimate-request-notification', {
+         body: { requestId },
+       });    } catch {    }
+   };
+@@ -438,11 +409,8 @@ export default function EstimateCreateScreen() {
+       return;
+     }
+ 
+-    const inquiryText = SIMPLE_AS_MODE ? buildAsInquiryText({
+-      title, description, categories: selectedCategories, symptoms: selectedSymptoms, attachmentCount: mediaAssets.length,
+-    }) : { title: title.trim(), description: description.trim() };
+-    const trimmedTitle = inquiryText.title;
+-    const trimmedDescription = inquiryText.description;
++    const trimmedTitle = title.trim();
++    const trimmedDescription = description.trim();
+     const trimmedApplicantName = applicantName.trim();
+     const trimmedApplicantPhone = applicantPhone.trim();
+     const phoneDigits = trimmedApplicantPhone.replace(/[^\d]/g, '');
+@@ -482,7 +450,7 @@ export default function EstimateCreateScreen() {
+     }
+ 
+     if (!trimmedDescription) {
+-      setMessage(SIMPLE_AS_MODE ? '사진·영상, 증상 선택, 상세 내용 중 하나 이상을 남겨 주세요.' : '상세 내용을 입력해 주세요.');
++      setMessage('상세 내용을 입력해 주세요.');
+       return;
+     }
+ 
+@@ -575,77 +543,13 @@ export default function EstimateCreateScreen() {
+     }
+   };
+ 
+-  const mediaSection = (
+-    <View style={styles.imageSection}>
+-      <View style={styles.sectionHeader}>
+-        <Text style={styles.sectionTitle}>사진·영상 첨부</Text>
+-        <Text style={styles.counter}>{mediaAssets.length}/6</Text>
+-      </View>
+-      <View style={styles.uploadRow}>
+-        <TouchableOpacity style={styles.uploadButton} accessibilityRole="button" accessibilityLabel="사진 촬영 또는 선택" onPress={() => chooseMedia('images')} disabled={pickingMedia || mediaAssets.length >= 6}>
+-          <Ionicons name="camera-outline" size={30} color={theme.primary} />
+-          <Text style={styles.uploadTitle}>사진 첨부</Text>
+-          <Text style={styles.uploadDetail}>{Platform.OS === 'web' ? '사진 선택' : '촬영 · 앨범 선택'}</Text>
+-        </TouchableOpacity>
+-        <TouchableOpacity style={styles.uploadButton} accessibilityRole="button" accessibilityLabel="영상 촬영 또는 선택" onPress={() => chooseMedia('videos')} disabled={pickingMedia || mediaAssets.length >= 6}>
+-          <Ionicons name="videocam-outline" size={30} color={theme.text} />
+-          <Text style={styles.uploadTitle}>영상 첨부</Text>
+-          <Text style={styles.uploadDetail}>{Platform.OS === 'web' ? '영상 선택' : '10초 촬영 · 앨범 선택'}</Text>
+-        </TouchableOpacity>
+-      </View>
+-      {pickingMedia ? <View style={styles.mediaLoading}><ActivityIndicator color={theme.primary} /><Text style={styles.imageHelp}>첨부파일 확인 중...</Text></View> : null}
+-      <Text style={styles.imageHelp}>{mediaAssets.length >= 6 ? '최대 6개 첨부됨 · 삭제 후 다른 파일을 추가할 수 있어요' : '최대 6개 · 사진 10MB / 영상 30MB 이하'}</Text>
+-      {mediaAssets.length > 0 ? (
+-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageRow}>
+-          {mediaAssets.map((asset, index) => (
+-            <View key={`${asset.uri}-${index}`} style={styles.previewBox}>
+-              {getMediaFormat(asset).kind === 'video'
+-                ? <VideoAttachment uri={asset.uri} name={asset.fileName || '첨부영상'} duration={asset.duration} compact />
+-                : <Image source={{ uri: asset.uri }} style={styles.previewImage} accessibilityLabel={`첨부사진 ${index + 1}`} />}
+-              <TouchableOpacity style={styles.removeImageBtn} accessibilityRole="button" accessibilityLabel={`첨부파일 ${index + 1} 삭제`} onPress={() => setMediaAssets((prev) => prev.filter((_, i) => i !== index))}>
+-                <Ionicons name="close" size={18} color="#fff" />
+-              </TouchableOpacity>
+-            </View>
+-          ))}
+-        </ScrollView>
+-      ) : null}
+-    </View>
+-  );
+-
+-  const descriptionField = (
+-    <View style={styles.formSection}>
+-      <View style={styles.sectionHeader}>
+-        <Text style={styles.label}>{SIMPLE_AS_MODE ? '덧붙일 내용 (선택)' : '상세 내용'}</Text>
+-        {SIMPLE_AS_MODE ? <Text style={styles.counter}>{description.length}/1000</Text> : null}
+-      </View>
+-      <TextInput
+-        style={[styles.input, styles.textarea]}
+-        accessibilityLabel="상세 내용"
+-        value={description}
+-        onChangeText={setDescription}
+-        placeholder={SIMPLE_AS_MODE ? '언제부터, 어떤 문제가 생겼나요?' : '공간 상태, 원하는 공사 범위, 필요한 자재, 참고사항을 적어주세요.'}
+-        placeholderTextColor={theme.textMuted}
+-        maxLength={SIMPLE_AS_MODE ? 1000 : undefined}
+-        multiline
+-        textAlignVertical="top"
+-      />
+-    </View>
+-  );
+-
+   return (
+-    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
++    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+       <Stack.Screen options={{ title: SIMPLE_AS_MODE ? 'AS 문의' : '견적문의' }} />
+       <View style={{ gap: 18 }} pointerEvents={submitting || createdRequestId ? 'none' : 'auto'}>
+-      <View style={styles.intro}>
+-        {SIMPLE_AS_MODE ? <Text style={styles.eyebrow}>사진·영상으로 간편 접수</Text> : null}
+-        <Text style={styles.title}>
+-          {SIMPLE_AS_MODE ? '어디가 고장 났나요?' : '어떤 공사가 필요하세요?'}
+-        </Text>
+-        {SIMPLE_AS_MODE ? <Text style={styles.categoryHelp}>문제가 생긴 곳을 보여주세요.</Text> : null}
+-      </View>
+-
+-      {SIMPLE_AS_MODE ? mediaSection : null}
+-      <Text style={styles.sectionTitle}>{SIMPLE_AS_MODE ? '수리 분야' : '공사 종류'}</Text>
++      <Text style={styles.title}>
++        {SIMPLE_AS_MODE ? '어떤 문제가 있으세요?' : '어떤 공사가 필요하세요?'}
++      </Text>
+ 
+       <View style={styles.categoryGrid}>
+         {requestCategories.map((item) => {
+@@ -655,9 +559,6 @@ export default function EstimateCreateScreen() {
+             <TouchableOpacity
+               key={item}
+               style={[styles.categoryBtn, active && styles.categoryBtnActive]}
+-              accessibilityRole="checkbox"
+-              accessibilityState={{ checked: active }}
+-              aria-checked={active}
+               onPress={() => toggleCategory(item)}
+             >
+               <Text style={[styles.categoryText, active && styles.categoryTextActive]}>
+@@ -673,70 +574,37 @@ export default function EstimateCreateScreen() {
+           : '여러 공사를 함께 선택할 수 있습니다.'}
+       </Text>
+ 
+-      {SIMPLE_AS_MODE ? (
+-        <View style={styles.symptomSection}>
+-          <Text style={styles.sectionTitle}>어떤 증상인가요?</Text>
+-          <View style={styles.categoryGrid}>
+-            {AS_SYMPTOMS.map((symptom) => {
+-              const selected = selectedSymptoms.includes(symptom);
+-              return (
+-                <TouchableOpacity
+-                  key={symptom}
+-                  style={[styles.symptom, selected && styles.symptomSelected]}
+-                  accessibilityRole="checkbox"
+-                  accessibilityLabel={symptom}
+-                  accessibilityState={{ checked: selected }}
+-                  aria-checked={selected}
+-                  onPress={() => setSelectedSymptoms((previous) => selected ? previous.filter((value) => value !== symptom) : [...previous, symptom])}
+-                >
+-                  <Ionicons name={selected ? 'checkbox' : 'square-outline'} size={18} color={selected ? theme.primary : theme.textMuted} />
+-                  <Text style={styles.symptomText}>{symptom}</Text>
+-                </TouchableOpacity>
+-              );
+-            })}
+-          </View>
+-          {descriptionField}
+-        </View>
+-      ) : null}
+-
+       <View style={styles.formSection}>
+-        {SIMPLE_AS_MODE ? <Text style={styles.formHeading}>연락받을 정보</Text> : null}
+-        <Text style={styles.label}>신청자 이름 (필수)</Text>
++        <Text style={styles.label}>신청자 이름</Text>
+         <TextInput
+           style={styles.input}
+           value={applicantName}
+           onChangeText={setApplicantName}
+           placeholder="예: 홍길동"
+-          placeholderTextColor={theme.textMuted}
+-          accessibilityLabel="신청자 이름, 필수"
+           autoCapitalize="none"
+         />
+ 
+-        <Text style={styles.label}>신청자 전화번호 (필수)</Text>
++        <Text style={styles.label}>신청자 전화번호</Text>
+         <TextInput
+           style={styles.input}
+           value={applicantPhone}
+           onChangeText={setApplicantPhone}
+           placeholder="예: 010-1234-5678"
+-          placeholderTextColor={theme.textMuted}
+-          accessibilityLabel="신청자 전화번호, 필수"
+           keyboardType="phone-pad"
+           autoCapitalize="none"
+         />
+         <Text style={styles.fieldHelp}>
+-          입력한 연락처는 관리자와 담당 가게의 상담에 사용됩니다.
++          입력한 연락처는 선택한 가게의 상담과 견적 확인에 사용됩니다.
+         </Text>
+ 
+-        <Text style={styles.label}>{SIMPLE_AS_MODE ? '문의 제목 (선택)' : '제목'}</Text>
++        <Text style={styles.label}>제목</Text>
+         <TextInput
+           style={styles.input}
+           value={title}
+           onChangeText={setTitle}
+-          placeholderTextColor={theme.textMuted}
+-          accessibilityLabel="문의 제목"
+           placeholder={
+             SIMPLE_AS_MODE
+-              ? `${selectedCategories.join(' · ')} 문의`
++              ? '예: 욕실 타일 깨짐 AS 문의'
+               : '예: 24평 아파트 욕실 리모델링 견적 문의'
+           }
+         />
+@@ -755,8 +623,6 @@ export default function EstimateCreateScreen() {
+           value={address}
+           onChangeText={setAddress}
+           placeholder="상담에 필요한 범위까지만 입력해 주세요."
+-          placeholderTextColor={theme.textMuted}
+-          accessibilityLabel="주소"
+         />
+ 
+         <Text style={styles.label}>희망 일정</Text>
+@@ -869,31 +735,68 @@ export default function EstimateCreateScreen() {
+           placeholder="예: 앱 채팅, 전화, 문자"
+         /> */}
+ 
+-        {!SIMPLE_AS_MODE ? descriptionField : null}
++        <Text style={styles.label}>상세 내용</Text>
++        <TextInput
++          style={[styles.input, styles.textarea]}
++          value={description}
++          onChangeText={setDescription}
++          placeholder={
++            SIMPLE_AS_MODE
++              ? '어디가 어떻게 고장났는지, 언제부터 그런지, 직접 확인한 내용을 적어주세요.'
++              : '공간 상태, 원하는 공사 범위, 필요한 자재, 참고사항을 적어주세요.'
++          }
++          multiline
++          textAlignVertical="top"
++        />
+       </View>
+ 
+-      {!SIMPLE_AS_MODE ? mediaSection : null}
++      <View style={styles.imageSection}>
++        <View style={styles.sectionHeader}>
++          <Text style={styles.sectionTitle}>사진·영상 첨부 ({mediaAssets.length}/6)</Text>
++          <TouchableOpacity style={styles.imageAddBtn} onPress={pickMedia}>
++            <Ionicons name="image-outline" size={17} color="#166534" />
++            <Text style={styles.imageAddText}>추가</Text>
++          </TouchableOpacity>
++        </View>
++
++        <Text style={styles.imageHelp}>사진 10MB · 영상 30MB 이하</Text>
++        {mediaAssets.length > 0 ? (
++          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageRow}>
++            {mediaAssets.map((asset, index) => (
++              <View key={`${asset.uri}-${index}`} style={styles.previewBox}>
++                {getMediaFormat(asset).kind === 'video'
++                  ? <VideoAttachment uri={asset.uri} name={asset.fileName || '첨부영상'} duration={asset.duration} compact />
++                  : <Image source={{ uri: asset.uri }} style={styles.previewImage} />}
++                <TouchableOpacity
++                  style={styles.removeImageBtn}
++                  accessibilityLabel="첨부파일 삭제"
++                  onPress={() => setMediaAssets((prev) => prev.filter((_, i) => i !== index))}
++                >
++                  <Ionicons name="close" size={14} color="#fff" />
++                </TouchableOpacity>
++              </View>
++            ))}
++          </ScrollView>
++        ) : (
++          <Text style={styles.imageHelp}>
++            {SIMPLE_AS_MODE
++              ? '고장난 부분의 사진이나 영상을 첨부해 주세요.'
++              : '현장 사진, 도면 또는 영상을 첨부해 주세요.'}
++          </Text>
++        )}
++      </View>
+ 
+       <View style={styles.storeSelectSection}>
+-        <TouchableOpacity
+-          style={styles.storeToggle}
+-          accessibilityRole="button"
+-          accessibilityState={{ expanded: storeSelectionOpen }}
+-          aria-expanded={storeSelectionOpen}
+-          onPress={() => setStoreSelectionOpen((value) => !value)}
+-        >
+-          <View style={{ flex: 1, gap: 5 }}>
+-            <Text style={styles.sectionTitle}>상담 받을 가게 (선택)</Text>
+-            <Text style={styles.storeSelectHelp}>{selectedStoreId ? stores.find((store) => store.id === selectedStoreId)?.display_name || '가게 선택됨' : '가게를 모르면 관리자가 연결해 드려요'}</Text>
+-          </View>
+-          <Ionicons name={storeSelectionOpen ? 'chevron-up' : 'chevron-down'} size={22} color={theme.text} />
+-        </TouchableOpacity>
+-        {storeSelectionOpen ? <>
++        <View style={styles.sectionHeader}>
++          <Text style={styles.sectionTitle}>
++            {SIMPLE_AS_MODE ? '연결 받을 가게 선택' : '상담 받을 가게 선택'}
++          </Text>
+           {selectedStoreId ? (
+-            <TouchableOpacity style={styles.clearStoreButton} accessibilityRole="button" onPress={() => setSelectedStoreId(null)}>
++            <TouchableOpacity onPress={() => setSelectedStoreId(null)}>
+               <Text style={styles.clearStoreText}>선택 해제</Text>
+             </TouchableOpacity>
+           ) : null}
++        </View>
+         <Text style={styles.storeSelectHelp}>
+           {SIMPLE_AS_MODE
+             ? '가게를 선택하지 않아도 접수할 수 있습니다. 관리자가 확인 후 직접 해결 안내 또는 업체 연결을 도와드립니다.'
+@@ -1053,23 +956,20 @@ export default function EstimateCreateScreen() {
+             )}
+           </View>
+         ) : null}
+-        </> : null}
+       </View>
+ 
+       </View>
+-      {message ? <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="assertive">{message}</Text> : null}
++      {message ? <Text style={styles.errorText}>{message}</Text> : null}
+ 
+       <TouchableOpacity
+-        style={[styles.submitBtn, (submitting || pickingMedia) && styles.submitBtnDisabled]}
++        style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+         onPress={submitEstimate}
+-        disabled={submitting || pickingMedia}
+-        accessibilityRole="button"
++        disabled={submitting}
+       >
+         <Text style={styles.submitText}>
+-          {submitting ? uploadLabel || '등록 중...' : createdRequestId ? '첨부 재시도' : SIMPLE_AS_MODE ? '상담 요청하기' : '등록하기'}
++          {submitting ? uploadLabel || '등록 중...' : createdRequestId ? '첨부 재시도' : SIMPLE_AS_MODE ? 'AS 문의 등록하기' : '등록하기'}
+         </Text>
+       </TouchableOpacity>
+-      {SIMPLE_AS_MODE ? <Text style={styles.submitHelp}>문의 접수 후 관리자 또는 선택한 가게에서 확인합니다.</Text> : null}
+     </ScrollView>
+   );
+ }
+@@ -1077,32 +977,15 @@ export default function EstimateCreateScreen() {
+ function createStyles(theme: AppPalette) {
+   return StyleSheet.create({
+   screen: { flex: 1, backgroundColor: theme.background },
+-  content: { padding: 20, paddingBottom: 48, gap: 18, width: '100%', maxWidth: 640, alignSelf: 'center' },
+-  intro: { gap: 8, paddingTop: 4, paddingBottom: 6 },
+-  eyebrow: { color: theme.primary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
+-  title: { color: theme.text, fontSize: 24, lineHeight: 34, fontWeight: '800' },
+-  counter: { color: theme.textMuted, fontSize: 12 },
+-  uploadRow: { flexDirection: 'row', gap: 12 },
+-  uploadButton: { flex: 1, minWidth: 0, minHeight: 132, borderWidth: 1, borderStyle: 'dashed', borderColor: theme.border, borderRadius: 8, padding: 10, alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: theme.surfaceSoft },
+-  uploadTitle: { color: theme.text, fontSize: 15, fontWeight: '700', textAlign: 'center' },
+-  uploadDetail: { color: theme.textMuted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+-  mediaLoading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+-  symptomSection: { gap: 16, paddingVertical: 20, borderTopWidth: 1, borderTopColor: theme.border, borderBottomWidth: 1, borderBottomColor: theme.border },
+-  symptom: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 10, minHeight: 44, borderWidth: 1, borderColor: theme.border, borderRadius: 8, maxWidth: '100%' },
+-  symptomSelected: { borderColor: theme.primary, backgroundColor: theme.primarySoft },
+-  symptomText: { color: theme.text, fontSize: 13, lineHeight: 20, flexShrink: 1 },
+-  formHeading: { color: theme.text, fontSize: 18, fontWeight: '800', paddingBottom: 8 },
+-  storeToggle: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64 },
+-  submitHelp: { color: theme.textMuted, fontSize: 12, lineHeight: 20, textAlign: 'center' },
++  content: { padding: 16, paddingBottom: 48, gap: 18 },
++  title: { color: theme.text, fontSize: 24, fontWeight: '900' },
+   categoryGrid: {
+     flexDirection: 'row',
+     flexWrap: 'wrap',
+     gap: 8,
+   },
+   categoryBtn: {
+-    borderRadius: 8,
+-    minHeight: 44,
+-    justifyContent: 'center',
++    borderRadius: 999,
+     borderWidth: 1,
+     borderColor: theme.border,
+     backgroundColor: theme.surface,
+@@ -1117,9 +1000,11 @@ function createStyles(theme: AppPalette) {
+   categoryTextActive: { color: theme.primaryText },
+   categoryHelp: { color: theme.textMuted, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+   storeSelectSection: {
+-    borderTopWidth: 1,
+-    borderTopColor: theme.border,
+-    paddingTop: 12,
++    borderRadius: 16,
++    borderWidth: 1,
++    borderColor: theme.border,
++    backgroundColor: theme.surface,
++    padding: 14,
+     gap: 10,
+   },
+   storeSelectHelp: {
+@@ -1133,7 +1018,6 @@ function createStyles(theme: AppPalette) {
+     fontSize: 13,
+     fontWeight: '900',
+   },
+-  clearStoreButton: { minHeight: 44, alignSelf: 'flex-start', justifyContent: 'center' },
+   storeCategoryRow: {
+     gap: 8,
+     paddingRight: 4,
+@@ -1169,7 +1053,7 @@ function createStyles(theme: AppPalette) {
+   },
+   storeCard: {
+     width: 172,
+-    borderRadius: 8,
++    borderRadius: 14,
+     borderWidth: 1,
+     borderColor: theme.border,
+     backgroundColor: theme.surface,
+@@ -1219,9 +1103,11 @@ function createStyles(theme: AppPalette) {
+   },
+   requestedBadgeText: { color: theme.text, fontSize: 11, fontWeight: '900' },
+   staffSelectBox: {
+-    borderTopWidth: 1,
+-    borderTopColor: theme.border,
+-    paddingTop: 12,
++    borderRadius: 14,
++    backgroundColor: theme.surfaceMuted,
++    borderWidth: 1,
++    borderColor: theme.border,
++    padding: 12,
+     gap: 8,
+   },
+   staffSelectTitle: { color: theme.text, fontSize: 14, fontWeight: '900' },
+@@ -1264,19 +1150,19 @@ function createStyles(theme: AppPalette) {
+     minHeight: 48,
+     borderWidth: 1,
+     borderColor: theme.border,
+-    borderRadius: 8,
++    borderRadius: 14,
+     paddingHorizontal: 14,
+     paddingVertical: 12,
+     color: theme.text,
+     fontSize: 15,
+     backgroundColor: theme.input,
+   },
+-  textarea: { minHeight: 112, lineHeight: 22 },
++  textarea: { minHeight: 140, lineHeight: 21 },
+   dateSelectBtn: {
+     minHeight: 58,
+     borderWidth: 1,
+     borderColor: theme.primarySoft,
+-    borderRadius: 8,
++    borderRadius: 14,
+     backgroundColor: theme.primarySoft,
+     paddingHorizontal: 14,
+     paddingVertical: 10,
+@@ -1366,33 +1252,45 @@ function createStyles(theme: AppPalette) {
+   },
+   quickDateText: { color: theme.text, fontSize: 13, fontWeight: '900' },
+   imageSection: {
+-    paddingBottom: 8,
++    borderRadius: 16,
++    borderWidth: 1,
++    borderColor: theme.border,
++    backgroundColor: theme.surface,
++    padding: 14,
+     gap: 12,
+   },
+   sectionHeader: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+-    flexWrap: 'wrap',
+-    gap: 8,
+   },
+   sectionTitle: { color: theme.text, fontSize: 16, fontWeight: '900' },
++  imageAddBtn: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 4,
++    borderRadius: 999,
++    backgroundColor: theme.primarySoft,
++    paddingHorizontal: 11,
++    paddingVertical: 7,
++  },
++  imageAddText: { color: theme.primary, fontSize: 13, fontWeight: '900' },
+   imageRow: { gap: 10 },
+   previewBox: {
+-    width: 112,
+-    height: 112,
+-    borderRadius: 8,
++    width: 92,
++    height: 92,
++    borderRadius: 12,
+     overflow: 'hidden',
+     backgroundColor: theme.surfaceSoft,
+   },
+   previewImage: { width: '100%', height: '100%' },
+   removeImageBtn: {
+     position: 'absolute',
+-    top: 2,
+-    right: 2,
+-    width: 36,
+-    height: 36,
+-    borderRadius: 18,
++    top: 6,
++    right: 6,
++    width: 22,
++    height: 22,
++    borderRadius: 11,
+     backgroundColor: theme.overlay,
+     alignItems: 'center',
+     justifyContent: 'center',
+@@ -1400,14 +1298,13 @@ function createStyles(theme: AppPalette) {
+   imageHelp: { color: theme.textMuted, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+   errorText: { color: theme.danger, fontSize: 13, lineHeight: 19, fontWeight: '800' },
+   submitBtn: {
+-    minHeight: 56,
+-    padding: 12,
+-    borderRadius: 8,
+-    backgroundColor: '#166534',
++    minHeight: 52,
++    borderRadius: 16,
++    backgroundColor: theme.primary,
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+   submitBtnDisabled: { opacity: 0.6 },
+-  submitText: { color: '#fff', fontSize: 16, lineHeight: 24, fontWeight: '800' },
++  submitText: { color: theme.primaryText, fontSize: 16, fontWeight: '900' },
+ });
+ }
+diff --git a/components/AsHomeScreen.tsx b/components/AsHomeScreen.tsx
+deleted file mode 100644
+index b8f7688..0000000
+--- a/components/AsHomeScreen.tsx
++++ /dev/null
+@@ -1,218 +0,0 @@
+-import Ionicons from '@expo/vector-icons/Ionicons';
+-import { router, useFocusEffect, type Href } from 'expo-router';
+-import { useCallback, useMemo, useRef, useState } from 'react';
+-import { ActivityIndicator, Image, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+-import { SafeAreaView } from 'react-native-safe-area-context';
+-import { useAuth } from '../contexts/AuthContext';
+-import { type AppPalette } from '../contexts/theme';
+-import { useAppTheme } from '../hooks/use-app-theme';
+-import { SIMPLE_AS_SERVICE_NAME } from '../lib/appMode';
+-import { AS_HOME_CATEGORIES } from '../lib/asInquiry';
+-import { getUnreadNotificationCount } from '../lib/notificationsData';
+-import { fetchMyRegions, fetchMyRegionSettings } from '../lib/region';
+-import { supabase } from '../lib/supabase';
+-import { useTabRefresh } from '../lib/tabRefresh';
+-
+-type RecentInquiry = { id: number; title: string; created_at: string };
+-const shortcuts = [
+-  { label: '내 문의', icon: 'document-text-outline', route: '/my/inquiries' },
+-  { label: '근처 가게', icon: 'storefront-outline', route: '/store' },
+-  { label: '장터 보기', icon: 'bag-handle-outline', route: '/explore' },
+-] as const;
+-
+-export default function AsHomeScreen() {
+-  const { user } = useAuth();
+-  const userId = user?.id;
+-  const theme = useAppTheme();
+-  const styles = useMemo(() => createStyles(theme), [theme]);
+-  const [regionName, setRegionName] = useState('');
+-  const [unread, setUnread] = useState(0);
+-  const [recent, setRecent] = useState<{ userId: string; inquiry: RecentInquiry | null } | null>(null);
+-  const [loading, setLoading] = useState(true);
+-  const [refreshing, setRefreshing] = useState(false);
+-  const [failed, setFailed] = useState(false);
+-  const requestVersion = useRef(0);
+-  const navigating = useRef(false);
+-  const currentInquiry = recent && recent.userId === userId ? recent.inquiry : null;
+-
+-  const navigate = (href: Href) => {
+-    if (navigating.current) return;
+-    navigating.current = true;
+-    router.push(href);
+-  };
+-
+-  const loadHome = useCallback(async (refresh = false) => {
+-    const version = ++requestVersion.current;
+-    setRefreshing(refresh);
+-    setLoading(true);
+-    setFailed(false);
+-    // 실패한 부가 정보 때문에 문의 버튼을 막지 않는다. 계정 전환 후 늦은 응답도 무시한다.
+-    const results = await Promise.allSettled([
+-      getUnreadNotificationCount(),
+-      Promise.all([fetchMyRegions(), fetchMyRegionSettings()]),
+-      userId
+-        ? supabase.from('estimate_requests').select('id, title, created_at')
+-          .eq('user_id', userId).order('created_at', { ascending: false }).limit(1).maybeSingle()
+-        : Promise.resolve(null),
+-    ]);
+-    if (version !== requestVersion.current) return;
+-    const [notifications, regions, inquiry] = results;
+-    setUnread(notifications.status === 'fulfilled' ? notifications.value : 0);
+-    if (regions.status === 'fulfilled') {
+-      const [items, settings] = regions.value;
+-      const active = items.find((item) => item.id === settings?.active_region_id) || items[0];
+-      setRegionName(active?.region_name || '');
+-    } else {
+-      setRegionName('');
+-    }
+-    if (inquiry.status === 'fulfilled' && !inquiry.value?.error) {
+-      setRecent(userId ? { userId, inquiry: inquiry.value?.data ?? null } : null);
+-    } else {
+-      setRecent(null);
+-      setFailed(true);
+-    }
+-    setLoading(false);
+-    setRefreshing(false);
+-  }, [userId]);
+-
+-  useFocusEffect(useCallback(() => {
+-    navigating.current = false;
+-    setRecent(null);
+-    setRegionName('');
+-    setUnread(0);
+-    void loadHome();
+-    return () => { requestVersion.current += 1; };
+-  }, [loadHome]));
+-  useTabRefresh('home', () => { void loadHome(true); });
+-
+-  return (
+-    <SafeAreaView style={styles.screen} edges={['top']}>
+-      <ScrollView
+-        contentContainerStyle={styles.content}
+-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadHome(true)} tintColor={theme.primary} colors={['#166534']} />}
+-      >
+-        <View style={styles.header}>
+-          <Image source={require('../assets/images/interior-market.jpg')} style={styles.logo} accessibilityIgnoresInvertColors />
+-          <Text style={styles.brand}>{SIMPLE_AS_SERVICE_NAME}</Text>
+-          <TouchableOpacity style={styles.iconButton} accessibilityRole="button" accessibilityLabel={`알림${unread ? `, 읽지 않은 알림 ${unread}개` : ''}`} onPress={() => navigate('/my/notifications' as Href)}>
+-            <Ionicons name="notifications-outline" size={24} color={theme.text} />
+-            {unread > 0 ? <View style={styles.badge}><Text style={styles.badgeText}>{unread > 99 ? '99+' : unread}</Text></View> : null}
+-          </TouchableOpacity>
+-        </View>
+-        <TouchableOpacity style={styles.location} accessibilityRole="button" accessibilityLabel="내 동네 설정" onPress={() => navigate('/(tabs)/home/regions' as Href)}>
+-          <Ionicons name="location-outline" size={15} color={theme.textMuted} />
+-          <Text style={styles.locationText} numberOfLines={1}>{regionName || '내 동네 설정'}</Text>
+-          <Ionicons name="chevron-down" size={14} color={theme.textMuted} />
+-        </TouchableOpacity>
+-
+-        <View style={styles.intro}>
+-          <Text style={styles.eyebrow}>사진·영상으로 간편하게</Text>
+-          <Text style={styles.title}>집수리·AS 문의</Text>
+-          <Text style={styles.subtitle}>고장 난 곳을 보여주세요.{`\n`}확인 후 상담과 업체 연결을 도와드려요.</Text>
+-          <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} accessibilityRole="button" onPress={() => navigate('/estimate/create' as Href)}>
+-            <Ionicons name="camera-outline" size={24} color="#fff" />
+-            <Text style={styles.primaryText}>수리·AS 문의하기</Text>
+-            <Ionicons name="arrow-forward" size={20} color="#fff" />
+-          </TouchableOpacity>
+-        </View>
+-
+-        <View style={styles.shortcuts}>
+-          {shortcuts.map((item) => (
+-            <TouchableOpacity key={item.label} style={styles.shortcut} accessibilityRole="button" accessibilityLabel={item.label} onPress={() => navigate(item.route as Href)}>
+-              <Ionicons name={item.icon} size={25} color={theme.text} />
+-              <Text style={styles.shortcutText}>{item.label}</Text>
+-            </TouchableOpacity>
+-          ))}
+-        </View>
+-
+-        <View style={styles.section}>
+-          <Text style={styles.sectionTitle}>어디를 고쳐야 하나요?</Text>
+-          <View style={styles.categoryGrid}>
+-            {AS_HOME_CATEGORIES.map((item) => (
+-              <View key={item.category} style={styles.categoryCell}>
+-                <TouchableOpacity style={styles.category} accessibilityRole="button" accessibilityLabel={`${item.label} 문의`} onPress={() => navigate({ pathname: '/estimate/create', params: { category: item.category } } as Href)}>
+-                  <Ionicons name={item.icon} size={26} color={theme.scheme === 'dark' ? theme.text : item.color} />
+-                  <Text style={styles.categoryTitle}>{item.label}</Text>
+-                  <Text style={styles.categoryDetail}>{item.detail}</Text>
+-                </TouchableOpacity>
+-              </View>
+-            ))}
+-          </View>
+-        </View>
+-
+-        <View style={styles.section}>
+-          <View style={styles.sectionHeader}>
+-            <Text style={styles.sectionTitle}>최근 문의</Text>
+-            <TouchableOpacity style={styles.textButton} accessibilityRole="button" onPress={() => navigate('/my/inquiries' as Href)}>
+-              <Text style={styles.linkText}>전체 보기</Text><Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+-            </TouchableOpacity>
+-          </View>
+-          {!userId ? (
+-            <TouchableOpacity style={styles.recentRow} accessibilityRole="button" onPress={() => navigate('/login?redirect=/my/inquiries' as Href)}>
+-              <Ionicons name="person-circle-outline" size={28} color={theme.textMuted} />
+-              <Text style={styles.rowText}>로그인하고 내 문의를 확인하세요</Text>
+-              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+-            </TouchableOpacity>
+-          ) : loading ? (
+-            <View style={styles.recentRow}><ActivityIndicator color={theme.primary} /><Text style={styles.muted}>문의 내역을 불러오는 중...</Text></View>
+-          ) : failed ? (
+-            <TouchableOpacity style={styles.recentRow} accessibilityRole="button" accessibilityLabel="문의 내역 다시 불러오기" onPress={() => void loadHome(true)}>
+-              <Text style={styles.rowText}>문의 내역을 불러오지 못했어요</Text><Ionicons name="refresh-outline" size={22} color={theme.text} />
+-            </TouchableOpacity>
+-          ) : currentInquiry ? (
+-            <TouchableOpacity style={styles.recentRow} accessibilityRole="button" onPress={() => navigate('/my/inquiries' as Href)}>
+-              <Ionicons name="document-text-outline" size={25} color={theme.primary} />
+-              <View style={styles.recentText}><Text style={styles.rowText} numberOfLines={2}>{currentInquiry.title}</Text><Text style={styles.muted}>{new Date(currentInquiry.created_at).toLocaleDateString('ko-KR')} 접수</Text></View>
+-              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+-            </TouchableOpacity>
+-          ) : <View style={styles.recentRow}><Ionicons name="document-outline" size={24} color={theme.textMuted} /><Text style={styles.muted}>아직 접수한 문의가 없어요</Text></View>}
+-        </View>
+-
+-        <TouchableOpacity style={styles.marketRow} accessibilityRole="button" onPress={() => navigate('/explore' as Href)}>
+-          <Ionicons name="bag-handle-outline" size={25} color={theme.text} />
+-          <View style={styles.recentText}><Text style={styles.rowText}>필요한 물품도 찾아보세요</Text><Text style={styles.muted}>우리 동네 거래 · 나눔 · 구함</Text></View>
+-          <Ionicons name="arrow-forward" size={20} color={theme.text} />
+-        </TouchableOpacity>
+-      </ScrollView>
+-    </SafeAreaView>
+-  );
+-}
+-
+-function createStyles(theme: AppPalette) {
+-  return StyleSheet.create({
+-    screen: { flex: 1, backgroundColor: theme.background },
+-    content: { width: '100%', maxWidth: 640, alignSelf: 'center', padding: 20, paddingBottom: 32 },
+-    header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+-    logo: { width: 36, height: 36, borderRadius: 8 },
+-    brand: { flex: 1, color: theme.text, fontSize: 22, fontWeight: '800' },
+-    iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+-    badge: { position: 'absolute', top: 0, right: 0, minWidth: 18, borderRadius: 10, paddingHorizontal: 4, backgroundColor: '#166534' },
+-    badgeText: { color: '#fff', fontSize: 11, lineHeight: 18, textAlign: 'center', fontWeight: '700' },
+-    location: { minHeight: 44, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 4, maxWidth: '100%' },
+-    locationText: { color: theme.textMuted, fontSize: 13, flexShrink: 1 },
+-    intro: { paddingTop: 18, paddingBottom: 24, gap: 10 },
+-    eyebrow: { color: theme.primary, fontSize: 14, fontWeight: '700' },
+-    title: { color: theme.text, fontSize: 28, lineHeight: 38, fontWeight: '800', letterSpacing: 0 },
+-    subtitle: { color: theme.textMuted, fontSize: 15, lineHeight: 24 },
+-    primaryButton: { marginTop: 12, minHeight: 60, flexDirection: 'row', alignItems: 'center', padding: 16, gap: 10, borderRadius: 8, backgroundColor: '#166534' },
+-    primaryText: { flex: 1, color: '#fff', fontSize: 17, lineHeight: 24, fontWeight: '800' },
+-    shortcuts: { flexDirection: 'row', gap: 8, paddingBottom: 24 },
+-    shortcut: { flex: 1, minWidth: 0, minHeight: 88, paddingVertical: 14, paddingHorizontal: 4, borderRadius: 8, backgroundColor: theme.surfaceSoft, alignItems: 'center', justifyContent: 'center', gap: 8 },
+-    shortcutText: { fontSize: 13, lineHeight: 20, fontWeight: '700', color: theme.text, textAlign: 'center' },
+-    section: { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 24, paddingBottom: 24, gap: 16 },
+-    sectionTitle: { color: theme.text, fontSize: 18, fontWeight: '800', flexShrink: 1 },
+-    sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+-    categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4, rowGap: 8 },
+-    categoryCell: { width: '33.333333%', paddingHorizontal: 4 },
+-    category: { minHeight: 118, height: '100%', paddingVertical: 14, paddingHorizontal: 3, gap: 7, borderRadius: 8, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center' },
+-    categoryTitle: { color: theme.text, fontSize: 14, lineHeight: 20, fontWeight: '700', textAlign: 'center' },
+-    categoryDetail: { color: theme.textMuted, fontSize: 11, lineHeight: 17, textAlign: 'center' },
+-    textButton: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 2 },
+-    linkText: { color: theme.textMuted, fontSize: 13 },
+-    recentRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
+-    recentText: { flex: 1, minWidth: 0, gap: 6 },
+-    rowText: { color: theme.text, fontSize: 15, lineHeight: 23, fontWeight: '700', flexShrink: 1 },
+-    muted: { color: theme.textMuted, fontSize: 13, lineHeight: 20, flexShrink: 1 },
+-    marketRow: { borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 24, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 12 },
+-  });
+-}
+diff --git a/lib/asInquiry.ts b/lib/asInquiry.ts
+deleted file mode 100644
+index 0b452e5..0000000
+--- a/lib/asInquiry.ts
++++ /dev/null
+@@ -1,42 +0,0 @@
+-// 홈 분야와 문의 화면은 같은 카테고리 값을 사용한다. 화면용 이름만 별도로 둔다.
+-export const AS_CATEGORIES = [
+-  '간단 AS', '누수/배관', '전기/조명', '문/창호', '타일/욕실',
+-  '도배/장판', '가구/수납', '마감 보수', '기타 수리',
+-];
+-
+-export const AS_HOME_CATEGORIES = [
+-  { label: '수도·배관', detail: '누수 · 싱크대', category: '누수/배관', icon: 'water-outline', color: '#0369a1' },
+-  { label: '전기·조명', detail: '차단기 · 스위치', category: '전기/조명', icon: 'bulb-outline', color: '#a16207' },
+-  { label: '문·창문', detail: '도어락 · 방충망', category: '문/창호', icon: 'key-outline', color: '#7c3aed' },
+-  { label: '욕실·타일', detail: '변기 · 실리콘', category: '타일/욕실', icon: 'grid-outline', color: '#0f766e' },
+-  { label: '도배·바닥', detail: '부분 보수 · 장판', category: '도배/장판', icon: 'layers-outline', color: '#b45309' },
+-  { label: '기타 수리', detail: '가구 · 생활 수리', category: '기타 수리', icon: 'build-outline', color: '#be185d' },
+-] as const;
+-
+-export const AS_SYMPTOMS = [
+-  '물이 새요', '전기가 안 들어와요', '문이 잘 안 닫혀요',
+-  '소음·진동이 나요', '깨지거나 떨어졌어요',
+-];
+-
+-export function getInitialAsCategory(value: string | string[] | undefined) {
+-  const category = Array.isArray(value) ? value[0] : value;
+-  return category && AS_CATEGORIES.includes(category) ? category : AS_CATEGORIES[0];
+-}
+-
+-// 선택한 증상도 실제 문의 본문에 저장한다. 사진만 접수한 경우 문제 내용을 추측하지 않는다.
+-export function buildAsInquiryText(input: {
+-  title: string;
+-  description: string;
+-  categories: string[];
+-  symptoms: string[];
+-  attachmentCount: number;
+-}) {
+-  const symptoms = [...new Set(input.symptoms.filter((value) => AS_SYMPTOMS.includes(value)))];
+-  const details = input.description.trim();
+-  const description = [symptoms.length ? `증상: ${symptoms.join(', ')}` : '', details]
+-    .filter(Boolean).join('\n\n') || (input.attachmentCount > 0 ? '사진·영상으로 접수한 AS 문의입니다.' : '');
+-  return {
+-    title: input.title.trim() || `${input.categories.join(' · ') || '간단 AS'} 문의`,
+-    description,
+-  };
+-}
+diff --git a/tests/asInquiry.test.cjs b/tests/asInquiry.test.cjs
+deleted file mode 100644
+index 301c166..0000000
+--- a/tests/asInquiry.test.cjs
++++ /dev/null
+@@ -1,55 +0,0 @@
+-const assert = require('node:assert/strict');
+-const { readFileSync } = require('node:fs');
+-const Module = require('node:module');
+-const path = require('node:path');
+-const { test } = require('node:test');
+-const ts = require('typescript');
+-
+-const filename = path.resolve(path.dirname(module.filename), '../lib/asInquiry.ts');
+-const compiled = ts.transpileModule(readFileSync(filename, 'utf8'), {
+-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+-});
+-const loaded = new Module(filename, module);
+-loaded._compile(compiled.outputText, filename);
+-const { AS_CATEGORIES, AS_HOME_CATEGORIES, buildAsInquiryText, getInitialAsCategory } = loaded.exports;
+-
+-test('every home category opens a supported inquiry category', () => {
+-  for (const item of AS_HOME_CATEGORIES) {
+-    assert.ok(AS_CATEGORIES.includes(item.category));
+-    assert.equal(getInitialAsCategory(item.category), item.category);
+-  }
+-});
+-
+-test('untrusted route parameters fall back to the default category', () => {
+-  for (const value of [undefined, '', [], 'unknown', ['unknown', '문/창호']]) {
+-    assert.equal(getInitialAsCategory(value), '간단 AS');
+-  }
+-  assert.equal(getInitialAsCategory(['문/창호', '누수/배관']), '문/창호');
+-});
+-
+-const emptyInput = { title: '', description: '', categories: ['간단 AS'], symptoms: [], attachmentCount: 0 };
+-
+-test('an empty inquiry stays invalid instead of inventing a defect', () => {
+-  assert.equal(buildAsInquiryText(emptyInput).description, '');
+-});
+-
+-test('photo-only inquiries get a neutral body and category title', () => {
+-  assert.deepEqual(buildAsInquiryText({ ...emptyInput, categories: ['문/창호'], attachmentCount: 1 }), {
+-    title: '문/창호 문의', description: '사진·영상으로 접수한 AS 문의입니다.',
+-  });
+-});
+-
+-test('selected symptoms and typed details are both saved; custom titles are preserved', () => {
+-  assert.deepEqual(buildAsInquiryText({ ...emptyInput, title: '  주방 수전 확인  ', description: '  어제부터 시작됨  ', symptoms: ['물이 새요', '소음·진동이 나요'] }), {
+-    title: '주방 수전 확인', description: '증상: 물이 새요, 소음·진동이 나요\n\n어제부터 시작됨',
+-  });
+-});
+-
+-test('symptom-only and text-only inquiries remain valid without attachments', () => {
+-  assert.equal(buildAsInquiryText({ ...emptyInput, symptoms: ['물이 새요'] }).description, '증상: 물이 새요');
+-  assert.equal(buildAsInquiryText({ ...emptyInput, description: '책장 선반 수리' }).description, '책장 선반 수리');
+-});
+-
+-test('unknown and repeated symptoms are not persisted', () => {
+-  assert.equal(buildAsInquiryText({ ...emptyInput, symptoms: ['물이 새요', '물이 새요', 'unknown'] }).description, '증상: 물이 새요');
+-});

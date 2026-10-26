@@ -365,7 +365,7 @@ export default function ReviewCreateScreen() {
 
       <Text style={styles.title}>거래 후기를 남겨요</Text>
       <Text style={styles.desc}>
-        선택한 항목에 따라 판매자 레벨 점수가 자동으로 반영됩니다.
+        선택한 항목에 따라 상대방의 사용자 레벨 점수가 자동으로 반영됩니다.
       </Text>
 
       <View style={styles.segment}>

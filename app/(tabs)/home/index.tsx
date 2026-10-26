@@ -17,9 +17,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import FloatingCreateButton from '../../../components/FloatingCreateButton';
 import MaterialCard from '../../../components/MaterialCard';
+import AsHomeScreen from '../../../components/AsHomeScreen';
 import RadiusSlider from '../../../components/RadiusSlider';
 import { type AppPalette } from '../../../contexts/theme';
 import { useAppTheme } from '../../../hooks/use-app-theme';
+import { SIMPLE_AS_MODE } from '../../../lib/appMode';
 import { getUnreadNotificationCount } from '../../../lib/notificationsData';
 import {
   deleteMyRegion,
@@ -41,7 +43,6 @@ const tabs = ['전체', '가게', '거래', '나눔', '구함'] as const;
 type FilterTab = (typeof tabs)[number];
 const HOME_SEARCH_HISTORY_KEY = 'home_recent_search_keywords_v1';
 const MAX_SEARCH_HISTORY = 12;
-
 function getShortRegionName(regionName?: string | null) {
   if (!regionName) return '';
 
@@ -118,6 +119,11 @@ function sortHomeListings(listings: Listing[], terms: string[]) {
 }
 
 export default function HomeScreen() {
+  return SIMPLE_AS_MODE ? <AsHomeScreen /> : <MarketplaceHomeScreen />;
+}
+
+
+export function MarketplaceHomeScreen({ isEmbedded }: { isEmbedded?: boolean } = {}) {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
@@ -399,7 +405,7 @@ export default function HomeScreen() {
   }, [items, selectedTab, activeRegion, radiusKm, searchKeyword, recentSearchKeywords]);
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
+    <SafeAreaView style={styles.screen} edges={isEmbedded ? [] : ['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -479,7 +485,7 @@ export default function HomeScreen() {
             </View>
             <View style={styles.quickTextBox}>
               <Text style={styles.quickTitle}>견적문의</Text>
-              <Text style={styles.quickDesc}>공사 상담 요청</Text>
+              <Text style={styles.quickDesc}>인테리어,공사 상담</Text>
             </View>
           </TouchableOpacity>
 

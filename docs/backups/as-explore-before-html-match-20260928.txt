@@ -1,0 +1,157 @@
+// 통합 탐색 화면 (옵션 C): 지도 탐색과 중고 장터 목록을 하나의 화면에서 탭으로 제공한다.
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { router, Stack } from 'expo-router';
+import { useState } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import MapTabScreen from '../components/MapTabScreen';
+import { type AppPalette } from '../contexts/theme';
+import { useAppTheme } from '../hooks/use-app-theme';
+import { MarketplaceHomeScreen } from './(tabs)/home/index';
+
+type ExploreTab = 'market' | 'map';
+
+export default function ExploreScreen() {
+  const theme = useAppTheme();
+  const styles = createStyles(theme);
+  const [activeTab, setActiveTab] = useState<ExploreTab>('market');
+
+  return (
+    <SafeAreaView style={styles.screen} edges={['top']}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {/* 상단 네비게이션 헤더 */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>근처 가게 & 필요물품</Text>
+        <View style={styles.headerPlaceholder} />
+      </View>
+
+      {/* 탭 전환 바 (장터 목록 / 지도 탐색) */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'market' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('market')}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name={activeTab === 'market' ? 'cube' : 'cube-outline'}
+            size={16}
+            color={activeTab === 'market' ? '#fff' : theme.textMuted}
+          />
+          <Text
+            style={[
+              styles.tabBtnText,
+              activeTab === 'market' && styles.tabBtnTextActive,
+            ]}
+          >
+            장터 목록
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'map' && styles.tabBtnActive]}
+          onPress={() => setActiveTab('map')}
+          activeOpacity={0.8}
+        >
+          <Ionicons
+            name={activeTab === 'map' ? 'map' : 'map-outline'}
+            size={16}
+            color={activeTab === 'map' ? '#fff' : theme.textMuted}
+          />
+          <Text
+            style={[
+              styles.tabBtnText,
+              activeTab === 'map' && styles.tabBtnTextActive,
+            ]}
+          >
+            지도 탐색
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 본문 콘텐츠: 선택된 탭에 따라 지도 or 장터 피드 렌더링 */}
+      <View style={styles.body}>
+        {activeTab === 'market' ? (
+          <MarketplaceHomeScreen isEmbedded />
+        ) : (
+          <MapTabScreen topOffset={10} />
+        )}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function createStyles(theme: AppPalette) {
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
+    header: {
+      height: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+      backgroundColor: theme.surface,
+    },
+    backBtn: {
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginLeft: -6,
+    },
+    headerTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: theme.text,
+    },
+    headerPlaceholder: {
+      width: 36,
+    },
+    tabContainer: {
+      flexDirection: 'row',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      backgroundColor: theme.surface,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.border,
+      gap: 10,
+    },
+    tabBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      paddingVertical: 9,
+      borderRadius: 12,
+      backgroundColor: theme.surfaceMuted,
+    },
+    tabBtnActive: {
+      backgroundColor: '#166534',
+    },
+    tabBtnText: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: theme.textMuted,
+    },
+    tabBtnTextActive: {
+      color: '#fff',
+      fontWeight: '800',
+    },
+    body: {
+      flex: 1,
+    },
+  });
+}

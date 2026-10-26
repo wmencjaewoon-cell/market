@@ -1,0 +1,42 @@
+// 홈 분야와 문의 화면은 같은 카테고리 값을 사용한다. 화면용 이름만 별도로 둔다.
+export const AS_CATEGORIES = [
+  '간단 AS', '누수/배관', '전기/조명', '문/창호', '타일/욕실',
+  '도배/장판', '가구/수납', '마감 보수', '기타 수리',
+];
+
+export const AS_HOME_CATEGORIES = [
+  { label: '수도·배관', detail: '누수 · 싱크대', category: '누수/배관', icon: 'water-outline', color: '#0369a1' },
+  { label: '전기·조명', detail: '차단기 · 스위치', category: '전기/조명', icon: 'bulb-outline', color: '#a16207' },
+  { label: '문·창문', detail: '도어락 · 방충망', category: '문/창호', icon: 'key-outline', color: '#7c3aed' },
+  { label: '욕실·타일', detail: '변기 · 실리콘', category: '타일/욕실', icon: 'grid-outline', color: '#0f766e' },
+  { label: '도배·바닥', detail: '부분 보수 · 장판', category: '도배/장판', icon: 'layers-outline', color: '#b45309' },
+  { label: '기타 수리', detail: '가구 · 생활 수리', category: '기타 수리', icon: 'build-outline', color: '#be185d' },
+] as const;
+
+export const AS_SYMPTOMS = [
+  '물이 새요', '전기가 안 들어와요', '문이 잘 안 닫혀요',
+  '소음·진동이 나요', '깨지거나 떨어졌어요',
+];
+
+export function getInitialAsCategory(value: string | string[] | undefined) {
+  const category = Array.isArray(value) ? value[0] : value;
+  return category && AS_CATEGORIES.includes(category) ? category : AS_CATEGORIES[0];
+}
+
+// 선택한 증상도 실제 문의 본문에 저장한다. 사진만 접수한 경우 문제 내용을 추측하지 않는다.
+export function buildAsInquiryText(input: {
+  title: string;
+  description: string;
+  categories: string[];
+  symptoms: string[];
+  attachmentCount: number;
+}) {
+  const symptoms = [...new Set(input.symptoms.filter((value) => AS_SYMPTOMS.includes(value)))];
+  const details = input.description.trim();
+  const description = [symptoms.length ? `증상: ${symptoms.join(', ')}` : '', details]
+    .filter(Boolean).join('\n\n') || (input.attachmentCount > 0 ? '사진·영상으로 접수한 AS 문의입니다.' : '');
+  return {
+    title: input.title.trim() || `${input.categories.join(' · ') || '간단 AS'} 문의`,
+    description,
+  };
+}

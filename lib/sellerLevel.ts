@@ -1,4 +1,4 @@
-// 판매자 레벨 규칙: 후기/거래 활동 점수를 LV 표시용 값으로 변환한다.
+// 사용자 레벨 규칙: 기존 DB 필드/API 이름은 유지하면서 개인과 가게의 활동 레벨을 표시한다.
 export const MAX_SELLER_LEVEL = 100;
 export const SELLER_LEVEL_POINTS = 100;
 export const TRADE_COMPLETED_POINTS = 10;
@@ -108,13 +108,13 @@ export function getSellerPoints(profile?: any | null, fallbackPoints = 0) {
 }
 
 export function getSellerLevelTitle(level: number) {
-  if (level >= 100) return '레전드 판매자';
-  if (level >= 75) return '마스터 판매자';
-  if (level >= 50) return '프리미엄 판매자';
-  if (level >= 25) return '인기 판매자';
-  if (level >= 10) return '신뢰 판매자';
-  if (level >= 5) return '성장 판매자';
-  return '새싹 판매자';
+  if (level >= 100) return '레전드 사용자';
+  if (level >= 75) return '마스터 사용자';
+  if (level >= 50) return '프리미엄 사용자';
+  if (level >= 25) return '인기 사용자';
+  if (level >= 10) return '신뢰 사용자';
+  if (level >= 5) return '성장 사용자';
+  return '새싹 사용자';
 }
 
 export function getSellerLevelProgress(points: number) {

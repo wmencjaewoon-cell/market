@@ -162,7 +162,9 @@ serve(async (req) => {
       : '';
 
     const bodyText =
-      rawMessage.startsWith('📷')
+      rawMessage.startsWith('[video:v1]\n')
+        ? '영상을 보냈습니다.'
+        : rawMessage.startsWith('📷')
         ? '사진을 보냈습니다.'
         : rawMessage.startsWith('📍 약속 장소') && placeAddress
           ? `약속장소: ${placeAddress}`.slice(0, 80)

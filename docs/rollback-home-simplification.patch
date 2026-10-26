@@ -1,0 +1,483 @@
+diff --git a/app/(tabs)/home/index.tsx b/app/(tabs)/home/index.tsx
+index fd857c1..ef9fe92 100644
+--- a/app/(tabs)/home/index.tsx
++++ b/app/(tabs)/home/index.tsx
+@@ -5,7 +5,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
+ import { router, useFocusEffect } from 'expo-router';
+ import { useCallback, useEffect, useMemo, useState } from 'react';
+ import {
++  Alert,
+   Modal,
++  Platform,
+   RefreshControl,
+   ScrollView,
+   StyleSheet,
+@@ -42,6 +44,29 @@ const tabs = ['전체', '가게', '거래', '나눔', '구함'] as const;
+ type FilterTab = (typeof tabs)[number];
+ const HOME_SEARCH_HISTORY_KEY = 'home_recent_search_keywords_v1';
+ const MAX_SEARCH_HISTORY = 12;
++const asGuideItems = [
++  {
++    icon: 'water-outline',
++    title: '세면기 교체',
++    desc: '수전 고장, 크랙, 부속 노후 등 세면기 철거 및 새 제품 교체·설치',
++  },
++  {
++    icon: 'bulb-outline',
++    title: '전등 교체',
++    desc: '어두워진 방등·거실등 교체, LED 조명 신규 설치 및 스위치 수리',
++  },
++  {
++    icon: 'key-outline',
++    title: '손잡이 교체',
++    desc: '고장난 방문·현관문 손잡이, 디지털 도어락 및 경첩 교체·수리',
++  },
++  {
++    icon: 'alert-circle-outline',
++    title: '누수 탐지·배관 공사',
++    desc: '원인 모를 천장·바닥 누수 정밀 탐지, 배관 교체 및 방수 공사',
++  },
++] as const;
++
+ function getShortRegionName(regionName?: string | null) {
+   if (!regionName) return '';
+ 
+@@ -153,6 +178,27 @@ function SimpleAsHomeScreen() {
+     void handleRefresh();
+   });
+ 
++  const askGuideSupport = () => {
++    const message =
++      '직접 해결 방법 가이드는 준비 중입니다. 상담원에게 문의를 남기면 확인 후 해결 방법 안내 또는 업체 연결을 도와드릴 수 있어요.';
++
++    if (Platform.OS === 'web' && typeof window !== 'undefined') {
++      const confirmed = window.confirm(`${message}\n\n상담원에게 문의를 남길까요?`);
++      if (confirmed) {
++        router.push('/estimate/create' as any);
++      }
++      return;
++    }
++
++    Alert.alert('직접 해결 방법 준비중', message, [
++      { text: '취소', style: 'cancel' },
++      {
++        text: '상담원 연결',
++        onPress: () => router.push('/estimate/create' as any),
++      },
++    ]);
++  };
++
+   return (
+     <SafeAreaView style={styles.screen} edges={['top']}>
+       <ScrollView
+@@ -167,12 +213,13 @@ function SimpleAsHomeScreen() {
+         }
+       >
+         <View style={styles.simpleTopRow}>
+-          <Text style={styles.simpleBrand}>{SIMPLE_AS_SERVICE_NAME}</Text>
++          <View>
++            <Text style={styles.simpleEyebrow}>{SIMPLE_AS_SERVICE_NAME}</Text>
++            <Text style={styles.simpleTitle}>사진 찍고{"\n"}간단 A/S 문의</Text>
++          </View>
+ 
+           <TouchableOpacity
+             style={styles.notificationBtn}
+-            accessibilityRole="button"
+-            accessibilityLabel={unreadNotificationCount > 0 ? `알림, 읽지 않은 알림 ${unreadNotificationCount}개` : '알림'}
+             onPress={() => router.push('../my/notifications' as any)}
+           >
+             <Ionicons name="notifications-outline" size={24} color={theme.text} />
+@@ -186,45 +233,105 @@ function SimpleAsHomeScreen() {
+           </TouchableOpacity>
+         </View>
+ 
+-        <View style={styles.simpleIntro}>
+-          <Text style={styles.simpleTitle}>집수리·AS 문의</Text>
+-          <Text style={styles.simpleSubtitle}>누수 · 조명 · 문 · 타일 등</Text>
+-        </View>
++        <Text style={styles.simpleSubtitle}>
++          고장, 교체, 수리, 마감 문제를 남기면 직접 해결할 수 있는지 먼저 안내하고,
++          필요하면 가까운 가게나 업체로 연결합니다.
++        </Text>
+ 
+         <TouchableOpacity
+-          style={styles.simplePrimaryButton}
++          style={styles.simplePrimaryCard}
+           activeOpacity={0.88}
+-          accessibilityRole="button"
+           onPress={() => router.push('/estimate/create' as any)}
+         >
+-          <Ionicons name="create-outline" size={24} color="#fff" />
+-          <Text style={styles.simplePrimaryTitle}>수리·AS 문의하기</Text>
+-          <Ionicons name="chevron-forward" size={20} color="#fff" />
++          <View style={styles.simplePrimaryIcon}>
++            <Ionicons name="camera-outline" size={28} color="#fff" />
++          </View>
++          <View style={styles.simplePrimaryTextBox}>
++            <Text style={styles.simplePrimaryTitle}>수리·AS 문의하기</Text>
++            <Text style={styles.simplePrimaryDesc}>
++              이름, 연락처, 사진, 내용을 남기면 접수됩니다.
++            </Text>
++          </View>
++          <Ionicons name="chevron-forward" size={24} color="#fff" />
+         </TouchableOpacity>
+ 
+-        <View style={styles.simpleLinks}>
++        <View style={styles.simpleActionGrid}>
+           <TouchableOpacity
+-            style={styles.simpleLinkRow}
+-            activeOpacity={0.75}
+-            accessibilityRole="button"
+-            onPress={() => router.push('/my/inquiries' as any)}
++            style={styles.simpleActionCard}
++            onPress={askGuideSupport}
+           >
+-            <Ionicons name="document-text-outline" size={22} color={theme.text} />
+-            <Text style={styles.simpleLinkTitle}>내 문의 내역</Text>
+-            <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++            <Ionicons name="bulb-outline" size={22} color={theme.primary} />
++            <Text style={styles.simpleActionTitle}>직접 해결 방법 보기</Text>
++            <Text style={styles.simpleActionDesc}>준비중인 가이드는 상담원 연결로 안내</Text>
+           </TouchableOpacity>
+ 
+           <TouchableOpacity
+-            style={styles.simpleLinkRow}
+-            activeOpacity={0.75}
+-            accessibilityRole="button"
+-            onPress={() => router.push('/explore' as any)}
++            style={styles.simpleActionCard}
++            onPress={() => router.push('/(tabs)/chat' as any)}
+           >
+-            <Ionicons name="storefront-outline" size={22} color={theme.text} />
+-            <Text style={styles.simpleLinkTitle}>근처 가게·장터</Text>
+-            <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++            <Ionicons name="chatbubbles-outline" size={22} color={theme.primary} />
++            <Text style={styles.simpleActionTitle}>문의 채팅</Text>
++            <Text style={styles.simpleActionDesc}>답변과 업체 연결 확인</Text>
+           </TouchableOpacity>
+         </View>
++
++        <TouchableOpacity
++          style={styles.simpleInquiryRow}
++          activeOpacity={0.88}
++          accessibilityRole="button"
++          onPress={() => router.push('/my/inquiries' as any)}
++        >
++          <Ionicons name="document-text-outline" size={24} color={theme.primary} />
++          <Text style={styles.simpleInquiryTitle}>내 문의 내역 보기</Text>
++          <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++        </TouchableOpacity>
++
++        <TouchableOpacity
++          style={styles.simpleExploreBanner}
++          activeOpacity={0.88}
++          onPress={() => router.push('/explore' as any)}
++        >
++          <View style={styles.simpleExploreIcon}>
++            <Ionicons name="compass-outline" size={26} color={theme.primary} />
++          </View>
++          <View style={styles.simpleExploreTextBox}>
++            <View style={styles.simpleExploreHeaderRow}>
++              <Text style={styles.simpleExploreTitle}>근처 가게 & 필요물품 찾기</Text>
++              <View style={styles.simpleExploreBadge}>
++                <Text style={styles.simpleExploreBadgeText}>지도·장터</Text>
++              </View>
++            </View>
++            <Text style={styles.simpleExploreDesc}>
++              수리에 필요한 부품·자재와 가까운 철물점·설비 매장을 찾아보세요
++            </Text>
++          </View>
++          <Ionicons name="chevron-forward" size={20} color={theme.textSubtle} />
++        </TouchableOpacity>
++
++        <View style={styles.simpleSection}>
++          <Text style={styles.simpleSectionTitle}>이런 내용을 남겨주세요</Text>
++          <View style={styles.simpleGuideList}>
++            {asGuideItems.map((item) => (
++              <View key={item.title} style={styles.simpleGuideItem}>
++                <View style={styles.simpleGuideIcon}>
++                  <Ionicons name={item.icon} size={21} color={theme.primary} />
++                </View>
++                <View style={styles.simpleGuideTextBox}>
++                  <Text style={styles.simpleGuideTitle}>{item.title}</Text>
++                  <Text style={styles.simpleGuideDesc}>{item.desc}</Text>
++                </View>
++              </View>
++            ))}
++          </View>
++        </View>
++
++        <View style={styles.simpleHelpBox}>
++          <Text style={styles.simpleHelpTitle}>직접 해결이 가능하면 먼저 안내해요</Text>
++          <Text style={styles.simpleHelpDesc}>
++            단순 확인으로 끝나는 문제는 조치 방법을 안내하고, 현장 확인이 필요한 문제만
++            업체 연결로 이어지게 정리합니다.
++          </Text>
++        </View>
+       </ScrollView>
+     </SafeAreaView>
+   );
+@@ -735,77 +842,225 @@ function createStyles(theme: AppPalette) {
+   content: { padding: 16, paddingBottom: 120 },
+   simpleContent: {
+     padding: 20,
+-    paddingBottom: 32,
+-    width: '100%',
+-    maxWidth: 640,
+-    alignSelf: 'center',
++    paddingBottom: 120,
+   },
+   simpleTopRow: {
+     flexDirection: 'row',
+-    alignItems: 'center',
++    alignItems: 'flex-start',
+     justifyContent: 'space-between',
+     gap: 16,
+   },
+-  simpleBrand: {
+-    flex: 1,
+-    color: theme.text,
+-    fontSize: 22,
+-    lineHeight: 30,
+-    fontWeight: '800',
+-  },
+-  simpleIntro: {
+-    marginTop: 32,
+-    marginBottom: 20,
+-    gap: 8,
++  simpleEyebrow: {
++    color: theme.primary,
++    fontSize: 14,
++    fontWeight: '900',
++    marginBottom: 8,
+   },
+   simpleTitle: {
+     color: theme.text,
+-    fontSize: 24,
+-    lineHeight: 32,
+-    fontWeight: '800',
++    fontSize: 34,
++    lineHeight: 41,
++    fontWeight: '900',
+     letterSpacing: 0,
+   },
+   simpleSubtitle: {
++    marginTop: 16,
+     color: theme.textMuted,
+     fontSize: 15,
+     lineHeight: 23,
++    fontWeight: '700',
+   },
+-  simplePrimaryButton: {
+-    minHeight: 64,
+-    borderRadius: 8,
+-    backgroundColor: '#166534',
++  simplePrimaryCard: {
++    marginTop: 24,
++    minHeight: 132,
++    borderRadius: 22,
++    backgroundColor: theme.primary,
++    padding: 20,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 14,
++  },
++  simplePrimaryIcon: {
++    width: 56,
++    height: 56,
++    borderRadius: 18,
++    backgroundColor: 'rgba(255,255,255,0.18)',
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  simplePrimaryTextBox: {
++    flex: 1,
++    minWidth: 0,
++  },
++  simplePrimaryTitle: {
++    color: '#fff',
++    fontSize: 22,
++    fontWeight: '900',
++  },
++  simplePrimaryDesc: {
++    marginTop: 7,
++    color: 'rgba(255,255,255,0.82)',
++    fontSize: 13,
++    lineHeight: 19,
++    fontWeight: '700',
++  },
++  simpleActionGrid: {
++    marginTop: 14,
++    flexDirection: 'row',
++    gap: 12,
++  },
++  simpleActionCard: {
++    flex: 1,
++    minHeight: 118,
++    borderRadius: 18,
++    borderWidth: 1,
++    borderColor: theme.border,
++    backgroundColor: theme.surface,
++    padding: 15,
++    justifyContent: 'center',
++  },
++  simpleActionTitle: {
++    marginTop: 10,
++    color: theme.text,
++    fontSize: 15,
++    fontWeight: '900',
++  },
++  simpleActionDesc: {
++    marginTop: 5,
++    color: theme.textMuted,
++    fontSize: 12,
++    lineHeight: 17,
++    fontWeight: '700',
++  },
++  simpleExploreBanner: {
++    marginTop: 12,
++    borderRadius: 18,
++    borderWidth: 1,
++    borderColor: theme.scheme === 'dark' ? theme.border : '#bbf7d0',
++    backgroundColor: theme.scheme === 'dark' ? theme.surface : '#f0fdf4',
+     padding: 16,
+     flexDirection: 'row',
+     alignItems: 'center',
++    gap: 14,
++  },
++  simpleInquiryRow: {
++    marginTop: 14,
++    minHeight: 60,
++    paddingVertical: 14,
++    paddingHorizontal: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
+     gap: 12,
++    borderBottomWidth: StyleSheet.hairlineWidth,
++    borderBottomColor: theme.border,
+   },
+-  simplePrimaryTitle: {
++  simpleInquiryTitle: {
+     flex: 1,
++    color: theme.text,
++    fontSize: 15,
++    fontWeight: '800',
++  },
++  simpleExploreIcon: {
++    width: 46,
++    height: 46,
++    borderRadius: 15,
++    backgroundColor: theme.scheme === 'dark' ? theme.surfaceMuted : '#dcfce7',
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  simpleExploreTextBox: {
++    flex: 1,
++    gap: 3,
++  },
++  simpleExploreHeaderRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++  },
++  simpleExploreTitle: {
++    color: theme.text,
++    fontSize: 15,
++    fontWeight: '900',
++  },
++  simpleExploreBadge: {
++    backgroundColor: '#166534',
++    borderRadius: 6,
++    paddingHorizontal: 6,
++    paddingVertical: 2,
++  },
++  simpleExploreBadgeText: {
+     color: '#fff',
+-    fontSize: 18,
+-    lineHeight: 26,
++    fontSize: 10,
+     fontWeight: '800',
+   },
+-  simpleLinks: {
+-    marginTop: 24,
+-    borderBottomWidth: StyleSheet.hairlineWidth,
+-    borderBottomColor: theme.border,
++  simpleExploreDesc: {
++    color: theme.textMuted,
++    fontSize: 12,
++    lineHeight: 17,
++    fontWeight: '600',
+   },
+-  simpleLinkRow: {
+-    minHeight: 64,
+-    paddingVertical: 16,
+-    paddingHorizontal: 4,
++  simpleSection: {
++    marginTop: 28,
++  },
++  simpleSectionTitle: {
++    color: theme.text,
++    fontSize: 18,
++    fontWeight: '900',
++  },
++  simpleGuideList: {
++    marginTop: 12,
++    gap: 10,
++  },
++  simpleGuideItem: {
++    borderRadius: 16,
++    borderWidth: 1,
++    borderColor: theme.border,
++    backgroundColor: theme.surface,
++    padding: 14,
+     flexDirection: 'row',
+     alignItems: 'center',
+     gap: 12,
+-    borderTopWidth: StyleSheet.hairlineWidth,
+-    borderTopColor: theme.border,
+   },
+-  simpleLinkTitle: {
++  simpleGuideIcon: {
++    width: 42,
++    height: 42,
++    borderRadius: 15,
++    backgroundColor: theme.primarySoft,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  simpleGuideTextBox: {
+     flex: 1,
++    minWidth: 0,
++  },
++  simpleGuideTitle: {
++    color: theme.text,
++    fontSize: 15,
++    fontWeight: '900',
++  },
++  simpleGuideDesc: {
++    marginTop: 4,
++    color: theme.textMuted,
++    fontSize: 13,
++    lineHeight: 18,
++    fontWeight: '700',
++  },
++  simpleHelpBox: {
++    marginTop: 18,
++    borderRadius: 18,
++    backgroundColor: theme.primarySoft,
++    padding: 16,
++  },
++  simpleHelpTitle: {
+     color: theme.text,
+     fontSize: 16,
+-    lineHeight: 24,
++    fontWeight: '900',
++  },
++  simpleHelpDesc: {
++    marginTop: 8,
++    color: theme.textMuted,
++    fontSize: 13,
++    lineHeight: 20,
+     fontWeight: '700',
+   },
+   topRow: {

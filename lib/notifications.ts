@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import { getEstimateNotificationRoute, type EstimateNotificationData } from './estimateNotificationRoute';
 
 export const CHAT_NOTIFICATION_CHANNEL_ID = 'chat_v2';
 const PUSH_INSTALLATION_ID_KEY = 'push-installation-id-v1';
@@ -198,11 +199,10 @@ export async function setupAndroidNotificationChannels() {
   });
 }
 
-type NotificationRouteData = {
+type NotificationRouteData = EstimateNotificationData & {
   type?: string;
   roomId?: string;
   listingId?: number | string;
-  estimateRequestId?: number | string;
   projectId?: string;
   projectMemberId?: string;
   inviteToken?: string;
@@ -294,12 +294,7 @@ function routeNotificationData(data?: NotificationRouteData | null) {
   }
 
   if (data?.type === 'estimate_request') {
-    if (data.estimateRequestId) {
-      router.push(`/store/estimates?requestId=${data.estimateRequestId}` as any);
-      return true;
-    }
-
-    router.push('/store/estimates' as any);
+    router.push(getEstimateNotificationRoute(data) as any);
     return true;
   }
 

@@ -3,15 +3,15 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 import { checkProhibitedContent } from '../lib/prohibited';
 import { fetchStorePublicExposureMap } from '../lib/storeExposure';
@@ -149,7 +149,7 @@ function sortStoresByExposure(stores: StoreMapItem[]) {
   });
 }
 
-export default function MapTabScreen() {
+export default function MapTabScreen({ topOffset }: { topOffset?: number } = {}) {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
@@ -606,7 +606,7 @@ export default function MapTabScreen() {
         </View>
       ) : null}
 
-      <View style={styles.searchBox}>
+      <View style={[styles.searchBox, topOffset !== undefined ? { top: topOffset } : null]}>
         <TextInput
           style={styles.searchInput}
           placeholder={activeLayer === 'stores' ? '가게명, 주소로 검색' : '제목, 지역, 가격으로 검색'}
